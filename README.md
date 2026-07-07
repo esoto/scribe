@@ -71,7 +71,7 @@ length_band = [0.5, 1.3]     # cleaned/raw length ratio sanity band
 clipboard_restore_delay_s = 2.0
 
 [audio]
-energy_gate_rms = 0.005      # silence gate (primary anti-hallucination defense)
+energy_gate_rms = 0.0005     # silence gate (primary anti-hallucination defense); real speech ~0.001+, digital silence ~0.0001
 
 [ui]
 sounds = true

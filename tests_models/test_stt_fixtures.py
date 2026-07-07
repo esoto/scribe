@@ -41,9 +41,9 @@ def test_energy_gate_blocks_silence_before_whisper():
     silence (observed: "Thank you." at no_speech_prob=0.0), but the
     pipeline's energy gate discards this capture before any engine runs."""
     pcm = load_pcm("silence.wav")
-    assert not passes_energy_gate(pcm, 0.005)
+    assert not passes_energy_gate(pcm, 0.0005)
 
 
 def test_voiced_fixtures_pass_energy_gate():
     for name in ("en.wav", "es.wav", "mixed.wav"):
-        assert passes_energy_gate(load_pcm(name), 0.005), name
+        assert passes_energy_gate(load_pcm(name), 0.0005), name

@@ -9,7 +9,7 @@ def test_defaults_when_missing(tmp_path):
     assert cfg.cleanup.enabled is True
     assert cfg.cleanup.length_band == (0.5, 1.3)
     assert cfg.paste.clipboard_restore_delay_s == 2.0
-    assert cfg.audio.energy_gate_rms == 0.005
+    assert cfg.audio.energy_gate_rms == 0.0005
     assert cfg.ui.history_size == 10
     assert warns == []
 
@@ -52,7 +52,7 @@ def test_wrong_type_warns(tmp_path):
     p = tmp_path / "c.toml"
     p.write_text('[audio]\nenergy_gate_rms="loud"\n')
     cfg, warns = load_config(p)
-    assert cfg.audio.energy_gate_rms == 0.005
+    assert cfg.audio.energy_gate_rms == 0.0005
     assert len(warns) == 1
 
 

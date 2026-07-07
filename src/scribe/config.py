@@ -46,7 +46,7 @@ class Paste:
 @dataclass(frozen=True)
 class Audio:
     sample_rate: int = 16000
-    energy_gate_rms: float = 0.005
+    energy_gate_rms: float = 0.0005
 
 
 @dataclass(frozen=True)

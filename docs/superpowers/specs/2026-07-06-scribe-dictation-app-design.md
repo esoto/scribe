@@ -141,7 +141,7 @@ clipboard_restore_delay_s = 2.0
 
 [audio]
 sample_rate = 16000
-energy_gate_rms = 0.005
+energy_gate_rms = 0.0005
 
 [ui]
 sounds = true
