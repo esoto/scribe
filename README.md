@@ -76,7 +76,23 @@ energy_gate_rms = 0.0005     # silence gate (primary anti-hallucination defense)
 [ui]
 sounds = true
 history_size = 10
+
+[memory]
+idle_unload_minutes = 15     # unload models after this many idle minutes (~5 GB reclaimed); 0 = keep resident
 ```
+
+## Memory behavior
+
+Model weights dominate the footprint (~1.3 GB Parakeet, ~2.5 GB Gemma,
+~1.6 GB Whisper — all in GPU/unified memory, invisible to RSS; use
+`footprint <pid>` to see the truth). scribe manages them on demand:
+
+- Only the **active** STT engine holds weights; switching engines frees the
+  other one.
+- After `idle_unload_minutes` without dictating, everything unloads
+  (footprint → ~300 MB). The next hotkey press starts reloading while you
+  speak; the first post-idle dictation takes a few extra seconds and may
+  paste the raw (uncleaned) transcript if the cleanup model isn't back yet.
 
 ## Troubleshooting
 

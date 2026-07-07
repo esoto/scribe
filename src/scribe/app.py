@@ -134,33 +134,41 @@ def main() -> None:  # pragma: no cover - composition root, exercised manually
         if state == State.ERROR and cfg.ui.sounds:
             _play_sound("Basso")
 
+    from scribe.cleanup.mlx_lm import MlxLmBackend
+    from scribe.idle import IdleTracker
     from scribe.mlx_thread import MlxThread, ThreadBoundCleaner, ThreadBoundStt
+    from scribe.stt.parakeet import ParakeetEngine
+    from scribe.stt.whisper import WhisperEngine
 
     mlx_thread = MlxThread()
-    components["mlx"] = mlx_thread
+    # Both engines exist as lazy wrappers; only the active one holds weights.
+    engines = {
+        "parakeet": ThreadBoundStt(
+            mlx_thread, lambda: ParakeetEngine(cfg.stt.parakeet_model), name="parakeet"
+        ),
+        "whisper": ThreadBoundStt(
+            mlx_thread, lambda: WhisperEngine(cfg.stt.whisper_model), name="whisper"
+        ),
+    }
+    cleaner = (
+        ThreadBoundCleaner(mlx_thread, lambda: MlxLmBackend(cfg.cleanup.model))
+        if cfg.cleanup.enabled
+        else None
+    )
+    components["engines"] = engines
+    components["cleaner"] = cleaner
+    idle = IdleTracker(cfg.memory.idle_unload_minutes)
 
     def load_models() -> None:
         try:
-            from scribe.cleanup.mlx_lm import MlxLmBackend
-            from scribe.stt.parakeet import ParakeetEngine
-            from scribe.stt.whisper import WhisperEngine
-
             log.info("loading models…")
             t0 = time.time()
-            engine = ThreadBoundStt(
-                mlx_thread,
-                (lambda: ParakeetEngine(cfg.stt.parakeet_model))
-                if cfg.stt.engine == "parakeet"
-                else (lambda: WhisperEngine(cfg.stt.whisper_model)),
-            )
-            cleaner = (
-                ThreadBoundCleaner(mlx_thread, lambda: MlxLmBackend(cfg.cleanup.model))
-                if cfg.cleanup.enabled
-                else None
-            )
+            engines[cfg.stt.engine].preload()
+            if cleaner is not None:
+                cleaner.preload()
             components["pipeline"] = Pipeline(
                 recorder=recorder,
-                stt=engine,
+                stt=engines[cfg.stt.engine],
                 cleaner=cleaner,
                 paster=paster,
                 history=history,
@@ -178,10 +186,32 @@ def main() -> None:  # pragma: no cover - composition root, exercised manually
             menubar.set_state(State.ERROR)
             menubar.notify(f"Model load failed: {e}")
 
+    def unload_if_idle() -> None:
+        while True:
+            time.sleep(60)
+            if not idle.due(time.monotonic()):
+                continue
+            idle_engines = [e for e in engines.values() if e.loaded]
+            if not idle_engines and (cleaner is None or not cleaner.loaded):
+                continue
+            log.info("idle %.0f min — unloading models to reclaim memory",
+                     cfg.memory.idle_unload_minutes)
+            for e in idle_engines:
+                e.unload()
+            if cleaner is not None:
+                cleaner.unload()
+
     def key_down() -> None:
         pipeline = components["pipeline"]
         if pipeline is None:
             return
+        idle.touch(time.monotonic())
+        # After an idle unload, start reloading while the user is speaking.
+        current = components.get("active_engine", cfg.stt.engine)
+        if not engines[current].loaded:
+            engines[current].preload_async()
+        if cleaner is not None and not cleaner.loaded:
+            cleaner.preload_async()
         try:
             pipeline.key_down()
         except RecorderError as e:
@@ -198,7 +228,10 @@ def main() -> None:  # pragma: no cover - composition root, exercised manually
     except RecorderError as e:
         log.warning("mic stream not available at startup: %s", e)
 
+    components["active_engine"] = cfg.stt.engine
     threading.Thread(target=load_models, daemon=True, name="scribe-model-load").start()
+    if idle.enabled:
+        threading.Thread(target=unload_if_idle, daemon=True, name="scribe-idle").start()
 
     listener = HotkeyListener(cfg.hotkey.key, key_down, key_up)
     try:
@@ -218,22 +251,15 @@ def _switch_engine(components, cfg, menubar, name: str) -> None:  # pragma: no c
 
     def do_switch():
         try:
-            from scribe.mlx_thread import ThreadBoundStt
-
-            if name == "whisper":
-                from scribe.stt.whisper import WhisperEngine
-
-                engine = ThreadBoundStt(
-                    components["mlx"], lambda: WhisperEngine(cfg.stt.whisper_model)
-                )
-            else:
-                from scribe.stt.parakeet import ParakeetEngine
-
-                engine = ThreadBoundStt(
-                    components["mlx"], lambda: ParakeetEngine(cfg.stt.parakeet_model)
-                )
-            pipeline.set_engine(engine, name=name)
+            engines = components["engines"]
+            engines[name].preload()
+            pipeline.set_engine(engines[name], name=name)
+            components["active_engine"] = name
             menubar.set_engine_checked(name)
+            # Free the inactive engine's weights (~1.3-1.6 GB).
+            for other, engine in engines.items():
+                if other != name:
+                    engine.unload()
         except Exception as e:
             menubar.notify(f"Engine switch failed: {e}")
 

@@ -56,6 +56,13 @@ class Ui:
 
 
 @dataclass(frozen=True)
+class Memory:
+    # Minutes without dictation before models unload (~5 GB reclaimed);
+    # 0 disables. The next dictation transparently reloads (a few seconds).
+    idle_unload_minutes: float = 15.0
+
+
+@dataclass(frozen=True)
 class Config:
     hotkey: Hotkey = field(default_factory=Hotkey)
     stt: Stt = field(default_factory=Stt)
@@ -63,6 +70,7 @@ class Config:
     paste: Paste = field(default_factory=Paste)
     audio: Audio = field(default_factory=Audio)
     ui: Ui = field(default_factory=Ui)
+    memory: Memory = field(default_factory=Memory)
 
 
 def _positive(v: float) -> bool:
@@ -97,6 +105,9 @@ _SCHEMA: dict[str, dict[str, tuple[type | tuple[type, ...], object]]] = {
         "sounds": (bool, lambda v: True),
         "history_size": (int, _positive),
     },
+    "memory": {
+        "idle_unload_minutes": ((int, float), lambda v: v >= 0),
+    },
 }
 
 _SECTIONS = {
@@ -106,6 +117,7 @@ _SECTIONS = {
     "paste": Paste,
     "audio": Audio,
     "ui": Ui,
+    "memory": Memory,
 }
 
 

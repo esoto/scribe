@@ -59,7 +59,9 @@ def test_cross_thread_inference_via_mlx_thread():
     from scribe.stt.parakeet import ParakeetEngine
 
     mlx = MlxThread(name="tm-mlx")
-    stt = ThreadBoundStt(mlx, lambda: ParakeetEngine("mlx-community/parakeet-tdt-0.6b-v3"))
+    stt = ThreadBoundStt(
+        mlx, lambda: ParakeetEngine("mlx-community/parakeet-tdt-0.6b-v3"), name="parakeet"
+    )
     result = {}
 
     def worker():
