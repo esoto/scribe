@@ -4,3 +4,8 @@ __pycache__/
 .pytest_cache/
 .ruby-lsp/
 .coverage
+.superpowers/
+
+# native/ — xcodegen derived artifacts (run `xcodegen generate` in native/)
+native/Scribe.xcodeproj/
+native/Info.plist
