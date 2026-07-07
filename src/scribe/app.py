@@ -16,7 +16,7 @@ from pathlib import Path
 
 import numpy as np
 
-STATE_DIR = Path("~/.local/state/susurro").expanduser()
+STATE_DIR = Path("~/.local/state/scribe").expanduser()
 
 log = logging.getLogger(__name__)
 
@@ -24,7 +24,7 @@ log = logging.getLogger(__name__)
 def _setup_logging() -> None:  # pragma: no cover
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     handler = logging.handlers.RotatingFileHandler(
-        STATE_DIR / "susurro.log", maxBytes=1_000_000, backupCount=7
+        STATE_DIR / "scribe.log", maxBytes=1_000_000, backupCount=7
     )
     handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
     logging.basicConfig(level=logging.INFO, handlers=[handler])
@@ -49,13 +49,13 @@ def _play_sound(name: str) -> None:  # pragma: no cover
 
 def main() -> None:  # pragma: no cover - composition root, exercised manually
     _setup_logging()
-    from susurro.config import DEFAULT_PATH, load_config
-    from susurro.history import History
-    from susurro.hotkey import HotkeyListener
-    from susurro.menubar import SusurroMenuBar
-    from susurro.paste import MacPasteboard, Paster, post_cmd_v, timer_schedule
-    from susurro.pipeline import Pipeline, State
-    from susurro.recorder import Recorder, RecorderError, default_stream_factory
+    from scribe.config import DEFAULT_PATH, load_config
+    from scribe.history import History
+    from scribe.hotkey import HotkeyListener
+    from scribe.menubar import ScribeMenuBar
+    from scribe.paste import MacPasteboard, Paster, post_cmd_v, timer_schedule
+    from scribe.pipeline import Pipeline, State
+    from scribe.recorder import Recorder, RecorderError, default_stream_factory
 
     cfg, warnings = load_config(DEFAULT_PATH)
     for w in warnings:
@@ -67,11 +67,11 @@ def main() -> None:  # pragma: no cover - composition root, exercised manually
 
     components: dict = {"pipeline": None, "ready": False, "load_error": None}
 
-    menubar = SusurroMenuBar(
+    menubar = ScribeMenuBar(
         on_engine=lambda name: _switch_engine(components, cfg, menubar, name),
         on_cleanup_toggle=lambda on: _toggle_cleanup(components, menubar, on),
         on_doctor=lambda: _run_doctor(menubar),
-        on_reload=lambda: menubar.notify("Restart susurro to apply config changes"),
+        on_reload=lambda: menubar.notify("Restart scribe to apply config changes"),
         history=history,
     )
     menubar.set_engine_checked(cfg.stt.engine)
@@ -86,9 +86,9 @@ def main() -> None:  # pragma: no cover - composition root, exercised manually
 
     def load_models() -> None:
         try:
-            from susurro.cleanup.mlx_lm import MlxLmBackend
-            from susurro.stt.parakeet import ParakeetEngine
-            from susurro.stt.whisper import WhisperEngine
+            from scribe.cleanup.mlx_lm import MlxLmBackend
+            from scribe.stt.parakeet import ParakeetEngine
+            from scribe.stt.whisper import WhisperEngine
 
             log.info("loading models…")
             t0 = time.time()
@@ -138,7 +138,7 @@ def main() -> None:  # pragma: no cover - composition root, exercised manually
     except RecorderError as e:
         log.warning("mic stream not available at startup: %s", e)
 
-    threading.Thread(target=load_models, daemon=True, name="susurro-model-load").start()
+    threading.Thread(target=load_models, daemon=True, name="scribe-model-load").start()
 
     listener = HotkeyListener(cfg.hotkey.key, key_down, key_up)
     try:
@@ -159,11 +159,11 @@ def _switch_engine(components, cfg, menubar, name: str) -> None:  # pragma: no c
     def do_switch():
         try:
             if name == "whisper":
-                from susurro.stt.whisper import WhisperEngine
+                from scribe.stt.whisper import WhisperEngine
 
                 engine = WhisperEngine(cfg.stt.whisper_model)
             else:
-                from susurro.stt.parakeet import ParakeetEngine
+                from scribe.stt.parakeet import ParakeetEngine
 
                 engine = ParakeetEngine(cfg.stt.parakeet_model)
             pipeline.set_engine(engine, name=name)
@@ -182,6 +182,6 @@ def _toggle_cleanup(components, menubar, on: bool) -> None:  # pragma: no cover
 
 
 def _run_doctor(menubar) -> None:  # pragma: no cover
-    from susurro.doctor import default_probes, format_report, run_checks
+    from scribe.doctor import default_probes, format_report, run_checks
 
-    menubar.alert("susurro doctor", format_report(run_checks(default_probes())))
+    menubar.alert("scribe doctor", format_report(run_checks(default_probes())))

@@ -1,6 +1,6 @@
 import pytest
 
-from susurro.paste import Paster, PasteError
+from scribe.paste import Paster, PasteError
 
 
 class FakePb:

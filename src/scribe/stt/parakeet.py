@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from susurro.stt.base import SttError
+from scribe.stt.base import SttError
 
 
 class ParakeetEngine:

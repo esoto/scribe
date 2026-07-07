@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from susurro.pipeline import State
+from scribe.pipeline import State
 
 _GLYPHS = {
     State.IDLE: "◦",
@@ -20,7 +20,7 @@ def truncate_label(text: str, n: int = 40) -> str:
     return text if len(text) <= n else text[: n - 1] + "…"
 
 
-class SusurroMenuBar:  # pragma: no cover - rumps/AppKit adapter
+class ScribeMenuBar:  # pragma: no cover - rumps/AppKit adapter
     """Owns the rumps.App; delegates every decision to the wired callbacks."""
 
     def __init__(self, *, on_engine, on_cleanup_toggle, on_doctor, on_reload, history):
@@ -30,7 +30,7 @@ class SusurroMenuBar:  # pragma: no cover - rumps/AppKit adapter
         self._history = history
         self._on_engine = on_engine
         self._on_cleanup_toggle = on_cleanup_toggle
-        self._app = rumps.App("susurro", title=glyph_for(State.IDLE), quit_button="Quit")
+        self._app = rumps.App("scribe", title=glyph_for(State.IDLE), quit_button="Quit")
 
         self._engine_items = {
             "parakeet": rumps.MenuItem("Parakeet (fast)", callback=lambda _: on_engine("parakeet")),
@@ -76,13 +76,13 @@ class SusurroMenuBar:  # pragma: no cover - rumps/AppKit adapter
             self._history_menu.add(item)
 
     def _copy(self, text: str) -> None:
-        from susurro.paste import MacPasteboard
+        from scribe.paste import MacPasteboard
 
         MacPasteboard().set(text)
 
     def notify(self, message: str) -> None:
         try:
-            self._rumps.notification("susurro", "", message)
+            self._rumps.notification("scribe", "", message)
         except Exception:
             import logging
 

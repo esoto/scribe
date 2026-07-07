@@ -1,4 +1,4 @@
-# susurro
+# scribe
 
 Personal hold-to-talk dictation for macOS — fully local, English + Spanish.
 
@@ -7,7 +7,7 @@ transcribes (~0.2 s), [Gemma 3 4B](https://huggingface.co/mlx-community/gemma-3-
 strips fillers and resolves self-corrections, and the result is pasted into
 whatever app has focus. No cloud, no accounts. ~3.5 GB resident RAM on Apple Silicon.
 
-Design and evidence: [docs/superpowers/specs/2026-07-06-susurro-dictation-app-design.md](docs/superpowers/specs/2026-07-06-susurro-dictation-app-design.md)
+Design and evidence: [docs/superpowers/specs/2026-07-06-scribe-dictation-app-design.md](docs/superpowers/specs/2026-07-06-scribe-dictation-app-design.md)
 
 ## Install
 
@@ -22,7 +22,7 @@ make install-agent # start at login via launchd
 ## Permissions (one-time, and after any .venv rebuild)
 
 macOS ties privacy grants to the exact interpreter binary (`.venv/bin/python`).
-susurro needs three:
+scribe needs three:
 
 1. **Microphone** — prompted automatically on first recording.
 2. **Accessibility** — System Settings → Privacy & Security → Accessibility → add `.venv/bin/python`. Needed to send ⌘V.
@@ -42,7 +42,7 @@ Run `make doctor` any time to see exactly what's missing. **Rebuilding
 
 ## Configuration
 
-`~/.config/susurro/config.toml` (all keys optional; defaults shown):
+`~/.config/scribe/config.toml` (all keys optional; defaults shown):
 
 ```toml
 [hotkey]
@@ -74,9 +74,9 @@ history_size = 10
 - **Nothing types, but the icon reacts** → Accessibility grant missing (`make doctor`).
 - **Hotkey does nothing** → Input Monitoring grant missing, or the app that has focus is capturing the key.
 - **Old clipboard contents got pasted** → increase `clipboard_restore_delay_s`.
-- **First words clipped** → shouldn't happen (stream is pre-opened); check `~/.local/state/susurro/susurro.log`.
-- **Transcription failed** → the audio was saved to `~/.local/state/susurro/last_failed.wav`.
-- Logs: `~/.local/state/susurro/susurro.log` (7-day rotation).
+- **First words clipped** → shouldn't happen (stream is pre-opened); check `~/.local/state/scribe/scribe.log`.
+- **Transcription failed** → the audio was saved to `~/.local/state/scribe/last_failed.wav`.
+- Logs: `~/.local/state/scribe/scribe.log` (7-day rotation).
 
 ## Development
 

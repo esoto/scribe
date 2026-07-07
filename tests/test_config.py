@@ -1,4 +1,4 @@
-from susurro.config import load_config
+from scribe.config import load_config
 
 
 def test_defaults_when_missing(tmp_path):

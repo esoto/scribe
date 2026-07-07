@@ -10,7 +10,7 @@ import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
-DEFAULT_PATH = Path("~/.config/susurro/config.toml").expanduser()
+DEFAULT_PATH = Path("~/.config/scribe/config.toml").expanduser()
 
 VALID_KEYS = ("right_command", "right_option", "f13")
 VALID_ENGINES = ("parakeet", "whisper")

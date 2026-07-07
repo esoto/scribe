@@ -1,4 +1,4 @@
-from susurro.app import main
+from scribe.app import main
 
 if __name__ == "__main__":
     main()

@@ -1,6 +1,6 @@
 import numpy as np
 
-from susurro.gates import length_ok, normalize, passes_energy_gate, rms, should_clean
+from scribe.gates import length_ok, normalize, passes_energy_gate, rms, should_clean
 
 
 def test_rms_silence_vs_tone():
@@ -39,7 +39,7 @@ def test_rms_empty_is_zero():
 
 
 def test_language_consistent_same_language():
-    from susurro.gates import language_consistent
+    from scribe.gates import language_consistent
 
     assert language_consistent(
         "so um move the meeting to friday", "Move the meeting to Friday."
@@ -50,7 +50,7 @@ def test_language_consistent_same_language():
 
 
 def test_language_consistent_detects_translation():
-    from susurro.gates import language_consistent
+    from scribe.gates import language_consistent
 
     assert not language_consistent(
         "digamos que el deploy se hace el viernes antes de las cinco",
@@ -63,6 +63,6 @@ def test_language_consistent_detects_translation():
 
 
 def test_language_consistent_neutral_text_passes():
-    from susurro.gates import language_consistent
+    from scribe.gates import language_consistent
 
     assert language_consistent("ok deploy prod 123", "Ok, deploy prod 123.")

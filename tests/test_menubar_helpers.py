@@ -1,5 +1,5 @@
-from susurro.menubar import glyph_for, truncate_label
-from susurro.pipeline import State
+from scribe.menubar import glyph_for, truncate_label
+from scribe.pipeline import State
 
 
 def test_glyphs():

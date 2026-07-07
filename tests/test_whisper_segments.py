@@ -1,4 +1,4 @@
-from susurro.stt.whisper import join_segments
+from scribe.stt.whisper import join_segments
 
 
 def test_joins_and_filters_no_speech():

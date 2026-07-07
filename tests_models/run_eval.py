@@ -12,8 +12,8 @@ from pathlib import Path
 
 
 def main() -> int:
-    from susurro.cleanup.mlx_lm import MlxLmBackend
-    from susurro.gates import normalize
+    from scribe.cleanup.mlx_lm import MlxLmBackend
+    from scribe.gates import normalize
 
     golden = json.loads((Path(__file__).parent / "golden.json").read_text())
     print("loading cleanup model…")

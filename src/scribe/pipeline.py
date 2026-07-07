@@ -16,11 +16,11 @@ from typing import Callable
 
 import numpy as np
 
-from susurro import gates
-from susurro.config import Config
-from susurro.history import History, Record
-from susurro.paste import PasteError
-from susurro.stt.base import SttError
+from scribe import gates
+from scribe.config import Config
+from scribe.history import History, Record
+from scribe.paste import PasteError
+from scribe.stt.base import SttError
 
 log = logging.getLogger(__name__)
 
@@ -63,7 +63,7 @@ class Pipeline:
         self._save_failed_audio = save_failed_audio
         self._down_at: float | None = None
         self._cleanup_pool = concurrent.futures.ThreadPoolExecutor(
-            max_workers=1, thread_name_prefix="susurro-cleanup"
+            max_workers=1, thread_name_prefix="scribe-cleanup"
         )
         self._work_queue: queue.Queue | None = None
 
@@ -147,7 +147,7 @@ class Pipeline:
     def _thread_runner(self, fn: Callable[[], None]) -> None:  # pragma: no cover - thread glue
         if self._work_queue is None:
             self._work_queue = queue.Queue()
-            threading.Thread(target=self._drain, daemon=True, name="susurro-pipeline").start()
+            threading.Thread(target=self._drain, daemon=True, name="scribe-pipeline").start()
         self._work_queue.put(fn)
 
     def _drain(self) -> None:  # pragma: no cover - thread glue

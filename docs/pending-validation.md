@@ -11,7 +11,7 @@ macOS TCC grants bind to `.venv/bin/python`. `make doctor` currently reports
 all three missing (expected — this binary has never asked):
 
 1. **Input Monitoring** — System Settings → Privacy & Security → Input
-   Monitoring → “+” → add `~/development/susurro/.venv/bin/python`.
+   Monitoring → “+” → add `~/development/scribe/.venv/bin/python`.
    Without it the hold-to-talk key is invisible to the app.
 2. **Accessibility** — same pane group → Accessibility → add the same binary.
    Without it ⌘V cannot be synthesized (text stays on the clipboard).
@@ -29,7 +29,7 @@ The engine benchmarks used synthesized TTS voices; these need your real
 voice, accent, and mic:
 
 - [ ] 5 Spanish dictations through Parakeet (default). If accuracy annoys,
-      switch default: `engine = "whisper"` in `~/.config/susurro/config.toml` —
+      switch default: `engine = "whisper"` in `~/.config/scribe/config.toml` —
       Whisper measured better on Spanish (3.12% vs 4.39% WER, FLEURS).
 - [ ] 5 English + 5 mixed EN/ES dictations — confirm cleanup never eats content
       (if it does, the raw text is in History; report the case so it joins the
@@ -38,8 +38,8 @@ voice, accent, and mic:
       browser, Slack. If stale clipboard ever pastes, raise
       `clipboard_restore_delay_s`.
 - [ ] Sleep/wake and AirPods connect/disconnect while running (recorder should
-      reopen on next key-down; watch `~/.local/state/susurro/susurro.log`).
-- [ ] RAM under pressure: susurro (~3.5 GB) + Xcode + Rails simultaneously.
+      reopen on next key-down; watch `~/.local/state/scribe/scribe.log`).
+- [ ] RAM under pressure: scribe (~3.5 GB) + Xcode + Rails simultaneously.
 
 ## 3. Findings from implementation (already handled, documented for the record)
 

@@ -1,4 +1,4 @@
-from susurro.doctor import Check, format_report, run_checks
+from scribe.doctor import Check, format_report, run_checks
 
 
 def test_run_checks_ok_and_fail_and_crash():

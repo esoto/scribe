@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from susurro.cleanup.base import CleanupError, build_messages, max_tokens_for
+from scribe.cleanup.base import CleanupError, build_messages, max_tokens_for
 
 
 class MlxLmBackend:

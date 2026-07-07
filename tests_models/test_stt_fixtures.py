@@ -6,7 +6,7 @@ Catches model/package regressions on version bumps (spec §7).
 import numpy as np
 import pytest
 
-from susurro.gates import passes_energy_gate
+from scribe.gates import passes_energy_gate
 from tests_models.conftest import load_pcm
 
 pytestmark = pytest.mark.models

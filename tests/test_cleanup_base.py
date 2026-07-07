@@ -1,4 +1,4 @@
-from susurro.cleanup.base import SYSTEM_PROMPT, build_messages, max_tokens_for
+from scribe.cleanup.base import SYSTEM_PROMPT, build_messages, max_tokens_for
 
 
 def test_messages_shape():

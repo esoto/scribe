@@ -1,4 +1,4 @@
-from susurro.hotkey import KEYCODES, KeyStateMachine
+from scribe.hotkey import KEYCODES, KeyStateMachine
 
 CMD = 0x100000
 

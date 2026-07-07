@@ -16,20 +16,20 @@ eval:
 	$(PY) tests_models/run_eval.py
 
 doctor:
-	$(PY) -m susurro.doctor
+	$(PY) -m scribe.doctor
 
 run:
-	$(PY) -m susurro
+	$(PY) -m scribe
 
-AGENT := $(HOME)/Library/LaunchAgents/dev.esoto.susurro.plist
-STATE := $(HOME)/.local/state/susurro
+AGENT := $(HOME)/Library/LaunchAgents/dev.esoto.scribe.plist
+STATE := $(HOME)/.local/state/scribe
 
 install-agent:
 	mkdir -p $(STATE) $(HOME)/Library/LaunchAgents
 	sed -e 's|__PYTHON__|$(abspath .venv/bin/python)|' -e 's|__STATE__|$(STATE)|' \
-	  resources/dev.esoto.susurro.plist.template > $(AGENT)
-	launchctl bootstrap gui/$$(id -u) $(AGENT) || launchctl kickstart -k gui/$$(id -u)/dev.esoto.susurro
+	  resources/dev.esoto.scribe.plist.template > $(AGENT)
+	launchctl bootstrap gui/$$(id -u) $(AGENT) || launchctl kickstart -k gui/$$(id -u)/dev.esoto.scribe
 
 uninstall-agent:
-	launchctl bootout gui/$$(id -u)/dev.esoto.susurro || true
+	launchctl bootout gui/$$(id -u)/dev.esoto.scribe || true
 	rm -f $(AGENT)

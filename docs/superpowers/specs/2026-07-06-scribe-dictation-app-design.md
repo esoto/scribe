@@ -1,8 +1,8 @@
-# susurro — personal voice dictation for macOS (design)
+# scribe — personal voice dictation for macOS (design)
 
 Date: 2026-07-06
 Status: approved pending final user review
-Working name: **susurro** (rename freely; nothing depends on it)
+Working name: **scribe** (rename freely; nothing depends on it)
 
 ## 1. What this is
 
@@ -97,7 +97,7 @@ is best-effort only. Dependency note: `transformers` must stay `>=5.5,<5.6` —
 > *translating* short EN inputs to ES (and Spanglish ES to EN). The shipped
 > prompt adds an explicit same-language rule and three multi-turn few-shot
 > pairs (inline examples in the system prompt caused verbatim parroting).
-> `src/susurro/cleanup/base.py` is the source of truth; `make eval` (10/10
+> `src/scribe/cleanup/base.py` is the source of truth; `make eval` (10/10
 > required) guards any change. A `language_consistent` gate in the pipeline
 > additionally rejects translated cleanups at runtime → raw is pasted.
 > Accepted behavior: request-looking text is preserved nearly verbatim
@@ -117,7 +117,7 @@ temperature 0, max_tokens = max(200, 2× input tokens).
 
 ## 4. Configuration
 
-`~/.config/susurro/config.toml`, loaded at start, re-read on menu "Reload config":
+`~/.config/scribe/config.toml`, loaded at start, re-read on menu "Reload config":
 
 ```toml
 [hotkey]
@@ -148,7 +148,7 @@ sounds = true
 history_size = 10
 ```
 
-State and logs: `~/.local/state/susurro/` — `susurro.log` (rotating, 7 days),
+State and logs: `~/.local/state/scribe/` — `scribe.log` (rotating, 7 days),
 `last_failed.wav` (only on STT failure). History is in-memory only (privacy).
 
 ## 5. Error handling — degrade, never die
@@ -166,12 +166,12 @@ State and logs: `~/.local/state/susurro/` — `susurro.log` (rotating, 7 days),
 
 Needs Microphone, Accessibility (synthetic ⌘V), Input Monitoring (event tap). Grants
 bind to the binary → the launchd agent must always run the venv python by absolute path
-(`~/development/susurro/.venv/bin/python`). Rebuilding the venv invalidates grants
+(`~/development/scribe/.venv/bin/python`). Rebuilding the venv invalidates grants
 (documented in README). `make doctor` (also menu item "Doctor") checks each grant and
 names the exact System Settings pane. v2 option if this gets old: signed `.app` wrapper
 (py2app) — nothing in the design precludes it.
 
-Launch at login: `~/Library/LaunchAgents/dev.esoto.susurro.plist` (`make install-agent` /
+Launch at login: `~/Library/LaunchAgents/dev.esoto.scribe.plist` (`make install-agent` /
 `make uninstall-agent`).
 
 ## 7. Testing
@@ -194,11 +194,11 @@ Three tiers; TDD throughout (superpowers test-driven-development).
 ## 8. Repo layout
 
 ```
-susurro/
+scribe/
 ├── pyproject.toml            # deps: mlx, parakeet-mlx, mlx-whisper, mlx-lm,
 │                             #       sounddevice, rumps, pyobjc, numpy
 ├── Makefile                  # run, test, test-models, eval, doctor, install-agent
-├── src/susurro/
+├── src/scribe/
 │   ├── app.py                # wiring + rumps entry point
 │   ├── pipeline.py           # orchestrator + state machine (pure)
 │   ├── hotkey.py             # event-tap adapter
@@ -223,7 +223,7 @@ susurro/
 - [ ] One full day of daily-driver use: paste reliability across Ghostty/terminal,
       browser, Slack; tune `clipboard_restore_delay_s` if races appear
 - [ ] Sleep/wake + AirPods connect/disconnect while running
-- [ ] RAM check under memory pressure (Xcode + Rails + susurro simultaneously)
+- [ ] RAM check under memory pressure (Xcode + Rails + scribe simultaneously)
 
 ## 10. Explicitly rejected alternatives (with evidence)
 

@@ -15,20 +15,20 @@ def load_pcm(name: str) -> np.ndarray:
 
 @pytest.fixture(scope="session")
 def parakeet():
-    from susurro.stt.parakeet import ParakeetEngine
+    from scribe.stt.parakeet import ParakeetEngine
 
     return ParakeetEngine("mlx-community/parakeet-tdt-0.6b-v3")
 
 
 @pytest.fixture(scope="session")
 def whisper():
-    from susurro.stt.whisper import WhisperEngine
+    from scribe.stt.whisper import WhisperEngine
 
     return WhisperEngine("mlx-community/whisper-large-v3-turbo")
 
 
 @pytest.fixture(scope="session")
 def gemma():
-    from susurro.cleanup.mlx_lm import MlxLmBackend
+    from scribe.cleanup.mlx_lm import MlxLmBackend
 
     return MlxLmBackend("mlx-community/gemma-3-4b-it-qat-4bit")

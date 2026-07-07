@@ -1,4 +1,4 @@
-from susurro.history import History, Record
+from scribe.history import History, Record
 
 
 def rec(i):

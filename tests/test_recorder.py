@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from susurro.recorder import Recorder, RecorderError, RingBuffer
+from scribe.recorder import Recorder, RecorderError, RingBuffer
 
 
 def chunk(v, n=160):

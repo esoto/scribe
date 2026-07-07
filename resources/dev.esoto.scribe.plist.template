@@ -3,12 +3,12 @@
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>dev.esoto.susurro</string>
+  <string>dev.esoto.scribe</string>
   <key>ProgramArguments</key>
   <array>
     <string>__PYTHON__</string>
     <string>-m</string>
-    <string>susurro</string>
+    <string>scribe</string>
   </array>
   <key>RunAtLoad</key>
   <true/>

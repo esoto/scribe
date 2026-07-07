@@ -1,8 +1,8 @@
-# susurro Implementation Plan
+# scribe Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build susurro — a local hold-to-talk dictation menu-bar app for macOS per the approved spec (`docs/superpowers/specs/2026-07-06-susurro-dictation-app-design.md`).
+**Goal:** Build scribe — a local hold-to-talk dictation menu-bar app for macOS per the approved spec (`docs/superpowers/specs/2026-07-06-scribe-dictation-app-design.md`).
 
 **Architecture:** One long-running Python process. OS adapters (hotkey tap, mic, pasteboard, menu bar) are logic-free shells; all decisions live in pure, injected-dependency modules tested to ~100%. Models: Parakeet v3 resident, mlx-whisper lazy, Gemma 3 4B resident behind `CleanupBackend`.
 
@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-- Repo: `~/development/susurro`; venv at `.venv` created from `python3` (3.14.3 verified on this machine); launchd must reference `.venv/bin/python` by absolute path (TCC).
+- Repo: `~/development/scribe`; venv at `.venv` created from `python3` (3.14.3 verified on this machine); launchd must reference `.venv/bin/python` by absolute path (TCC).
 - Pin exact model repos: `mlx-community/parakeet-tdt-0.6b-v3`, `mlx-community/whisper-large-v3-turbo`, `mlx-community/gemma-3-4b-it-qat-4bit` (all already in HF cache).
 - Cleanup prompt is the validated text in spec §3 — copy verbatim, never paraphrase.
 - Empirical guard (2026-07-07 probe): mlx-whisper hallucinated " Thank you." on near-silence with `no_speech_prob=0.0` → the RMS energy gate is the primary silence defense; always call mlx-whisper with `condition_on_previous_text=False`; `no_speech_prob > 0.6` filter is best-effort only.
@@ -28,9 +28,9 @@
 
 ### Task 1: Scaffold + tooling
 
-**Files:** Create `pyproject.toml`, `Makefile`, `src/susurro/__init__.py`, `tests/test_scaffold.py`.
+**Files:** Create `pyproject.toml`, `Makefile`, `src/scribe/__init__.py`, `tests/test_scaffold.py`.
 
-**Interfaces:** Produces the package `susurro` (version string) and `make test` / `make cov`.
+**Interfaces:** Produces the package `scribe` (version string) and `make test` / `make cov`.
 
 - [ ] **Step 1: write files**
 
@@ -41,7 +41,7 @@ requires = ["setuptools>=69"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "susurro"
+name = "scribe"
 version = "0.1.0"
 description = "Local hold-to-talk dictation for macOS (Parakeet/Whisper + Gemma cleanup)"
 requires-python = ">=3.12"
@@ -61,31 +61,31 @@ dependencies = [
 dev = ["pytest>=8", "pytest-cov>=6"]
 
 [project.scripts]
-susurro = "susurro.app:main"
+scribe = "scribe.app:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = ["models: needs local MLX models (make test-models)"]
 
 [tool.coverage.run]
-source = ["susurro"]
+source = ["scribe"]
 
 [tool.coverage.report]
 fail_under = 95
 exclude_also = ["pragma: no cover", "if __name__ =="]
 ```
 
-`src/susurro/__init__.py`:
+`src/scribe/__init__.py`:
 ```python
 __version__ = "0.1.0"
 ```
 
 `tests/test_scaffold.py`:
 ```python
-import susurro
+import scribe
 
 def test_package_imports():
-    assert susurro.__version__ == "0.1.0"
+    assert scribe.__version__ == "0.1.0"
 ```
 
 `Makefile`:
@@ -102,9 +102,9 @@ test-models:
 eval:
 	$(PY) tests_models/run_eval.py
 doctor:
-	$(PY) -m susurro.doctor
+	$(PY) -m scribe.doctor
 run:
-	$(PY) -m susurro
+	$(PY) -m scribe
 ```
 
 - [ ] **Step 2:** `make venv && make test` → 1 passed.
@@ -114,17 +114,17 @@ run:
 
 ### Task 2: config.py
 
-**Files:** Create `src/susurro/config.py`, `tests/test_config.py`.
+**Files:** Create `src/scribe/config.py`, `tests/test_config.py`.
 
 **Interfaces — Produces:**
 `Config` frozen dataclass with nested `Hotkey(key: str, hold_threshold_s: float)`, `Stt(engine: str, parakeet_model: str, whisper_model: str)`, `Cleanup(enabled: bool, model: str, min_words: int, timeout_s: float, length_band: tuple[float, float])`, `Paste(clipboard_restore_delay_s: float)`, `Audio(sample_rate: int, energy_gate_rms: float)`, `Ui(sounds: bool, history_size: int)`.
-`load_config(path: Path) -> tuple[Config, list[str]]` — missing file → defaults + no warnings; unparseable/invalid values → defaults for the bad field + warning strings. `DEFAULT_PATH = Path("~/.config/susurro/config.toml").expanduser()`.
+`load_config(path: Path) -> tuple[Config, list[str]]` — missing file → defaults + no warnings; unparseable/invalid values → defaults for the bad field + warning strings. `DEFAULT_PATH = Path("~/.config/scribe/config.toml").expanduser()`.
 
 - [ ] **Step 1: failing tests** (`tests/test_config.py`)
 
 ```python
 from pathlib import Path
-from susurro.config import Config, load_config
+from scribe.config import Config, load_config
 
 def test_defaults_when_missing(tmp_path):
     cfg, warns = load_config(tmp_path / "nope.toml")
@@ -170,14 +170,14 @@ def test_unknown_keys_ignored(tmp_path):
 
 ### Task 3: history.py
 
-**Files:** Create `src/susurro/history.py`, `tests/test_history.py`.
+**Files:** Create `src/scribe/history.py`, `tests/test_history.py`.
 
 **Interfaces — Produces:** `Record(raw: str, final: str, engine: str, cleaned: bool, at: float, duration_ms: int)`; `History(maxlen: int)` with thread-safe `.append(Record)` and `.items() -> list[Record]` (newest first).
 
 - [ ] **Step 1: failing tests**
 
 ```python
-from susurro.history import History, Record
+from scribe.history import History, Record
 
 def rec(i):
     return Record(raw=f"r{i}", final=f"f{i}", engine="parakeet", cleaned=True, at=float(i), duration_ms=10)
@@ -198,7 +198,7 @@ def test_empty():
 
 ### Task 4: gates.py (pure decision helpers)
 
-**Files:** Create `src/susurro/gates.py`, `tests/test_gates.py`.
+**Files:** Create `src/scribe/gates.py`, `tests/test_gates.py`.
 
 **Interfaces — Produces:**
 `rms(pcm: np.ndarray) -> float`; `passes_energy_gate(pcm, threshold: float) -> bool` (empty array → False); `should_clean(text: str, *, enabled: bool, min_words: int) -> bool`; `length_ok(raw: str, cleaned: str, band: tuple[float, float]) -> bool`; `normalize(text: str) -> str` (strip + collapse internal whitespace runs to single spaces, preserve case/accents).
@@ -207,7 +207,7 @@ def test_empty():
 
 ```python
 import numpy as np
-from susurro.gates import rms, passes_energy_gate, should_clean, length_ok, normalize
+from scribe.gates import rms, passes_energy_gate, should_clean, length_ok, normalize
 
 def test_rms_silence_vs_tone():
     silent = np.zeros(1600, dtype=np.float32)
@@ -242,7 +242,7 @@ def test_normalize_preserves_spanish():
 
 ### Task 5: interfaces + cleanup prompt logic
 
-**Files:** Create `src/susurro/stt/__init__.py`, `src/susurro/stt/base.py`, `src/susurro/cleanup/__init__.py`, `src/susurro/cleanup/base.py`, `tests/test_cleanup_base.py`.
+**Files:** Create `src/scribe/stt/__init__.py`, `src/scribe/stt/base.py`, `src/scribe/cleanup/__init__.py`, `src/scribe/cleanup/base.py`, `tests/test_cleanup_base.py`.
 
 **Interfaces — Produces:**
 `stt.base`: `class SttError(Exception)`; `class SttEngine(Protocol): def transcribe(self, pcm: np.ndarray) -> str: ...`
@@ -251,7 +251,7 @@ def test_normalize_preserves_spanish():
 - [ ] **Step 1: failing tests**
 
 ```python
-from susurro.cleanup.base import SYSTEM_PROMPT, build_messages, max_tokens_for
+from scribe.cleanup.base import SYSTEM_PROMPT, build_messages, max_tokens_for
 
 def test_messages_shape():
     msgs = build_messages("hola este mundo")
@@ -276,7 +276,7 @@ def test_max_tokens():
 
 ### Task 6: pipeline.py (state machine + orchestrator)
 
-**Files:** Create `src/susurro/pipeline.py`, `tests/test_pipeline.py`, `tests/fakes.py`.
+**Files:** Create `src/scribe/pipeline.py`, `tests/test_pipeline.py`, `tests/fakes.py`.
 
 **Interfaces — Consumes:** gates, history, config, `SttEngine`/`CleanupBackend` protocols.
 **Produces:**
@@ -356,11 +356,11 @@ class FakeClock:
 ```python
 import numpy as np
 import pytest
-from susurro.config import load_config
-from susurro.history import History
-from susurro.paste import PasteError
-from susurro.pipeline import Pipeline, State
-from susurro.stt.base import SttError
+from scribe.config import load_config
+from scribe.history import History
+from scribe.paste import PasteError
+from scribe.pipeline import Pipeline, State
+from scribe.stt.base import SttError
 from tests.fakes import FakeRecorder, FakeStt, FakeCleaner, FakePaster, FakeClock, VOICED, SILENT
 
 def make(**kw):
@@ -498,14 +498,14 @@ def test_two_dictations_fifo():
 
 ### Task 7: STT adapters
 
-**Files:** Create `src/susurro/stt/parakeet.py`, `src/susurro/stt/whisper.py`, `tests/test_whisper_segments.py`.
+**Files:** Create `src/scribe/stt/parakeet.py`, `src/scribe/stt/whisper.py`, `tests/test_whisper_segments.py`.
 
 **Interfaces — Produces:** `ParakeetEngine(model_repo).transcribe(pcm)->str` (loads at construction; `# pragma: no cover` body); `WhisperEngine(model_repo)` lazy — first `transcribe` triggers model download/load; module-level pure `join_segments(segments: list[dict], threshold: float = 0.6) -> str`.
 
 - [ ] **Step 1: failing test** (pure part only)
 
 ```python
-from susurro.stt.whisper import join_segments
+from scribe.stt.whisper import join_segments
 
 def test_joins_and_filters_no_speech():
     segs = [
@@ -527,7 +527,7 @@ def test_missing_prob_key_kept():
 ```python
 # parakeet.py
 import numpy as np
-from susurro.stt.base import SttError
+from scribe.stt.base import SttError
 
 class ParakeetEngine:
     name = "parakeet"
@@ -548,7 +548,7 @@ class ParakeetEngine:
 ```python
 # whisper.py
 import numpy as np
-from susurro.stt.base import SttError
+from scribe.stt.base import SttError
 
 def join_segments(segments, threshold: float = 0.6) -> str:
     kept = [s["text"].strip() for s in segments if s.get("no_speech_prob", 0.0) <= threshold and s["text"].strip()]
@@ -574,12 +574,12 @@ class WhisperEngine:
 
 ### Task 8: cleanup adapter
 
-**Files:** Create `src/susurro/cleanup/mlx_lm.py`.
+**Files:** Create `src/scribe/cleanup/mlx_lm.py`.
 
 **Interfaces — Produces:** `MlxLmBackend(model_repo).clean(text) -> str`; raises `CleanupError` on any internal failure. Uses `build_messages` / `max_tokens_for` from Task 5, temp 0.
 
 ```python
-from susurro.cleanup.base import CleanupError, build_messages, max_tokens_for
+from scribe.cleanup.base import CleanupError, build_messages, max_tokens_for
 
 class MlxLmBackend:
     def __init__(self, model_repo: str):  # pragma: no cover - loads MLX model
@@ -603,7 +603,7 @@ class MlxLmBackend:
 
 ### Task 9: recorder.py
 
-**Files:** Create `src/susurro/recorder.py`, `tests/test_recorder.py`.
+**Files:** Create `src/scribe/recorder.py`, `tests/test_recorder.py`.
 
 **Interfaces — Produces:** `RecorderError(Exception)`; `RingBuffer(max_seconds, sample_rate)` with `.append(chunk)`, `.drain() -> np.ndarray`, `.clear()`, drops appends past capacity; `Recorder(stream_factory, sample_rate=16000, max_seconds=300)` with `.start()`, `.arm()`, `.disarm() -> np.ndarray`, `.ensure_stream()`; `_callback(indata)` appends `indata[:, 0].copy()` only when armed. `stream_factory(callback) -> stream` where stream has `.start()`, `.stop()`, `.close()`, `.active: bool`.
 
@@ -612,7 +612,7 @@ class MlxLmBackend:
 ```python
 import numpy as np
 import pytest
-from susurro.recorder import Recorder, RecorderError, RingBuffer
+from scribe.recorder import Recorder, RecorderError, RingBuffer
 
 def chunk(v, n=160):
     return np.full((n, 1), v, dtype=np.float32)
@@ -684,14 +684,14 @@ def test_ensure_stream_raises_when_reopen_fails():
 
 ### Task 10: hotkey.py
 
-**Files:** Create `src/susurro/hotkey.py`, `tests/test_hotkey.py`.
+**Files:** Create `src/scribe/hotkey.py`, `tests/test_hotkey.py`.
 
 **Interfaces — Produces:** `KEYCODES = {"right_command": 54, "right_option": 61, "f13": 105}`; `MODIFIER_MASKS = {54: 0x100000, 61: 0x80000}`; `KeyStateMachine(key: str)` with `.handle(event_type: int, keycode: int, flags: int) -> str | None` returning `"down"` / `"up"` / `None`. Event types: 10 keyDown, 11 keyUp, 12 flagsChanged. `HotkeyListener(key, on_down, on_up)` adapter wraps a CGEventTap on the current run loop (`# pragma: no cover`).
 
 - [ ] **Step 1: failing tests**
 
 ```python
-from susurro.hotkey import KeyStateMachine
+from scribe.hotkey import KeyStateMachine
 
 CMD = 0x100000
 
@@ -754,7 +754,7 @@ class HotkeyListener:  # pragma: no cover - CGEventTap wiring
 
 ### Task 11: paste.py
 
-**Files:** Create `src/susurro/paste.py`, `tests/test_paste.py`.
+**Files:** Create `src/scribe/paste.py`, `tests/test_paste.py`.
 
 **Interfaces — Produces:** `PasteError(Exception)`; `Paster(pasteboard, post_cmd_v, schedule, restore_delay_s)` — `pasteboard` duck: `.get() -> str | None`, `.set(str)`, `.change_count() -> int`; `schedule(delay_s, fn)`; `.paste(text)` per spec §3 step 6 plus: restore is **skipped** if the pasteboard changed since we set it (user copied something meanwhile). `MacPasteboard` and `post_cmd_v()` real adapters (`# pragma: no cover`).
 
@@ -762,7 +762,7 @@ class HotkeyListener:  # pragma: no cover - CGEventTap wiring
 
 ```python
 import pytest
-from susurro.paste import Paster, PasteError
+from scribe.paste import Paster, PasteError
 
 class FakePb:
     def __init__(self, initial="old stuff"):
@@ -853,14 +853,14 @@ def timer_schedule(delay_s, fn):  # pragma: no cover
 
 ### Task 12: doctor.py
 
-**Files:** Create `src/susurro/doctor.py`, `tests/test_doctor.py`.
+**Files:** Create `src/scribe/doctor.py`, `tests/test_doctor.py`.
 
 **Interfaces — Produces:** `Check(name: str, ok: bool, hint: str)`; `run_checks(probes: dict[str, tuple[Callable[[], bool], str]]) -> list[Check]` (probe exception ⇒ not-ok with hint + error); `format_report(checks) -> str` (✓/✗ lines + failing hints); `default_probes() -> dict` with mic (`AVCaptureDevice.authorizationStatusForMediaType_` == 3), accessibility (`AXIsProcessTrusted`), input monitoring (`Quartz.CGPreflightListenEventAccess`), models-cached (HF cache dirs exist) — all `# pragma: no cover`; `main()` prints report, exit 0 iff all ok. Hints name the exact System Settings pane, e.g. `"System Settings → Privacy & Security → Microphone"`.
 
 - [ ] **Step 1: failing tests**
 
 ```python
-from susurro.doctor import Check, format_report, run_checks
+from scribe.doctor import Check, format_report, run_checks
 
 def test_run_checks_ok_and_fail_and_crash():
     probes = {
@@ -883,15 +883,15 @@ def test_format_report():
 
 ### Task 13: menubar.py + app.py + logging
 
-**Files:** Create `src/susurro/menubar.py`, `src/susurro/app.py`, `src/susurro/__main__.py`, `tests/test_menubar_helpers.py`.
+**Files:** Create `src/scribe/menubar.py`, `src/scribe/app.py`, `src/scribe/__main__.py`, `tests/test_menubar_helpers.py`.
 
-**Interfaces — Consumes:** everything above. **Produces:** pure helpers `glyph_for(state: State) -> str` (IDLE `"◦"`, RECORDING `"●"`, PROCESSING `"⋯"`, ERROR `"⚠"`), `truncate_label(text, n=40)`; `SusurroApp(rumps.App)` and `main()` (all `# pragma: no cover`). `__main__.py` calls `main()`.
+**Interfaces — Consumes:** everything above. **Produces:** pure helpers `glyph_for(state: State) -> str` (IDLE `"◦"`, RECORDING `"●"`, PROCESSING `"⋯"`, ERROR `"⚠"`), `truncate_label(text, n=40)`; `ScribeApp(rumps.App)` and `main()` (all `# pragma: no cover`). `__main__.py` calls `main()`.
 
 - [ ] **Step 1: failing tests**
 
 ```python
-from susurro.menubar import glyph_for, truncate_label
-from susurro.pipeline import State
+from scribe.menubar import glyph_for, truncate_label
+from scribe.pipeline import State
 
 def test_glyphs():
     assert glyph_for(State.IDLE) == "◦"
@@ -906,11 +906,11 @@ def test_truncate():
 ```
 
 - [ ] **Steps 2–4:** implement helpers, then app wiring (`# pragma: no cover` on the classes/functions below):
-  - `main()`: set up rotating log (`logging.handlers.RotatingFileHandler`, `~/.local/state/susurro/susurro.log`, 7 backups), load config (log warnings), build components — models loaded lazily *after* the menu bar shows (background thread) so startup is instant; on model-load failure keep app alive, show ⚠ + disable hotkey (spec §5).
-  - `SusurroApp(rumps.App)`: title = glyph; menu: `Engine → Parakeet ✓ / Whisper`, `Cleanup ✓`, `History` (submenu; item click copies final text back to clipboard), `Doctor` (runs `run_checks(default_probes())`, shows via `rumps.alert`), `Reload config`, `Quit`.
+  - `main()`: set up rotating log (`logging.handlers.RotatingFileHandler`, `~/.local/state/scribe/scribe.log`, 7 backups), load config (log warnings), build components — models loaded lazily *after* the menu bar shows (background thread) so startup is instant; on model-load failure keep app alive, show ⚠ + disable hotkey (spec §5).
+  - `ScribeApp(rumps.App)`: title = glyph; menu: `Engine → Parakeet ✓ / Whisper`, `Cleanup ✓`, `History` (submenu; item click copies final text back to clipboard), `Doctor` (runs `run_checks(default_probes())`, shows via `rumps.alert`), `Reload config`, `Quit`.
   - UI updates from worker threads hop to main: `NSOperationQueue.mainQueue().addOperationWithBlock_(fn)`.
   - Sounds via `AppKit.NSSound.soundNamed_("Pop"/"Basso").play()` gated on `cfg.ui.sounds`.
-  - `save_failed_audio`: write float32→int16 WAV via `wave` to `~/.local/state/susurro/last_failed.wav`.
+  - `save_failed_audio`: write float32→int16 WAV via `wave` to `~/.local/state/scribe/last_failed.wav`.
   - Engine switch constructs `WhisperEngine` on demand and calls `pipeline.set_engine(engine, name=…)`; Parakeet instance is kept.
 - [ ] **Step 5:** `make test && make cov` green (≥95%), commit `feat: menu bar app wiring`.
 
@@ -918,9 +918,9 @@ def test_truncate():
 
 ### Task 14: launchd + README
 
-**Files:** Create `resources/dev.esoto.susurro.plist.template`, extend `Makefile` (`install-agent`, `uninstall-agent`), create `README.md`.
+**Files:** Create `resources/dev.esoto.scribe.plist.template`, extend `Makefile` (`install-agent`, `uninstall-agent`), create `README.md`.
 
-- [ ] Plist template (ProgramArguments = `__PYTHON__ -m susurro`, `RunAtLoad` true, `KeepAlive` `SuccessfulExit=false`, StandardError to `~/.local/state/susurro/launchd.err`). Makefile targets `sed` `__PYTHON__` → `$(abspath .venv/bin/python)` into `~/Library/LaunchAgents/dev.esoto.susurro.plist` + `launchctl bootstrap gui/$$(id -u)` / `bootout`. README: install, permissions walkthrough (the three TCC panes + venv-rebuild caveat from spec §6), usage, config reference, troubleshooting.
+- [ ] Plist template (ProgramArguments = `__PYTHON__ -m scribe`, `RunAtLoad` true, `KeepAlive` `SuccessfulExit=false`, StandardError to `~/.local/state/scribe/launchd.err`). Makefile targets `sed` `__PYTHON__` → `$(abspath .venv/bin/python)` into `~/Library/LaunchAgents/dev.esoto.scribe.plist` + `launchctl bootstrap gui/$$(id -u)` / `bootout`. README: install, permissions walkthrough (the three TCC panes + venv-rebuild caveat from spec §6), usage, config reference, troubleshooting.
 - [ ] Commit `feat: launchd agent install + README`.
 
 ---

@@ -3,11 +3,11 @@ from pathlib import Path
 
 import numpy as np
 
-from susurro.config import load_config
-from susurro.history import History
-from susurro.paste import PasteError
-from susurro.pipeline import Pipeline, State
-from susurro.stt.base import SttError
+from scribe.config import load_config
+from scribe.history import History
+from scribe.paste import PasteError
+from scribe.pipeline import Pipeline, State
+from scribe.stt.base import SttError
 from tests.fakes import SILENT, FakeClock, FakeCleaner, FakePaster, FakeRecorder, FakeStt
 
 

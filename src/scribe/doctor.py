@@ -57,7 +57,7 @@ def default_probes() -> dict:  # pragma: no cover - OS/TCC probes
         return bool(Quartz.CGPreflightListenEventAccess())
 
     def models_cached() -> bool:
-        from susurro.config import DEFAULT_PATH, load_config
+        from scribe.config import DEFAULT_PATH, load_config
 
         cfg, _ = load_config(DEFAULT_PATH)
         hub = Path("~/.cache/huggingface/hub").expanduser()
