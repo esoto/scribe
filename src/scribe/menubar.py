@@ -41,6 +41,9 @@ class ScribeMenuBar:  # pragma: no cover - rumps/AppKit adapter
             engine_menu.add(item)
         self._cleanup_item = rumps.MenuItem("Cleanup", callback=lambda item: on_cleanup_toggle(not item.state))
         self._history_menu = rumps.MenuItem("History")
+        # Seed the submenu: rumps only creates the underlying NSMenu when an
+        # item is added, and .clear() on a never-populated MenuItem crashes.
+        self._history_menu.add(rumps.MenuItem("(empty)"))
         doctor_item = rumps.MenuItem("Doctor", callback=lambda _: on_doctor())
         reload_item = rumps.MenuItem("Reload config", callback=lambda _: on_reload())
         self._app.menu = [engine_menu, self._cleanup_item, self._history_menu, None, doctor_item, reload_item, None]
@@ -52,15 +55,32 @@ class ScribeMenuBar:  # pragma: no cover - rumps/AppKit adapter
     def set_cleanup_checked(self, on: bool) -> None:
         self._cleanup_item.state = bool(on)
 
-    def set_state(self, state: State) -> None:
+    def _on_main(self, fn) -> None:
+        """Run fn on the main queue; log failures instead of dying.
+
+        PyObjC converts an uncaught Python exception inside an ObjC block
+        into an NSException that aborts the process — a UI glitch must
+        never take dictation down.
+        """
         from Foundation import NSOperationQueue
 
-        def update():
+        def safe() -> None:
+            try:
+                fn()
+            except Exception:
+                import logging
+
+                logging.getLogger(__name__).exception("menu bar update failed")
+
+        NSOperationQueue.mainQueue().addOperationWithBlock_(safe)
+
+    def set_state(self, state: State) -> None:
+        def update() -> None:
             self._app.title = glyph_for(state)
             if state == State.PROCESSING:
                 self.refresh_history()
 
-        NSOperationQueue.mainQueue().addOperationWithBlock_(update)
+        self._on_main(update)
 
     def refresh_history(self) -> None:
         self._history_menu.clear()
@@ -89,14 +109,10 @@ class ScribeMenuBar:  # pragma: no cover - rumps/AppKit adapter
             logging.getLogger(__name__).warning("notification failed: %s", message)
 
     def alert(self, title: str, message: str) -> None:
-        from Foundation import NSOperationQueue
-
         def show() -> None:
-            # ObjC blocks are void — returning rumps.alert's result raises
-            # inside PyObjC and takes the whole app down.
             self._rumps.alert(title=title, message=message)
 
-        NSOperationQueue.mainQueue().addOperationWithBlock_(show)
+        self._on_main(show)
 
     def run(self) -> None:
         self._app.run()
