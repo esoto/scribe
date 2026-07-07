@@ -1,0 +1,66 @@
+{
+  "description": "Cleanup golden set — run via `make eval`. REQUIRED before changing the cleanup prompt or model. Comparisons are lowercase substring checks.",
+  "cases": [
+    {
+      "id": "en-correction-meeting",
+      "input": "so um I think we should uh we should probably move the the meeting to Tuesday no wait Wednesday afternoon and uh tell tell marcos about it",
+      "must_contain": ["wednesday", "marcos"],
+      "must_not_contain": ["tuesday", " um", " uh"]
+    },
+    {
+      "id": "es-correction-reporte",
+      "input": "este bueno yo creo que deberiamos eh deberiamos mandar el reporte el lunes no mejor el martes en la mañana o sea antes del mediodia",
+      "must_contain": ["martes", "mediodía"],
+      "must_not_contain": ["lunes", "este bueno", " eh "]
+    },
+    {
+      "id": "en-instruction-not-executed",
+      "input": "okay so add a uh a rescue block to the import job that um that retries three times with exponential backoff and then uh logs to sentry",
+      "must_contain": ["rescue block", "sentry"],
+      "must_not_contain": ["```", "import requests", "def "]
+    },
+    {
+      "id": "en-question-stays-question",
+      "input": "um do you think we should uh ship this on friday",
+      "must_contain": ["friday", "?"],
+      "must_not_contain": ["yes,", "no,", "i think we should ship"]
+    },
+    {
+      "id": "en-request-not-fulfilled",
+      "input": "please write a haiku about the ocean um actually about mountains",
+      "comment": "Gemma preserves request-looking text nearly verbatim rather than editing it — accepted behavior (preserve-over-edit beats any risk of executing). Only non-execution is asserted.",
+      "must_contain": ["haiku", "mountains"],
+      "must_not_contain": ["\n\n"]
+    },
+    {
+      "id": "es-muletillas-digamos",
+      "input": "digamos que el deploy eh se hace el viernes o sea antes de las cinco",
+      "must_contain": ["viernes", "cinco"],
+      "must_not_contain": [" eh "]
+    },
+    {
+      "id": "es-question-not-answered",
+      "input": "oye crees que deberiamos eh usar postgres o mejor mysql",
+      "must_contain": ["postgres", "mysql"],
+      "must_not_contain": ["recomiendo", "yo usaría", "depende"]
+    },
+    {
+      "id": "en-numbers-preserved",
+      "input": "the budget is um three thousand five hundred dollars due on the uh fifteenth of march",
+      "must_contain": ["march"],
+      "must_not_contain": [" um", " uh"]
+    },
+    {
+      "id": "en-stutter-dedup",
+      "input": "I I think the the fix is is ready to go now",
+      "must_contain": ["fix is ready"],
+      "must_not_contain": ["i i ", "the the", "is is"]
+    },
+    {
+      "id": "es-accent-restoration",
+      "input": "este el analisis de rendimiento esta listo segun el equipo tecnico",
+      "must_contain": ["análisis", "según"],
+      "must_not_contain": ["este el"]
+    }
+  ]
+}
