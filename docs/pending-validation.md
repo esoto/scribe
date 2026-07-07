@@ -5,7 +5,12 @@ unit suite 66/66 (99.7% coverage on pure logic), model integration suite
 10/10, cleanup eval 10/10, `make doctor` functional, all modules import.
 What remains requires your voice, your screen, or your click.
 
-## 1. One-time setup (blocking — the app is inert without these)
+> **Update 2026-07-07 ~12:30:** Section 1 is DONE — all grants verified live
+> (mic 3/authorized, input monitoring tap enabled, post-event access True)
+> and the first real dictations completed end-to-end. Section 2 (real-voice
+> quality checklist) is what remains.
+
+## 1. One-time setup (blocking — the app is inert without these) — ✅ COMPLETED
 
 macOS TCC grants bind to `.venv/bin/python`. `make doctor` currently reports
 all three missing (expected — this binary has never asked):
@@ -51,6 +56,19 @@ voice, accent, and mic:
 | Inline few-shot examples in the system prompt made Gemma parrot the last example verbatim | eval | Few-shots moved to chat-format user/assistant pairs |
 | Gemma preserves request-looking text nearly verbatim (won't resolve "ocean um actually mountains") | eval case `en-request-not-fulfilled` | **Accepted**: preserve-over-edit is the safe failure mode vs. executing the request. Golden asserts non-execution only |
 | "o sea" survives cleanup when used as a connector ("that is") | eval | Accepted as linguistically correct; goldens only require hard fillers (um/uh/este/eh) gone |
+
+## 3b. Findings from first-run debugging (2026-07-07, app confirmed working end-to-end)
+
+| Finding | Evidence | Resolution |
+|---|---|---|
+| TCC grants on `.venv/bin/python` / `bin/python3.14` do nothing — framework Python re-execs into a hidden `Python.app` bundle | `ps` showed `…/Resources/Python.app/Contents/MacOS/Python`; `sys.executable` lies | `make doctor` prints the real grant target; grants live on Python.app |
+| Terminal-launched processes attribute TCC to the TERMINAL (responsible process), not to Python | probe from iTerm: all grants False while Settings showed Python ✓ | Run via launchd (`make install-agent`) where Python.app is its own identity; probe prints the caveat |
+| macOS 26 creates listen-only event taps WITHOUT the Input Monitoring grant, then silently leaves them disabled | probe: `tap created: True, tap enabled: False`; app never errored | App now checks `CGEventTapIsEnabled` after enabling and raises loudly |
+| ObjC blocks must return void — returning any value from a PyObjC main-queue block aborts the app | Doctor-click crash: `OC_PythonException … expecting void return value` | All UI blocks wrapped in `_on_main` (logs exceptions, never propagates) |
+| rumps `MenuItem.clear()` crashes on a never-populated submenu | first-dictation crash: `'NoneType' … removeAllItems` | History submenu seeded with "(empty)" at construction |
+| Energy gate 0.005 (calibrated on loud TTS fixtures) discarded ALL real dictation — real speech on the built-in mic is rms 0.001–0.002 | six discards logged with healthy rms | Default gate lowered to 0.0005 (2× below quiet speech, 3.5× above digital silence) |
+| **MLX weights bind to the loading thread's GPU stream; any other thread gets "There is no Stream(gpu, N) in current thread"** | reproduced in 5 isolated experiments | `MlxThread` owns all loads + inference; `ThreadBound*` wrappers marshal calls; cross-thread regression test in tier-2 |
+| `CGEventPost` without Accessibility is SILENTLY swallowed — no error, no paste | "dictation ok" logged but no text visible | Startup logs + requests post-event access (`CGPreflightPostEventAccess`) |
 
 ## 4. Open experiments (non-blocking, when you feel like it)
 
