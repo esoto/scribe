@@ -13,6 +13,7 @@ Requires-Dist: sounddevice>=0.5
 Requires-Dist: rumps>=0.4
 Requires-Dist: pyobjc-framework-Quartz>=11
 Requires-Dist: pyobjc-framework-AVFoundation>=11
+Requires-Dist: pyobjc-framework-ApplicationServices>=11
 Provides-Extra: dev
 Requires-Dist: pytest>=8; extra == "dev"
 Requires-Dist: pytest-cov>=6; extra == "dev"

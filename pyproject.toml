@@ -20,6 +20,7 @@ dependencies = [
   "rumps>=0.4",
   "pyobjc-framework-Quartz>=11",
   "pyobjc-framework-AVFoundation>=11",
+  "pyobjc-framework-ApplicationServices>=11",
 ]
 
 [project.optional-dependencies]

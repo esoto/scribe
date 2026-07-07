@@ -8,6 +8,7 @@ sounddevice>=0.5
 rumps>=0.4
 pyobjc-framework-Quartz>=11
 pyobjc-framework-AVFoundation>=11
+pyobjc-framework-ApplicationServices>=11
 
 [dev]
 pytest>=8
