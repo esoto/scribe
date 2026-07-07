@@ -91,6 +91,13 @@ class Pipeline:
         self._on_state(State.PROCESSING)
         try:
             if not gates.passes_energy_gate(pcm, self._cfg.audio.energy_gate_rms):
+                log.info(
+                    "capture discarded by energy gate (rms=%.6f, %.1fs, gate=%s) — "
+                    "all-zero audio usually means the Microphone grant is missing",
+                    gates.rms(pcm),
+                    pcm.size / self._cfg.audio.sample_rate,
+                    self._cfg.audio.energy_gate_rms,
+                )
                 return
             t0 = self._clock()
             try:
@@ -116,6 +123,14 @@ class Pipeline:
             except PasteError as e:
                 log.warning("paste failed: %s", e)
                 self._on_notice("Paste failed — press ⌘V to paste manually")
+            duration_ms = int((self._clock() - t0) * 1000)
+            log.info(
+                "dictation ok: engine=%s cleaned=%s %d chars in %d ms",
+                self.engine_name,
+                cleaned,
+                len(final),
+                duration_ms,
+            )
             self._history.append(
                 Record(
                     raw=raw,
@@ -123,7 +138,7 @@ class Pipeline:
                     engine=self.engine_name,
                     cleaned=cleaned,
                     at=time.time(),
-                    duration_ms=int((self._clock() - t0) * 1000),
+                    duration_ms=duration_ms,
                 )
             )
         finally:

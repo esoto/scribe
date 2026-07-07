@@ -47,6 +47,29 @@ def _play_sound(name: str) -> None:  # pragma: no cover
         sound.play()
 
 
+def _request_microphone() -> None:  # pragma: no cover
+    """Force the TCC microphone prompt for THIS process identity.
+
+    Opening the stream via PortAudio does not reliably trigger the prompt;
+    without the grant CoreAudio silently delivers all-zero samples, which
+    the energy gate then (correctly) discards — no error anywhere.
+    """
+    from AVFoundation import AVCaptureDevice, AVMediaTypeAudio
+
+    status = int(AVCaptureDevice.authorizationStatusForMediaType_(AVMediaTypeAudio))
+    log.info("microphone authorization status: %d (3=authorized)", status)
+    if status == 0:  # not determined — ask
+        AVCaptureDevice.requestAccessForMediaType_completionHandler_(
+            AVMediaTypeAudio,
+            lambda granted: log.info("microphone request result: granted=%s", bool(granted)),
+        )
+    elif status != 3:
+        log.error(
+            "microphone DENIED for this identity — enable Python in "
+            "System Settings → Privacy & Security → Microphone"
+        )
+
+
 def main() -> None:  # pragma: no cover - composition root, exercised manually
     import os
 
@@ -66,6 +89,8 @@ def main() -> None:  # pragma: no cover - composition root, exercised manually
     cfg, warnings = load_config(DEFAULT_PATH)
     for w in warnings:
         log.warning("config: %s", w)
+
+    _request_microphone()
 
     history = History(cfg.ui.history_size)
     recorder = Recorder(default_stream_factory, sample_rate=cfg.audio.sample_rate)
