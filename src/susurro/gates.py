@@ -38,3 +38,27 @@ def length_ok(raw: str, cleaned: str, band: tuple[float, float]) -> bool:
 
 def normalize(text: str) -> str:
     return " ".join(text.split())
+
+
+_EN_STOPWORDS = frozenset(
+    "the a an is are was were be do does did to of on in at for with and or "
+    "but this that it we you they should would could i".split()
+)
+_ES_STOPWORDS = frozenset(
+    "el la los las un una es son está esta estaba ser hacer de en a para con "
+    "y o pero este esto eso que se nosotros ustedes ellos debería yo según".split()
+)
+
+
+def _lang_score(text: str) -> int:
+    """Positive = English-leaning, negative = Spanish-leaning, 0 = neutral."""
+    words = text.lower().split()
+    return sum(w in _EN_STOPWORDS for w in words) - sum(w in _ES_STOPWORDS for w in words)
+
+
+def language_consistent(raw: str, cleaned: str) -> bool:
+    """Reject cleanups that flipped the language (small-model translation bug,
+    observed 2026-07-07 with Gemma 3 4B on Spanglish input). Neutral or
+    ambiguous scores pass — only a confident flip fails."""
+    raw_score, cleaned_score = _lang_score(raw), _lang_score(cleaned)
+    return not (raw_score * cleaned_score < 0 and abs(raw_score - cleaned_score) >= 3)

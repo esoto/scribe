@@ -162,3 +162,14 @@ def test_two_dictations_fifo():
     dictate(p, clock)
     dictate(p, clock)
     assert len(paster.pasted) == 2
+
+
+def test_cleanup_translation_falls_back_to_raw():
+    paster = FakePaster()
+    p, clock, *_ = make(
+        stt=FakeStt(text="digamos que el deploy se hace el viernes antes de las cinco"),
+        cleaner=FakeCleaner(out="The deploy is done on Friday before five o'clock."),
+        paster=paster,
+    )
+    dictate(p, clock)
+    assert paster.pasted == ["digamos que el deploy se hace el viernes antes de las cinco"]

@@ -36,3 +36,33 @@ def test_normalize_preserves_spanish():
 
 def test_rms_empty_is_zero():
     assert rms(np.zeros(0, dtype=np.float32)) == 0.0
+
+
+def test_language_consistent_same_language():
+    from susurro.gates import language_consistent
+
+    assert language_consistent(
+        "so um move the meeting to friday", "Move the meeting to Friday."
+    )
+    assert language_consistent(
+        "este el codigo esta listo segun el equipo", "El código está listo según el equipo."
+    )
+
+
+def test_language_consistent_detects_translation():
+    from susurro.gates import language_consistent
+
+    assert not language_consistent(
+        "digamos que el deploy se hace el viernes antes de las cinco",
+        "The deploy is done on Friday or before five.",
+    )
+    assert not language_consistent(
+        "do you think we should ship this on friday",
+        "¿Deberíamos enviar esto el viernes?",
+    )
+
+
+def test_language_consistent_neutral_text_passes():
+    from susurro.gates import language_consistent
+
+    assert language_consistent("ok deploy prod 123", "Ok, deploy prod 123.")

@@ -139,6 +139,9 @@ class Pipeline:
         if not out or not gates.length_ok(raw, out, self._cfg.cleanup.length_band):
             log.warning("cleanup output failed gates, using raw transcript")
             return None
+        if not gates.language_consistent(raw, out):
+            log.warning("cleanup translated the transcript, using raw")
+            return None
         return out
 
     def _thread_runner(self, fn: Callable[[], None]) -> None:  # pragma: no cover - thread glue

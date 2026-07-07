@@ -7,6 +7,7 @@ Requires-Dist: mlx>=0.31
 Requires-Dist: parakeet-mlx==0.5.2
 Requires-Dist: mlx-whisper==0.4.3
 Requires-Dist: mlx-lm==0.31.3
+Requires-Dist: transformers<5.6,>=5.5
 Requires-Dist: numpy>=2.0
 Requires-Dist: sounddevice>=0.5
 Requires-Dist: rumps>=0.4
