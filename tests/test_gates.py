@@ -32,3 +32,7 @@ def test_length_ok():
 
 def test_normalize_preserves_spanish():
     assert normalize("  el  martes,\n antes del mediodía.  ") == "el martes, antes del mediodía."
+
+
+def test_rms_empty_is_zero():
+    assert rms(np.zeros(0, dtype=np.float32)) == 0.0

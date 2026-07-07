@@ -62,3 +62,19 @@ def test_engine_validated(tmp_path):
     cfg, warns = load_config(p)
     assert cfg.stt.engine == "parakeet"
     assert len(warns) == 1
+
+
+def test_section_not_a_table_warns(tmp_path):
+    p = tmp_path / "c.toml"
+    p.write_text("hotkey = 5\n")
+    cfg, warns = load_config(p)
+    assert cfg.hotkey.key == "right_command"
+    assert any("expected a table" in w for w in warns)
+
+
+def test_positive_validator_used(tmp_path):
+    p = tmp_path / "c.toml"
+    p.write_text("[cleanup]\ntimeout_s = -1\n[ui]\nhistory_size = 0\n")
+    cfg, warns = load_config(p)
+    assert cfg.cleanup.timeout_s == 6.0 and cfg.ui.history_size == 10
+    assert len(warns) == 2

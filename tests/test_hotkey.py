@@ -38,3 +38,8 @@ def test_right_option():
     m = KeyStateMachine("right_option")
     assert m.handle(12, 61, 0x80000) == "down"
     assert m.handle(12, 61, 0) == "up"
+
+
+def test_modifier_key_ignores_keydown_events():
+    m = KeyStateMachine("right_command")
+    assert m.handle(10, 54, CMD) is None

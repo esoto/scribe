@@ -31,6 +31,14 @@ markers = ["models: needs local MLX models (make test-models)"]
 
 [tool.coverage.run]
 source = ["susurro"]
+# Composition root and model adapters: 100% OS/MLX glue, exercised by
+# tests_models and manual use, not unit tests (spec §7 seam rule).
+omit = [
+  "*/susurro/app.py",
+  "*/susurro/__main__.py",
+  "*/susurro/stt/parakeet.py",
+  "*/susurro/cleanup/mlx_lm.py",
+]
 
 [tool.coverage.report]
 fail_under = 95
