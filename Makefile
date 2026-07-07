@@ -20,3 +20,16 @@ doctor:
 
 run:
 	$(PY) -m susurro
+
+AGENT := $(HOME)/Library/LaunchAgents/dev.esoto.susurro.plist
+STATE := $(HOME)/.local/state/susurro
+
+install-agent:
+	mkdir -p $(STATE) $(HOME)/Library/LaunchAgents
+	sed -e 's|__PYTHON__|$(abspath .venv/bin/python)|' -e 's|__STATE__|$(STATE)|' \
+	  resources/dev.esoto.susurro.plist.template > $(AGENT)
+	launchctl bootstrap gui/$$(id -u) $(AGENT) || launchctl kickstart -k gui/$$(id -u)/dev.esoto.susurro
+
+uninstall-agent:
+	launchctl bootout gui/$$(id -u)/dev.esoto.susurro || true
+	rm -f $(AGENT)
