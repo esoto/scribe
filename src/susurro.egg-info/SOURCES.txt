@@ -1,0 +1,9 @@
+pyproject.toml
+src/susurro/__init__.py
+src/susurro.egg-info/PKG-INFO
+src/susurro.egg-info/SOURCES.txt
+src/susurro.egg-info/dependency_links.txt
+src/susurro.egg-info/entry_points.txt
+src/susurro.egg-info/requires.txt
+src/susurro.egg-info/top_level.txt
+tests/test_scaffold.py
