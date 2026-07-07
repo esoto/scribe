@@ -7,6 +7,12 @@ transcribes (~0.2 s), [Gemma 3 4B](https://huggingface.co/mlx-community/gemma-3-
 strips fillers and resolves self-corrections, and the result is pasted into
 whatever app has focus. No cloud, no accounts. ~3.5 GB resident RAM on Apple Silicon.
 
+**Privacy:** audio and text never leave the machine. The app sets
+`HF_HUB_OFFLINE=1` at startup, so after the one-time model downloads it makes
+zero network requests — not even Hugging Face's are-you-up-to-date check.
+To download a new model (e.g. after changing a model repo in the config),
+run once with `HF_HUB_OFFLINE=0 make run`.
+
 Design and evidence: [docs/superpowers/specs/2026-07-06-scribe-dictation-app-design.md](docs/superpowers/specs/2026-07-06-scribe-dictation-app-design.md)
 
 ## Install

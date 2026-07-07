@@ -48,6 +48,12 @@ def _play_sound(name: str) -> None:  # pragma: no cover
 
 
 def main() -> None:  # pragma: no cover - composition root, exercised manually
+    import os
+
+    # Privacy: force HF loaders to the local cache — zero network requests at
+    # runtime. Export HF_HUB_OFFLINE=0 before launching to allow downloads
+    # (only needed once when switching to a model that isn't cached yet).
+    os.environ.setdefault("HF_HUB_OFFLINE", "1")
     _setup_logging()
     from scribe.config import DEFAULT_PATH, load_config
     from scribe.history import History
