@@ -21,6 +21,9 @@ doctor:
 run:
 	$(PY) -m scribe
 
+probe:
+	$(PY) scripts/probe_hotkey.py
+
 AGENT := $(HOME)/Library/LaunchAgents/dev.esoto.scribe.plist
 STATE := $(HOME)/.local/state/scribe
 
