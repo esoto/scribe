@@ -24,6 +24,11 @@ def main() -> None:
         ["ps", "-p", str(os.getpid()), "-o", "comm="], capture_output=True, text=True
     ).stdout.strip()
     print(f"running executable: {exe}")
+    term = os.environ.get("TERM_PROGRAM")
+    if term:
+        print(f"NOTE: launched from {term} — macOS attributes TCC grants of terminal")
+        print(f"      children to the TERMINAL app. Results below reflect {term}'s")
+        print("      grants, NOT Python.app's. They do not predict launchd behavior.")
 
     print("\n=== Layer 1: TCC grants (as seen by this process) ===")
     print(f"input monitoring (CGPreflightListenEventAccess): {bool(Quartz.CGPreflightListenEventAccess())}")
