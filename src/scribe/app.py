@@ -70,6 +70,24 @@ def _request_microphone() -> None:  # pragma: no cover
         )
 
 
+def _check_paste_access() -> None:  # pragma: no cover
+    """Log (and request) permission to post ⌘V.
+
+    Without it CGEventPost is SILENTLY swallowed — no error, no paste —
+    so this is the only place the failure becomes visible.
+    """
+    import Quartz
+
+    ok = bool(Quartz.CGPreflightPostEventAccess())
+    log.info("post-event (paste) access: %s", ok)
+    if not ok:
+        Quartz.CGRequestPostEventAccess()
+        log.error(
+            "paste access MISSING — ⌘V will be silently dropped. Enable Python in "
+            "System Settings → Privacy & Security → Accessibility, then restart scribe"
+        )
+
+
 def main() -> None:  # pragma: no cover - composition root, exercised manually
     import os
 
@@ -91,6 +109,7 @@ def main() -> None:  # pragma: no cover - composition root, exercised manually
         log.warning("config: %s", w)
 
     _request_microphone()
+    _check_paste_access()
 
     history = History(cfg.ui.history_size)
     recorder = Recorder(default_stream_factory, sample_rate=cfg.audio.sample_rate)
