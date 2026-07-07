@@ -38,6 +38,27 @@ def format_report(checks: list[Check]) -> str:
     return "\n".join(lines)
 
 
+def _grant_target_for(real_executable: str) -> str:
+    """The path macOS actually attributes TCC grants to.
+
+    Framework Python builds re-exec `bin/pythonX.Y` into the Python.app
+    bundle inside the framework (visible in `ps`, hidden from
+    sys.executable) — grants must go to that bundle, not the launcher.
+    """
+    from pathlib import Path
+
+    real = Path(real_executable)
+    app_bundle = real.parent.parent / "Resources" / "Python.app"
+    return str(app_bundle) if app_bundle.exists() else str(real)
+
+
+def grant_target() -> str:  # pragma: no cover - depends on live interpreter
+    import os
+    import sys
+
+    return _grant_target_for(os.path.realpath(sys.executable))
+
+
 def default_probes() -> dict:  # pragma: no cover - OS/TCC probes
     from pathlib import Path
 
@@ -64,12 +85,16 @@ def default_probes() -> dict:  # pragma: no cover - OS/TCC probes
         repos = (cfg.stt.parakeet_model, cfg.cleanup.model)
         return all((hub / f"models--{r.replace('/', '--')}").exists() for r in repos)
 
+    target = grant_target()
     return {
         "microphone": (mic, "System Settings → Privacy & Security → Microphone"),
-        "accessibility": (accessibility, "System Settings → Privacy & Security → Accessibility"),
+        "accessibility": (
+            accessibility,
+            f"System Settings → Privacy & Security → Accessibility → “+” → ⌘⇧G → {target}",
+        ),
         "input monitoring": (
             input_monitoring,
-            "System Settings → Privacy & Security → Input Monitoring",
+            f"System Settings → Privacy & Security → Input Monitoring → “+” → ⌘⇧G → {target}",
         ),
         "models cached": (models_cached, "run: make test-models (downloads on first use)"),
     }
@@ -78,6 +103,8 @@ def default_probes() -> dict:  # pragma: no cover - OS/TCC probes
 def main() -> int:  # pragma: no cover - CLI entry
     checks = run_checks(default_probes())
     print(format_report(checks))
+    if not all(c.ok for c in checks):
+        print(f"\ngrant permissions to: {grant_target()}")
     return 0 if all(c.ok for c in checks) else 1
 
 

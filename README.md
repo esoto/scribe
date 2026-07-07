@@ -27,15 +27,18 @@ make install-agent # start at login via launchd
 
 ## Permissions (one-time, and after any .venv rebuild)
 
-macOS ties privacy grants to the exact interpreter binary (`.venv/bin/python`).
-scribe needs three:
+scribe needs three grants. **Run `make doctor` first — it prints the exact
+path macOS attributes the grants to.** (Gotcha: framework Python re-execs
+into a hidden `Python.app` bundle inside the Homebrew framework; grants on
+`.venv/bin/python` or `bin/python3.14` target the wrong binary and silently
+do nothing. `ps` shows the truth; `sys.executable` does not.)
 
 1. **Microphone** — prompted automatically on first recording.
-2. **Accessibility** — System Settings → Privacy & Security → Accessibility → add `.venv/bin/python`. Needed to send ⌘V.
-3. **Input Monitoring** — System Settings → Privacy & Security → Input Monitoring → add `.venv/bin/python`. Needed for the hold-to-talk key.
+2. **Accessibility** — System Settings → Privacy & Security → Accessibility → “+” → ⌘⇧G → paste the path from `make doctor`. Needed to send ⌘V.
+3. **Input Monitoring** — same pane group → Input Monitoring → same path. Needed for the hold-to-talk key.
 
-Run `make doctor` any time to see exactly what's missing. **Rebuilding
-`.venv` invalidates all three grants** — you'll need to re-add the binary.
+Restart scribe after granting. **Rebuilding `.venv` or upgrading Homebrew
+Python invalidates the grants** — re-run `make doctor` and re-add.
 
 ## Usage
 
