@@ -28,6 +28,9 @@ targets:
     type: application
     platform: macOS
     sources: [Sources/Scribe]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.esoto.scribe
     info:
       path: Info.plist
       properties:

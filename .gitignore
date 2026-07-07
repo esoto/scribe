@@ -7,5 +7,10 @@ __pycache__/
 .superpowers/
 
 # native/ — xcodegen derived artifacts (run `xcodegen generate` in native/)
-native/Scribe.xcodeproj/
+native/Scribe.xcodeproj/*
+!native/Scribe.xcodeproj/project.xcworkspace
+native/Scribe.xcodeproj/project.xcworkspace/*
+!native/Scribe.xcodeproj/project.xcworkspace/xcshareddata
+native/Scribe.xcodeproj/project.xcworkspace/xcshareddata/*
+!native/Scribe.xcodeproj/project.xcworkspace/xcshareddata/swiftpm
 native/Info.plist
