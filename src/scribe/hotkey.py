@@ -82,4 +82,12 @@ class HotkeyListener:  # pragma: no cover - CGEventTap wiring
             Quartz.CFRunLoopGetCurrent(), source, Quartz.kCFRunLoopCommonModes
         )
         Quartz.CGEventTapEnable(tap, True)
+        # On macOS 26, creation SUCCEEDS without the Input Monitoring grant
+        # and the tap is just silently left disabled — check, don't trust.
+        if not Quartz.CGEventTapIsEnabled(tap):
+            raise PermissionError(
+                "event tap created but disabled — Input Monitoring grant is not "
+                "reaching this process (from a terminal, grants attribute to the "
+                "terminal app; via launchd, to Python.app). Run `make probe`."
+            )
         self._tap = tap
