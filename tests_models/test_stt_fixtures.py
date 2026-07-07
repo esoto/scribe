@@ -47,3 +47,25 @@ def test_energy_gate_blocks_silence_before_whisper():
 def test_voiced_fixtures_pass_energy_gate():
     for name in ("en.wav", "es.wav", "mixed.wav"):
         assert passes_energy_gate(load_pcm(name), 0.0005), name
+
+
+def test_cross_thread_inference_via_mlx_thread():
+    """Regression: mlx weights bind to the loading thread's GPU stream —
+    inference from any other thread dies unless marshaled through MlxThread
+    (the 2026-07-07 'There is no Stream(gpu, 0)' bug)."""
+    import threading
+
+    from scribe.mlx_thread import MlxThread, ThreadBoundStt
+    from scribe.stt.parakeet import ParakeetEngine
+
+    mlx = MlxThread(name="tm-mlx")
+    stt = ThreadBoundStt(mlx, lambda: ParakeetEngine("mlx-community/parakeet-tdt-0.6b-v3"))
+    result = {}
+
+    def worker():
+        result["text"] = stt.transcribe(load_pcm("en.wav"))
+
+    t = threading.Thread(target=worker, name="tm-pipeline")
+    t.start()
+    t.join()
+    assert "wednesday" in result["text"].lower()

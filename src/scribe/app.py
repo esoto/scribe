@@ -115,6 +115,11 @@ def main() -> None:  # pragma: no cover - composition root, exercised manually
         if state == State.ERROR and cfg.ui.sounds:
             _play_sound("Basso")
 
+    from scribe.mlx_thread import MlxThread, ThreadBoundCleaner, ThreadBoundStt
+
+    mlx_thread = MlxThread()
+    components["mlx"] = mlx_thread
+
     def load_models() -> None:
         try:
             from scribe.cleanup.mlx_lm import MlxLmBackend
@@ -123,12 +128,17 @@ def main() -> None:  # pragma: no cover - composition root, exercised manually
 
             log.info("loading models…")
             t0 = time.time()
-            engine = (
-                ParakeetEngine(cfg.stt.parakeet_model)
+            engine = ThreadBoundStt(
+                mlx_thread,
+                (lambda: ParakeetEngine(cfg.stt.parakeet_model))
                 if cfg.stt.engine == "parakeet"
-                else WhisperEngine(cfg.stt.whisper_model)
+                else (lambda: WhisperEngine(cfg.stt.whisper_model)),
             )
-            cleaner = MlxLmBackend(cfg.cleanup.model) if cfg.cleanup.enabled else None
+            cleaner = (
+                ThreadBoundCleaner(mlx_thread, lambda: MlxLmBackend(cfg.cleanup.model))
+                if cfg.cleanup.enabled
+                else None
+            )
             components["pipeline"] = Pipeline(
                 recorder=recorder,
                 stt=engine,
@@ -189,14 +199,20 @@ def _switch_engine(components, cfg, menubar, name: str) -> None:  # pragma: no c
 
     def do_switch():
         try:
+            from scribe.mlx_thread import ThreadBoundStt
+
             if name == "whisper":
                 from scribe.stt.whisper import WhisperEngine
 
-                engine = WhisperEngine(cfg.stt.whisper_model)
+                engine = ThreadBoundStt(
+                    components["mlx"], lambda: WhisperEngine(cfg.stt.whisper_model)
+                )
             else:
                 from scribe.stt.parakeet import ParakeetEngine
 
-                engine = ParakeetEngine(cfg.stt.parakeet_model)
+                engine = ThreadBoundStt(
+                    components["mlx"], lambda: ParakeetEngine(cfg.stt.parakeet_model)
+                )
             pipeline.set_engine(engine, name=name)
             menubar.set_engine_checked(name)
         except Exception as e:
