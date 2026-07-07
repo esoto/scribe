@@ -91,9 +91,12 @@ class ScribeMenuBar:  # pragma: no cover - rumps/AppKit adapter
     def alert(self, title: str, message: str) -> None:
         from Foundation import NSOperationQueue
 
-        NSOperationQueue.mainQueue().addOperationWithBlock_(
-            lambda: self._rumps.alert(title=title, message=message)
-        )
+        def show() -> None:
+            # ObjC blocks are void — returning rumps.alert's result raises
+            # inside PyObjC and takes the whole app down.
+            self._rumps.alert(title=title, message=message)
+
+        NSOperationQueue.mainQueue().addOperationWithBlock_(show)
 
     def run(self) -> None:
         self._app.run()
