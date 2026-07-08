@@ -31,6 +31,13 @@ final class HotkeyMonitor {
         self.onUp = onUp
     }
 
+    deinit {
+        // The C callback holds an unretained pointer to self. Without this
+        // teardown, deallocation while the tap is live leaves a dangling refcon
+        // that crashes on the next keystroke.
+        teardown()
+    }
+
     /// Installs the session-level, listen-only event tap over
     /// flagsChanged/keyDown/keyUp and adds its run-loop source to the
     /// current run loop's common modes.
@@ -41,6 +48,9 @@ final class HotkeyMonitor {
     /// the Input Monitoring grant isn't reaching this process. We check
     /// `CGEvent.tapIsEnabled` after `tapEnable` rather than trusting a
     /// non-nil tap; see `scribe.hotkey.HotkeyListener.install`.
+    ///
+    /// Must be called on the thread whose run loop pumps the tap — call
+    /// install() and reinstall() from the same thread (main).
     func install() throws {
         let mask: CGEventMask =
             (1 << CGEventType.flagsChanged.rawValue)
@@ -73,6 +83,7 @@ final class HotkeyMonitor {
         // trust the non-nil result above.
         guard CGEvent.tapIsEnabled(tap: newTap) else {
             CFRunLoopRemoveSource(CFRunLoopGetCurrent(), source, .commonModes)
+            CFMachPortInvalidate(newTap)
             throw HotkeyError(
                 message: "event tap created but disabled — Input Monitoring grant is not "
                     + "reaching this process. Grant Input Monitoring to scribe in System "
@@ -87,6 +98,9 @@ final class HotkeyMonitor {
     /// Tears down the current tap (if any) and installs a fresh one.
     /// Used by the onboarding flow to live-activate the hotkey immediately
     /// after the user grants Input Monitoring, without an app relaunch.
+    ///
+    /// Must be called on the thread whose run loop pumps the tap — call
+    /// install() and reinstall() from the same thread (main).
     func reinstall() throws {
         teardown()
         try install()
