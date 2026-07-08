@@ -196,4 +196,161 @@ loads); `PromptDumpTests` single-case dump ~6 s.
 
 `xcodebuild test -scheme ScribeModelTests` (unscoped, all models cached): **8/8, TEST SUCCEEDED, 51.7 s total.**
 FixtureTests 7/7 — concurrency 0.90 s, Parakeet en 0.13 s / es 0.12 s / silence 0.09 s, Whisper en 9.5 s (cached; earlier 2596 s figure was the one-time model download).
+
+## Cleanup speed investigation (2026-07-07)
+
+**Problem:** native cleanup (`GemmaBackend.swift`, MLX-Swift `ChatSession`) took
+~2.8–3.5 s/utterance, ~2.6x the Python oracle's ~1.3–1.5 s
+(`src/scribe/cleanup/base.py` + `mlx_lm`, same model/machine), and was nearly
+**flat regardless of input/output length** (20 chars → 2.8 s, 113 chars → 3.3 s).
+
+### Method
+
+Instrumented both stacks directly rather than guessing:
+
+- **Python**: a one-off script (`.venv/bin/python`) loaded
+  `mlx-community/gemma-3-4b-it-qat-4bit` via `mlx_lm.load`/`generate(...,
+  verbose=True)` with the exact `build_messages()`/`max_tokens_for()` the
+  app uses, on the input `"um do you think we should uh ship this on
+  friday"`. Result (warm run): **290 prompt tokens, 11 generated tokens,
+  stopped on EOS, wall 1.27 s** (prompt 290 tok @ 312 tok/s ≈ 0.93 s;
+  generation 11 tok @ 67 tok/s ≈ 0.16 s).
+- **Swift**: a temporary XCTest (`GenPerfTests.swift`, deleted after use —
+  see git history for the exact harness) drove `ChatSession.streamDetails`
+  and, separately, a bare `TokenIterator` (bypassing `ChatSession`'s actor
+  plumbing) on the identical input/config, printing
+  `GenerateCompletionInfo` (generated-token count, tokens/s, stop reason)
+  and hand-timed phase breakdowns (`processor.prepare` / chat-template
+  render, `TokenIterator.init` / prompt prefill, generation loop).
+
+### Root causes (two, independent)
+
+**1. Missing `<end_of_turn>` stop token (confirmed bug, now fixed).**
+`GemmaBackend.swift` loaded the model via
+`#huggingFaceLoadModelContainer(configuration: ModelConfiguration(id:
+"mlx-community/gemma-3-4b-it-qat-4bit"))` — a **bare** `ModelConfiguration`
+literal. `#huggingFaceLoadModelContainer` expands to
+`loadModelContainer(from:using:configuration:progressHandler:)`
+(`MLXHuggingFaceMacros/HuggingFaceIntegrationMacros.swift`), which passes
+that literal straight through `resolve(configuration:from:useLatest:
+progressHandler:)` (`MLXLMCommon/ModelFactory.swift`) with **no lookup**
+against `VLMModelFactory`'s static registry — so the registry's
+`VLMRegistry.gemma3_4B_qat_4bit` entry, which sets `extraEOSTokens:
+["<end_of_turn>"]`, was never consulted. `ChatSession`'s stop-token set
+(`buildStopTokenIds` in `MLXLMCommon/Evaluate.swift`) therefore only
+contained the tokenizer's single `eos_token` (`<eos>`, id 1, from
+`tokenizer_config.json`) — not `<end_of_turn>` (id 106), the token Gemma's
+chat template and `generation_config.json`'s `eos_token_id: [1, 106]`
+actually use to end a turn.
+
+Direct proof via the bare-`TokenIterator` harness (bypassing `ChatSession`,
+config matching the pre-fix `GemmaBackend`): the model correctly generated
+*"Do you think we should ship this on Friday?"* and then emitted
+`<end_of_turn>` — since that token wasn't registered as a stop token, it was
+appended as ordinary output and generation continued, **repeating
+`<end_of_turn>` 190 more times** until hitting the 200-token ceiling
+(`stopReason: maxTokens`, `generateLoop: ~6.1–6.3 s`). Decoded output
+(truncated): `"Do you think we should ship this on Friday?<end_of_turn>
+<end_of_turn>\n<end_of_turn><end_of_turn>..."` (190x). This reproduced
+identically across repeated runs.
+
+Interestingly, the *production* code path (`ChatSession`, matching
+`GemmaBackend.clean()` exactly) did not hit this ceiling in the measured
+"friday" case — it happened to argmax to `<eos>` (id 1) after 10 tokens even
+pre-fix, most likely because per-token logits for `<eos>` vs `<end_of_turn>`
+are extremely close post-quantization and GPU floating-point reduction order
+can differ subtly between `ChatSession`'s actor-hopped call path and a raw
+synchronous `TokenIterator` loop. That makes this a **fragile, latent bug**:
+usually masked by a near-tied argmax, but capable of stalling 6–9 extra
+seconds on any input/model-state combination where the tie breaks the other
+way. Fixed by setting `extraEOSTokens` explicitly (`GemmaBackend.swift`):
+
+```swift
+static func modelConfiguration() -> ModelConfiguration {
+    ModelConfiguration(
+        id: "mlx-community/gemma-3-4b-it-qat-4bit",
+        extraEOSTokens: ["<end_of_turn>"]
+    )
+}
+```
+
+Post-fix, the same bare-`TokenIterator` harness stops deterministically at
+`stopReason: eos(106)`, **10 generated tokens**, `generateLoop: ~0.76 s`
+(down from ~6.1–6.3 s) — matching Python's 11-token stop almost exactly.
+
+`GenerateParameters` were checked and ruled out as a contributing factor:
+`GemmaBackend`'s `temperature: 0.0` resolves to `ArgMaxSampler` (no
+top-p/top-k/min-p, since `topP` defaults to `1.0` and `topK`/`minP` default
+to `0`), and no repetition/presence/frequency penalty is set — this already
+matches Python's `make_sampler(temp=0.0)` with no extra per-token
+transforms, so there was nothing to tighten there.
+
+**2. Chat-template (Jinja) rendering dominates latency — NOT fixed in this
+pass; documented as a follow-up.** Isolating `processor.prepare(input:)`
+(chat-template render + tokenize, called once per `clean()` call before any
+generation) showed it costing **~1.5 s consistently**, with **no speedup
+across repeated identical calls** on the same loaded model/tokenizer (4x
+back-to-back calls: 1538/1490/1489/1491 ms) — ruling out template
+*compilation* (swift-transformers' `PreTrainedTokenizer` does cache
+compiled `Jinja.Template`s by string, confirmed in
+`Tokenizer.swift:compiledTemplate(for:)`) as the cost; it's template
+*rendering* itself. Render time scales with the message list: system+query
+only (2 messages) costs ~400 ms; the full system+3-few-shot-pairs+query (8
+messages, what every `clean()` call actually sends) costs ~1.5 s. Add
+prompt-prefill (~0.6–0.7 s for the resulting 290 tokens, in line with
+Python's prefill throughput) and the **fixed floor is ~2.1–2.4 s before any
+utterance-specific generation happens** — this is the real explanation for
+the reported "flat regardless of length" symptom: the few-shot prefix (which
+never changes) dominates over the short, variable utterance.
+
+This is upstream of `native/` (swift-transformers' Jinja interpreter,
+vendored via SPM) — we can't fix the interpreter itself. The available
+lever is architectural: avoid re-rendering + re-tokenizing + re-prefilling
+the fixed system+few-shot prefix on every call. `ChatSession` supports this
+via its `cache:` initializer (prebuilt `[KVCache]`, documented for exactly
+this "long shared context computed once" use case) — when a `.kvcache` is
+supplied, `ChatSession.streamMap` skips appending `history` to the rendered
+message list entirely, so `processor.prepare` only renders the new query.
+**Not implemented here**: correctly wiring it requires stripping the
+chat-template's per-call `<bos>` (Gemma's template always emits `{{
+bos_token }}`, which would double up when continuing an existing cache),
+verifying the KV-cache-continuation path produces numerically-equivalent
+output to a fresh prefill for a 4-bit QAT model, and dedicated test
+coverage for the clone/reuse semantics across calls — more scope than fits
+safely in this debugging pass. Flagging as the next concrete step to close
+the remaining gap to Python.
+
+### Before/after (same input, same machine)
+
+| Harness | Metric | Before | After |
+|---|---|---|---|
+| Bare `TokenIterator` (isolates generation) | generated tokens | 200 (ceiling) | **10** |
+| Bare `TokenIterator` | stop reason | `maxTokens` | **`eos(106)`** |
+| Bare `TokenIterator` | generation loop wall | ~6.1–6.3 s | **~0.76 s** |
+| Bare `TokenIterator` | decoded output | correct sentence + 190x `<end_of_turn>` spam | correct sentence, clean stop |
+| `ChatSession` (matches `GemmaBackend.clean()`) | wall (warm, 2nd call) | 3069–3126 ms | 2871–2894 ms |
+| `ChatSession` | generated tokens / stop reason | 10 / `.stop` (lucky pre-fix) | 10 / `.stop` (now deterministic) |
+| `chatTemplatePrepare` (unaffected by this fix) | — | ~1.49–1.58 s | ~1.49–1.51 s |
+
+Python oracle, same input: 290 prompt tokens, **11** generated tokens,
+stopped on EOS, wall **1.27 s**.
+
+**Net effect of the fix actually shipped:** removes a real, reproducible
+failure mode (200-token/~6–9 s stalls whenever the `<eos>`/`<end_of_turn>`
+argmax tie breaks the "wrong" way) and makes stopping behavior
+deterministic instead of relying on a near-tied logit. It does **not**
+close the full ~2.6x gap to Python — the dominant remaining cost
+(`chatTemplatePrepare`, ~1.5 s/call) is unchanged, because it was never
+about token count or EOS handling in the common case observed here. Golden
+eval stayed **10/10** (`GoldenEvalTests`, native) at ~3.0–3.4 s/case
+(dominated by the same fixed template-render + prefill floor); `ScribeTests`
+stayed **101/101** green.
+
+### Verification
+
+| Check | Result |
+|---|---|
+| `GoldenEvalTests` (native, 10 cases) | **10/10**, ~3.0–3.4 s/case (first case ~7.5 s incl. cold model load) |
+| `ScribeTests` (full suite) | **101/101**, 0 failures |
+| Temporary `GenPerfTests.swift` | deleted after use (loaded the full 4B model per test, not fast-suite material) |
 GoldenEvalTests: **10/10** (per-case 3.2–9.3 s, total 40.9 s).

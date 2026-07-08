@@ -30,9 +30,39 @@ final class GemmaBackend: UnloadableCleaner {
     init() {
         lazyModel = LazyModel(label: "gemma-cleanup") {
             try await #huggingFaceLoadModelContainer(
-                configuration: ModelConfiguration(id: "mlx-community/gemma-3-4b-it-qat-4bit")
+                configuration: GemmaBackend.modelConfiguration()
             )
         }
+    }
+
+    /// The `ModelConfiguration` used to load the cleanup model. Constructed
+    /// directly (not looked up via `LLMModelFactory`/`VLMModelFactory`'s
+    /// static registry) because `#huggingFaceLoadModelContainer` takes a
+    /// `ModelConfiguration` literal and never consults those registries —
+    /// `resolve(configuration:from:useLatest:progressHandler:)` in
+    /// MLXLMCommon/ModelFactory.swift uses the literal as-is. A bare
+    /// `ModelConfiguration(id:)` therefore does NOT pick up
+    /// `VLMRegistry.gemma3_4B_qat_4bit`'s `extraEOSTokens: ["<end_of_turn>"]`.
+    ///
+    /// Without `extraEOSTokens` set here, `ChatSession`'s stop-token set
+    /// (`buildStopTokenIds` in MLXLMCommon/Evaluate.swift) only contains the
+    /// tokenizer's single `eos_token` (`<eos>`, id 1, from
+    /// tokenizer_config.json) — NOT `<end_of_turn>` (id 106), which is the
+    /// token Gemma's chat template (and `generation_config.json`'s
+    /// multi-value `eos_token_id: [1, 106]`) actually uses to end a chat
+    /// turn. Confirmed via a temporary instrumented `TokenIterator` run
+    /// (see the cleanup-perf investigation, native/SPIKE-RESULTS.md): the
+    /// model correctly produced the cleaned sentence and then emitted
+    /// `<end_of_turn>` — but since that token wasn't a registered stop, it
+    /// was appended as ordinary output and generation continued, repeating
+    /// `<end_of_turn>` until hitting the 200-token ceiling (`stopReason:
+    /// .length`) instead of stopping after ~10 tokens like the validated
+    /// Python oracle (`stopReason: .stop`).
+    static func modelConfiguration() -> ModelConfiguration {
+        ModelConfiguration(
+            id: "mlx-community/gemma-3-4b-it-qat-4bit",
+            extraEOSTokens: ["<end_of_turn>"]
+        )
     }
 
     /// Builds the exact message sequence sent to Gemma for a cleanup
