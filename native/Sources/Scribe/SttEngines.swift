@@ -3,13 +3,18 @@ import Foundation
 import WhisperKit
 
 /// Idle-unloadable lazy holder for a model of type `M` — the Swift-native
-/// equivalent of Python's `ThreadBound*` model wrappers. An `actor` so
-/// concurrent `get()` callers during a slow first load are serialized rather
-/// than racing to construct the model twice.
+/// equivalent of Python's `ThreadBound*` model wrappers. An `actor`, but
+/// actor isolation on its own does NOT prevent double-loading: `get()`
+/// suspends at `try await factory()`, and the actor can interleave a second
+/// `get()` call in that gap, so two concurrent callers can both observe
+/// `model == nil` and both start a load. To keep "load-once" true, the first
+/// caller publishes an in-flight `Task` that later callers await instead of
+/// starting their own factory call — see `get()`.
 actor LazyModel<M> {
     private let label: String
     private let factory: () async throws -> M
     private var model: M?
+    private var inFlight: Task<M, Error>?
 
     init(label: String, factory: @escaping () async throws -> M) {
         self.label = label
@@ -17,20 +22,37 @@ actor LazyModel<M> {
     }
 
     /// Loads the model via `factory` on first call (logging load seconds)
-    /// and returns the cached instance on subsequent calls.
+    /// and returns the cached instance on subsequent calls. Concurrent
+    /// callers that arrive while a load is already underway await the same
+    /// in-flight `Task` instead of triggering their own `factory()` call, so
+    /// the model is constructed at most once even under a slow first load.
     func get() async throws -> M {
         if let model {
             return model
         }
-        let t0 = Date()
-        let loaded = try await factory()
-        let elapsed = Date().timeIntervalSince(t0)
-        print("[LazyModel] \(label) loaded in \(String(format: "%.2f", elapsed))s")
+        if let inFlight {
+            return try await inFlight.value
+        }
+        let task = Task { [factory, label] () throws -> M in
+            let t0 = Date()
+            let loaded = try await factory()
+            let elapsed = Date().timeIntervalSince(t0)
+            print("[LazyModel] \(label) loaded in \(String(format: "%.2f", elapsed))s")
+            return loaded
+        }
+        inFlight = task
+        defer { inFlight = nil }
+        let loaded = try await task.value
         model = loaded
         return loaded
     }
 
     /// Drops the cached reference so the next `get()` reloads from scratch.
+    /// Deliberately leaves any in-flight load alone: if a load started
+    /// before `unload()` is still running, it will finish and repopulate
+    /// `model` afterward rather than being cancelled. That's an acceptable
+    /// (and simplest-to-reason-about) outcome — `unload()` is a hint to
+    /// drop idle memory, not a hard guarantee that no load is in progress.
     func unload() {
         model = nil
     }

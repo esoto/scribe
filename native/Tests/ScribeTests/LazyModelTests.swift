@@ -7,8 +7,12 @@ import XCTest
 private final class CountingFactory: @unchecked Sendable {
     private(set) var calls = 0
     var shouldFail = false
+    var delay: Duration?
 
     func make() async throws -> String {
+        if let delay {
+            try? await Task.sleep(for: delay)
+        }
         calls += 1
         if shouldFail {
             throw TestError(message: "factory failed")
@@ -78,6 +82,22 @@ final class LazyModelTests: XCTestCase {
         }
         let loaded = await model.isLoaded
         XCTAssertFalse(loaded)
+    }
+
+    func testConcurrentGetLoadsOnlyOnce() async throws {
+        let factory = CountingFactory()
+        factory.delay = .milliseconds(100)
+        let model = LazyModel(label: "test") { try await factory.make() }
+
+        async let a = model.get()
+        async let b = model.get()
+        let (first, second) = try await (a, b)
+
+        XCTAssertEqual(first, "model-1")
+        XCTAssertEqual(second, "model-1")
+        XCTAssertEqual(factory.calls, 1)
+        let loaded = await model.isLoaded
+        XCTAssertTrue(loaded)
     }
 
     func testPreloadSwallowsFactoryError() async {
