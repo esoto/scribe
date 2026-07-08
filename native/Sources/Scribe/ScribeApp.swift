@@ -17,13 +17,14 @@ final class AppModel: ObservableObject {
     let engines: [String: UnloadableEngine]
     let cleaner: GemmaBackend
     let idleTracker: IdleTracker
-    let logger: FileLogger
+    nonisolated let logger: FileLogger
 
     private(set) var pipeline: DictationPipeline!
     private var hotkeyMonitor: HotkeyMonitor!
 
     @Published private(set) var state: PipelineState = .idle
-    @Published var grantsOk: Bool = true
+    // Task 14's onboarding probes will keep this current for mic/accessibility.
+    @Published var grants: GrantStatus = GrantStatus(microphone: false, accessibility: false, inputMonitoring: false)
     @Published private(set) var activeEngineName: String
     @Published private(set) var cleanupEnabled: Bool
     @Published private(set) var launchAtLoginEnabled: Bool = LoginItem.isEnabled
@@ -32,6 +33,7 @@ final class AppModel: ObservableObject {
     private let pipelineConfig: PipelineConfig
 
     var glyph: String { glyphFor(state) }
+    var grantsOk: Bool { grants.microphone && grants.accessibility && grants.inputMonitoring }
 
     init() {
         let defaults = UserDefaults.standard
@@ -120,9 +122,10 @@ final class AppModel: ObservableObject {
     private func start() {
         do {
             try hotkeyMonitor.install()
+            grants.inputMonitoring = true
         } catch {
             logger.log("hotkey install failed: \(error)")
-            grantsOk = false
+            grants.inputMonitoring = false
         }
 
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { [logger] granted, error in
@@ -140,11 +143,18 @@ final class AppModel: ObservableObject {
     private func preloadAtStartup() {
         let engine = engines[activeEngineName]
         let cleaner = self.cleaner
+        let cleanupEnabled = self.cleanupEnabled
         let logger = self.logger
         Task {
             let t0 = Date()
             await engine?.preload()
-            await cleaner.preload()
+            // Mirrors the Python reference (src/scribe/app.py's load_models),
+            // which only constructs/preloads the cleaner when cleanup is
+            // enabled — the Swift cleaner is a non-optional stored property,
+            // so gate the preload on the live cleanup-enabled state instead.
+            if cleanupEnabled {
+                await cleaner.preload()
+            }
             let elapsed = Date().timeIntervalSince(t0)
             logger.log("models ready in \(String(format: "%.1f", elapsed))s")
         }
@@ -228,11 +238,14 @@ final class AppModel: ObservableObject {
 
         if let engine = engines[activeEngineName] {
             let cleaner = self.cleaner
+            let cleanupEnabled = self.cleanupEnabled
             Task.detached {
                 if await !engine.isLoaded {
                     await engine.preload()
                 }
-                if await !cleaner.isLoaded {
+                // Gated on cleanup-enabled, same as preloadAtStartup() —
+                // see the comment there for the Python-reference rationale.
+                if cleanupEnabled, await !cleaner.isLoaded {
                     await cleaner.preload()
                 }
             }
