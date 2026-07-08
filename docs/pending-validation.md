@@ -70,6 +70,60 @@ voice, accent, and mic:
 | **MLX weights bind to the loading thread's GPU stream; any other thread gets "There is no Stream(gpu, N) in current thread"** | reproduced in 5 isolated experiments | `MlxThread` owns all loads + inference; `ThreadBound*` wrappers marshal calls; cross-thread regression test in tier-2 |
 | `CGEventPost` without Accessibility is SILENTLY swallowed — no error, no paste | "dictation ok" logged but no text visible | Startup logs + requests post-event access (`CGPreflightPostEventAccess`) |
 
+## Native app (scribe-native) — cutover checklist
+
+Branch `claude/scribe-native`. Status: **built** (`xcodebuild build` clean,
+no warnings), **96/96 unit tests green**, **model suite 8/8**, **golden eval
+parity 10/10** (matches the Python oracle byte-for-byte on chat-template
+structure — see `native/SPIKE-RESULTS.md` "Task 15 parity run"). All
+automated reviews clean. What's left is the same category as the Python
+app's own §2 above: real voice, your screen, your click.
+
+### Manual QA still pending (from Task 14 handoff)
+
+The native onboarding + hotkey adapters were built and unit-tested but never
+exercised through a real launch. Confirm on first real run:
+
+- [ ] **Real TCC prompt flow on first launch** — this Mac's grants are bound
+      to the Python `scribe` process, not the native bundle (`dev.esoto.scribe`),
+      so the native app should show all three permissions ✗ and trigger the
+      actual OS dialogs (Microphone, Accessibility, Input Monitoring) — not
+      just the unit-tested `OnboardingState` logic.
+- [ ] **Auto-open at launch** — the onboarding window should open itself
+      when grants are missing at true app launch, without the user clicking
+      the menu bar icon first (`MenuBarLabel.onAppear`, unobserved live as of
+      Task 14).
+- [ ] **Live hotkey activation after granting Input Monitoring** — granting
+      mid-session should install the hotkey tap without an app restart; the
+      row's own checkmark lags up to ~2 s behind the grant (poll cadence, by
+      design, not a bug).
+- [ ] **Window-close poll cancellation** — closing the onboarding window
+      before all grants land should stop the 2 s poll loop cleanly (no
+      leaked timer/task).
+
+### Cutover steps (spec §8)
+
+1. **Side-by-side validation on Right ⌥** — the native app already defaults
+   to Right ⌥ (`AppSettings.hotkey`) specifically so it can run alongside the
+   Python app (Right ⌘) without double-pasting. Run both.
+2. **Rule-of-five human check** — 5 English + 5 Spanish real dictations
+   through *both* apps, outputs compared. This is the one gate no automated
+   suite can clear; golden eval parity (10/10) covers the cleanup model in
+   isolation, not the full mic → STT → cleanup → paste pipeline on real
+   speech.
+3. **Retire the Python agent** — `make uninstall-agent`.
+4. **Switch the native hotkey to Right ⌘** — in the native app's Settings,
+   change the hotkey from Right ⌥ to `right_command`.
+5. **Enable Launch at Login** — native Settings toggle
+   (`SMAppService.mainApp`), replacing the Python launchd plist.
+
+### Rollback
+
+One command in reverse: re-run `make install-agent` to bring the Python
+agent back on Right ⌘. The Python app is never deleted — both apps stay
+in-repo permanently, Python as the oracle + eval harness the golden set and
+model tests validate against.
+
 ## 4. Open experiments (non-blocking, when you feel like it)
 
 - **apple-fm-sdk cleanup backend A/B** — official Python bindings for Apple's
