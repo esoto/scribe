@@ -56,12 +56,12 @@ final class Recorder: RecorderLike {
         // Clear first so a re-arm without an intervening disarm() discards
         // whatever had accumulated, same as the Python reference.
         buffer.clear()
-        lock.lock()
-        armed = true
-        lock.unlock()
         if !engineControl.isRunning {
             try engineControl.start()
         }
+        lock.lock()
+        armed = true
+        lock.unlock()
     }
 
     func disarm() -> [Float] {

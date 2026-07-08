@@ -85,4 +85,36 @@ final class RingBufferTests: XCTestCase {
         XCTAssertFalse(pcm.isEmpty)
         XCTAssertTrue(pcm.allSatisfy { $0 == 1.0 })
     }
+
+    /// Port of test_arm_reopens_dead_stream: if the engine died between
+    /// sessions, the next arm() must restart it.
+    func testArmRestartsDeadEngine() throws {
+        let engineControl = FakeEngineControl()
+        let r = Recorder(engineControl: engineControl)
+
+        try r.arm()
+        XCTAssertEqual(engineControl.startCalls, 1)
+
+        // Simulate the engine dying between sessions (device unplugged, etc).
+        engineControl.running = false
+
+        XCTAssertNoThrow(try r.arm())
+        XCTAssertEqual(engineControl.startCalls, 2)
+    }
+
+    /// Port of test_ensure_stream_raises_when_reopen_fails: arm() surfaces
+    /// the start failure AND stays fail-closed — after a failed arm() the
+    /// recorder must not capture anything (armed remained false).
+    func testArmThrowsWhenEngineStartFailsAndStaysDisarmed() {
+        let engineControl = FakeEngineControl()
+        engineControl.failStart = true
+        let r = Recorder(engineControl: engineControl)
+
+        XCTAssertThrowsError(try r.arm())
+
+        // Fail-closed: the failed arm() must have left armed == false, so
+        // ingested audio is dropped and disarm() drains nothing.
+        r.ingest(chunk(1.0))
+        XCTAssertTrue(r.disarm().isEmpty)
+    }
 }
