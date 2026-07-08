@@ -61,6 +61,9 @@ final class DictationPipeline {
     private let runner: (@escaping () async -> Void) -> Void
     private let onState: (PipelineState) -> Void
     private let onNotice: (String) -> Void
+    /// Optional diagnostic sink for per-dictation stage timings. Never carries
+    /// transcript text — only durations, engine name, and stage labels.
+    private let onLog: ((String) -> Void)?
     private let saveFailedAudio: ([Float]) -> Void
 
     private(set) var engineName: String
@@ -81,7 +84,8 @@ final class DictationPipeline {
         onState: @escaping (PipelineState) -> Void,
         onNotice: @escaping (String) -> Void,
         saveFailedAudio: @escaping ([Float]) -> Void,
-        cleanupEnabled: Bool = true
+        cleanupEnabled: Bool = true,
+        onLog: ((String) -> Void)? = nil
     ) {
         self.recorder = recorder
         self.stt = stt
@@ -96,6 +100,7 @@ final class DictationPipeline {
         self.onNotice = onNotice
         self.saveFailedAudio = saveFailedAudio
         self.cleanupEnabled = cleanupEnabled
+        self.onLog = onLog
     }
 
     // MARK: - Public API
@@ -146,6 +151,7 @@ final class DictationPipeline {
         }
 
         let t0 = clock()
+        let sttStart = t0
         let raw: String
         do {
             raw = Gates.normalize(try await stt.transcribe(pcm))
@@ -161,6 +167,8 @@ final class DictationPipeline {
             return
         }
 
+        let sttMs = Int((clock() - sttStart) * 1000)
+
         guard !raw.isEmpty else {
             onNotice("Nothing transcribed")
             return
@@ -168,12 +176,16 @@ final class DictationPipeline {
 
         var final = raw
         var cleaned = false
+        var cleanupMs = 0
         if let cleaner, Gates.shouldClean(raw, enabled: cleanupEnabled, minWords: config.minWords) {
+            let cleanStart = clock()
             if let out = await tryClean(raw, cleaner: cleaner) {
                 final = out
                 cleaned = true
             }
+            cleanupMs = Int((clock() - cleanStart) * 1000)
         }
+        onLog?("dictation: engine=\(engineName) stt=\(sttMs)ms cleanup=\(cleanupMs)ms cleaned=\(cleaned) chars=\(final.count)")
 
         do {
             try paster.paste(final)

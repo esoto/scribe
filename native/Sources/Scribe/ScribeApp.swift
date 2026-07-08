@@ -111,7 +111,8 @@ final class AppModel: ObservableObject {
                     self?.saveFailedAudio(pcm)
                 }
             },
-            cleanupEnabled: settings.cleanupEnabled
+            cleanupEnabled: settings.cleanupEnabled,
+            onLog: { [logger] line in logger.log(line) }
         )
 
         self.hotkeyMonitor = HotkeyMonitor(
