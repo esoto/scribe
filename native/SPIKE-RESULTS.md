@@ -451,3 +451,114 @@ prefill are fully eliminated from the steady-state path.
 - Warm-up cost (~4s: 2 dummy renders + prefix prefill + parity gate) is paid once per
   process, on the first real `clean()` call — this inflates that first call's latency
   but is a one-time cost, not per-utterance.
+
+## Cleanup speed — prefix cache: FAST-tier per-call boundary guard (2026-07-08)
+
+**Trigger:** adversarial review of the prefix-reuse optimization above found the FAST
+tier's residual risk (the "accepted risk of the FAST tier by design" concern noted above)
+was sharper than described: the fixed `wrapOverlap` (7) was derived once from the EN/ES
+warm-up samples and then applied unconditionally to every call's tokens via
+`tokens.removeFirst(min(wrapOverlap, tokens.count))`, with **no per-call check** that the
+tokens actually being discarded were the ones the warm-up gate assumed. BPE tokenization
+at the prefix/content JOIN is not guaranteed concatenative — a leading digit, a leading
+Spanish `¿`/`¡`, a very short single-word utterance, or a leading emoji could tokenize the
+shared `<start_of_turn>user\n<transcript>\n` wrap-open text differently than the two
+warm-up probes did, which would silently strip the wrong tokens (eating real content or
+leaving a stray wrap token) — a deterministic wrong output that would still pass the 10
+golden cases (none of which happen to trigger it).
+
+### Fix (C1, critical)
+
+`generateCleaned`'s FAST branch (`GemmaBackend.swift`) now verifies the boundary before
+trusting the strip: it slices the `wrapOverlap` tokens about to be removed and requires
+them to equal `warm.prefixTokens.suffix(wrapOverlap)` — the literal tail of the warm
+prefix — before calling `tokens.removeFirst(wrapOverlap)`. On any mismatch (or if there
+aren't even `wrapOverlap` tokens to check), it logs
+`"[GemmaBackend] cleanup: fast-path boundary mismatch, using full render"` and falls back
+to `runFreshGeneration` — the same always-correct, uncached full-render path used
+elsewhere as the SAFE/no-warm-up fallback. Worst case for a pathological input is a
+slower call; it can never silently corrupt the prompt. The `<bos>` strip needs no
+equivalent guard (unchanged) — `<bos>` is a reserved special-token id that can never
+appear as ordinary content, so stripping it when present is unconditionally safe. The
+TAIL side (content + the closing `</transcript>` tag) also needs no guard: the isolated
+single-turn render tokenizes `{text}` and its trailing `</transcript>` together, in
+context, in exactly the arrangement fed to the model — there's no seam there for a BPE
+merge to disagree across, unlike the prefix boundary where two independently rendered
+pieces (warm prefix + incremental render) are concatenated. Both points are now recorded
+as code comments at the guard site.
+
+### Test coverage (I1, important)
+
+The always-correct fallback (`runFreshGeneration`) was previously exercised only
+indirectly (whenever `warmPrefix` is `nil`, i.e. before warm-up completes) and had no
+dedicated test — everything silently depended on it working whenever a guard tripped.
+`runFreshGeneration` is `private`, so it isn't reachable directly from
+`@testable import Scribe` in a different file; instead, added
+`native/Tests/ScribeModelTests/FastPathBoundaryTests.swift` (real-model tier, not the fast
+`ScribeTests` suite) with three tests that drive the exact C1 risk inputs end-to-end
+through the real, unmodified `clean()`:
+
+- a Spanish input starting with `¿` ("¿crees que deberíamos eh enviarlo el viernes?"),
+- an English input starting with a bare digit ("2 things we need um to review before
+  friday"),
+- a very short single-word utterance ("sí").
+
+Each asserts the cleaned output contains the expected content, has the filler word
+removed, and is well within a sane length bound (`< 200` chars) — a corrupted
+prefix/content join or a broken stop-token setup would either garble the content
+(failing the substring checks) or run away without finding `<end_of_turn>`/`<eos>`
+(failing the length check), so these tests would catch a regression in either the guard
+or the fallback path even though — see Verification below — none of the three inputs
+actually tripped the guard on this tokenizer.
+
+(Minor test-writing note: the digit test initially asserted the literal `"2"` appeared in
+the output and failed — the model legitimately spelled it out as `"Two things we need to
+review before Friday."`, a stylistic cleanup choice, not a boundary corruption. Loosened
+the assertion to accept either `"2"` or `"two"`.)
+
+### I2: `ModelContainer.perform` concurrency mechanism (confirmed, no code change needed)
+
+Read the vendored `MLXLMCommon/Utilities/SerialAccessContainer.swift`
+(`~/Library/Developer/Xcode/DerivedData/*/SourcePackages/checkouts/mlx-swift-lm/...`).
+`ModelContainer.perform` calls `SerialAccessContainer.read`, which funnels through a
+private `AsyncMutex` — an `actor` that hand-rolls `isLocked` plus a `CheckedContinuation`
+waiter queue (`lock()`/`unlock()`), NOT bare actor-reentrancy. Its own doc comment states
+this exists specifically because "an `actor` does not guarantee exclusive access for the
+duration of an `async` function" — i.e. this is deliberately a real serial lock held for
+the whole `perform` body, addressing exactly the race the finding worried about. This
+confirms the existing `@unchecked Sendable` justification in `GemmaBackend`'s class doc
+comment was already correct; added a short comment citing this source next to it. No
+additional protection around warm-up idempotency was needed — two `clean()` calls can
+never interleave their access to `warmPrefix`/`warmupAttempted`.
+
+### Verification
+
+| Check | Result |
+|---|---|
+| `GoldenEvalTests` (10 cases) | **10/10 passed**, `fastPath=true wrapOverlap=7` — per-case: 10173, 1379, 1506, 864, 970, 1074, 1021, 1048, 883, 917 ms (first case includes cold model load; steady-state ~0.9–1.5s, consistent with the ~1.15s baseline established above) |
+| Fallback triggered on any golden case? | **No** — no `"boundary mismatch"` log line in the run |
+| `FastPathBoundaryTests` (3 new tests: `¿`-leading, digit-leading, short single-word) | **3/3 passed** |
+| Fallback triggered on any of the 3 stress inputs? | **No** — `wrapOverlap=7` tokenized correctly for all three on this tokenizer; the guard *proved* correctness per call rather than needing to catch a real mismatch |
+| `ScribeTests` (full suite) | **101/101 passed**, 0 failures |
+
+The guard never fired in this verification pass — expected and fine per the task's own
+framing: the point of a per-call guard is that it **proves** correctness for every input
+that does tokenize consistently, and safely degrades to a slower-but-correct path for any
+future input that doesn't, rather than relying on the one-time warm-up gate's two samples
+generalizing to every possible transcript.
+
+### Concerns
+
+- The three new stress tests happened not to trip the guard on the current tokenizer/model
+  pairing — they're regression coverage for the guard-and-fallback mechanism (via output
+  correctness + length bounds), not a demonstration that the fallback path executes. If a
+  future tokenizer/model update ever does trip the guard, the
+  `"[GemmaBackend] cleanup: fast-path boundary mismatch, using full render"` log line is
+  the signal to watch for in production logs.
+- `runFreshGeneration` still has no test that observes it running with the wrap-overlap
+  guard specifically causing the fallback (as opposed to `warmPrefix == nil` or the SAFE
+  prefix-mismatch guard) — synthetically forcing that would require exposing private
+  `GemmaBackend` state to tests, which wasn't done here to avoid weakening encapsulation
+  for test-only access. The three new tests are the practical, non-invasive substitute the
+  task's own fallback framing allows for ("if forcing a guard-trip synthetically is
+  impractical, at minimum...").

@@ -72,10 +72,16 @@ private struct WarmPrefix {
 ///   that call.
 /// - **FAST tier** (opportunistic): additionally skips the full
 ///   8-message-conversation render by rendering only the incremental
-///   turn (~0.4s vs ~1.5s). This is trusted ONLY after an empirical,
-///   one-time startup parity gate (EN + ES samples) proves
-///   `prefixTokens + incrementalTokens == fullRenderTokens` exactly; any
-///   mismatch permanently falls back to SAFE for the rest of the process.
+///   turn (~0.4s vs ~1.5s). The wrap-overlap amount is derived once from
+///   an empirical, one-time startup parity gate (EN + ES samples) proving
+///   `prefixTokens + incrementalTokens == fullRenderTokens` exactly for
+///   those samples — but is re-verified on THIS call's actual tokens every
+///   time before being trusted (see `generateCleaned`), since BPE
+///   tokenization at the prefix/content boundary isn't guaranteed
+///   concatenative for every possible input. Any per-call mismatch falls
+///   back to a fresh, uncached generation for just that call (never a
+///   silently wrong prompt); a startup gate disagreement between the EN/ES
+///   samples permanently falls back to SAFE for the rest of the process.
 ///
 /// `@unchecked Sendable`: `warmPrefix`/`warmupAttempted` are plain mutable
 /// stored properties, not actor-isolated. That's safe because every read
@@ -87,6 +93,17 @@ private struct WarmPrefix {
 /// though nothing here is compiler-checked `Sendable`. Mirrors
 /// `FileLogger`/`SerialWorker`'s use of the same pattern elsewhere in this
 /// target.
+///
+/// Confirmed from the vendored source
+/// (`MLXLMCommon/Utilities/SerialAccessContainer.swift`):
+/// `SerialAccessContainer.read`/`.update` funnel through a private
+/// `AsyncMutex` — an `actor` that hand-rolls `isLocked` + a
+/// `CheckedContinuation` waiter queue, NOT bare actor-reentrancy — whose
+/// own doc comment states it exists specifically because "an `actor` does
+/// not guarantee exclusive access for the duration of an `async`
+/// function." So this is a real serial lock held for the whole
+/// `container.perform` body, not a reentrant actor that could interleave
+/// two `clean()` calls at an internal `await`.
 final class GemmaBackend: UnloadableCleaner, @unchecked Sendable {
     private let lazyModel: LazyModel<ModelContainer>
 
@@ -380,10 +397,16 @@ final class GemmaBackend: UnloadableCleaner, @unchecked Sendable {
     ///   ONLY the incremental user turn (a 1-message template render,
     ///   ~0.4s vs ~1.5s for the full 8-message conversation) and strips
     ///   the leading `<bos>` the template re-emits for an isolated
-    ///   single-turn render, plus the validated wrap-overlap. Trusted via
-    ///   the one-time parity gate computed at warm-up
-    ///   (`parityGateOverlap`) — never re-verified per call, since doing
-    ///   so would require the full render this tier exists to avoid.
+    ///   single-turn render (always safe — `<bos>` is a reserved special
+    ///   token id that never appears as ordinary content), plus the
+    ///   wrap-overlap amount established by the one-time warm-up parity
+    ///   gate (`parityGateOverlap`). Unlike the `<bos>` strip, the
+    ///   wrap-overlap strip IS re-verified per call — the tokens about to
+    ///   be stripped must equal the warm prefix's corresponding suffix —
+    ///   before being trusted; a mismatch falls back to the full render.
+    ///   This check is cheap (a small array comparison, not a render), so
+    ///   it doesn't defeat the point of this tier the way re-rendering
+    ///   would.
     /// - SAFE tier: renders the full conversation exactly as `clean()`
     ///   always did, then feeds only the suffix past the fixed prefix — a
     ///   literal suffix of the real render, so parity is exact by
@@ -412,7 +435,40 @@ final class GemmaBackend: UnloadableCleaner, @unchecked Sendable {
                 tokens.removeFirst()
             }
             if wrapOverlap > 0 {
-                tokens.removeFirst(min(wrapOverlap, tokens.count))
+                // The warm-up parity gate (`parityGateOverlap`) proved
+                // `wrapOverlap` correct only for the two warm-up samples —
+                // BPE tokenization at the prefix<->content JOIN is not
+                // guaranteed concatenative for every possible input. A
+                // leading digit, a leading Spanish "¿"/"¡", a very short
+                // single-word utterance, or a leading emoji can tokenize
+                // the shared `<start_of_turn>user\n<transcript>\n`
+                // open-wrap text differently once it's adjacent to THIS
+                // call's specific content, even though the warm-up samples
+                // agreed. So verify per call, on the actual token ids,
+                // before trusting the strip — never assume it from the
+                // one-time warm-up gate alone. Worst case on a mismatch is
+                // a slower fallback to the always-correct full render;
+                // never a silently wrong prompt.
+                //
+                // Only the JOIN (prefix tail <-> incremental head) needs
+                // this guard. The TAIL side (content + the closing
+                // `</transcript>` tag) needs no equivalent check: the
+                // isolated single-turn render tokenizes `{text}` and its
+                // trailing `</transcript>` together, in-context, in
+                // exactly the arrangement fed to the model — there's no
+                // seam there for a BPE merge to disagree across, unlike
+                // the prefix boundary where two independently rendered
+                // pieces (warm prefix + incremental render) are
+                // concatenated.
+                let toStrip = Array(tokens.prefix(wrapOverlap))
+                guard tokens.count >= wrapOverlap,
+                    toStrip == Array(warm.prefixTokens.suffix(wrapOverlap))
+                else {
+                    print("[GemmaBackend] cleanup: fast-path boundary mismatch, using full render")
+                    return try await GemmaBackend.runFreshGeneration(
+                        chat: chat, parameters: parameters, context: context)
+                }
+                tokens.removeFirst(wrapOverlap)
             }
             guard !tokens.isEmpty else {
                 return try await GemmaBackend.runFreshGeneration(
