@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import UserNotifications
 
@@ -23,12 +24,14 @@ final class AppModel: ObservableObject {
     private var hotkeyMonitor: HotkeyMonitor!
 
     @Published private(set) var state: PipelineState = .idle
-    // Task 14's onboarding probes will keep this current for mic/accessibility.
+    // Seeded from TCC probes in start(); the onboarding window's 2 s poll
+    // loop (OnboardingWindow.swift) keeps this current thereafter, and
+    // live-activates the hotkey via activateHotkeyIfNeeded() on an
+    // inputMonitoring false→true flip.
     @Published var grants: GrantStatus = GrantStatus(microphone: false, accessibility: false, inputMonitoring: false)
     @Published private(set) var activeEngineName: String
     @Published private(set) var cleanupEnabled: Bool
     @Published private(set) var launchAtLoginEnabled: Bool = LoginItem.isEnabled
-    @Published var showDoctor: Bool = false
 
     private let pipelineConfig: PipelineConfig
 
@@ -120,6 +123,13 @@ final class AppModel: ObservableObject {
     /// kicks off the background preload + idle-unload loops. Called once
     /// from `init()`, on the main thread (required for the CGEventTap).
     private func start() {
+        // Microphone/accessibility probes are synchronous reads of the
+        // cached TCC status (no prompt) — seed them up front so the
+        // launch-time auto-open decision (OnboardingState.missing) is
+        // correct even before the onboarding window's poll loop starts.
+        grants.microphone = TCC.microphoneGranted()
+        grants.accessibility = TCC.accessibilityGranted()
+
         do {
             try hotkeyMonitor.install()
             grants.inputMonitoring = true
@@ -295,19 +305,75 @@ final class AppModel: ObservableObject {
         pasteboard.set(text)
     }
 
-    func openDoctor() {
-        showDoctor = true
+    // MARK: - Onboarding
+
+    /// Live-activates the hotkey tap right after the user grants Input
+    /// Monitoring from the onboarding window — no app restart required.
+    /// Called from `OnboardingWindow`'s poll loop on an inputMonitoring
+    /// false→true flip. Must run on the main thread, same contract as
+    /// `HotkeyMonitor.install`/`reinstall`; `AppModel` being `@MainActor`
+    /// guarantees that for every call site.
+    func activateHotkeyIfNeeded() {
+        do {
+            try hotkeyMonitor.reinstall()
+            grants.inputMonitoring = true
+        } catch {
+            logger.log("hotkey reinstall failed: \(error)")
+            grants.inputMonitoring = false
+        }
     }
 }
+
+/// Scene id for the onboarding/Doctor window, shared between the
+/// launch-time auto-open hook and the menu's "Setup / Doctor…" item.
+let onboardingWindowID = "onboarding"
 
 @main
 struct ScribeApp: App {
     @StateObject private var model = AppModel()
 
     var body: some Scene {
-        MenuBarExtra(model.glyph) {
+        MenuBarExtra {
             MenuBarView(model: model)
+        } label: {
+            // `MenuBarExtra`'s content closure (the menu itself) only
+            // builds lazily when the user opens it, so it can't host a
+            // launch-time hook. The label, in contrast, is resolved
+            // immediately — it's what's drawn in the menu bar — so its
+            // `onAppear` is where we auto-open onboarding when a
+            // permission is missing at launch.
+            MenuBarLabel(model: model)
         }
         .menuBarExtraStyle(.menu)
+
+        Window("scribe setup", id: onboardingWindowID) {
+            OnboardingWindow(model: model)
+        }
     }
+}
+
+/// Menu bar glyph label. Doubles as the launch-time auto-open trigger for
+/// the onboarding window (see the comment on `ScribeApp.body`).
+private struct MenuBarLabel: View {
+    @ObservedObject var model: AppModel
+    @Environment(\.openWindow) private var openWindow
+    @State private var didAutoOpen = false
+
+    var body: some View {
+        Text(model.glyph)
+            .onAppear {
+                guard !didAutoOpen else { return }
+                didAutoOpen = true
+                guard !OnboardingState.missing(model.grants).isEmpty else { return }
+                openOnboarding(openWindow)
+            }
+    }
+}
+
+/// Brings scribe to the foreground and opens the onboarding window.
+/// `MenuBarExtra` apps are `LSUIElement` (no Dock icon, no automatic
+/// activation), so opened windows can otherwise appear behind other apps.
+func openOnboarding(_ openWindow: OpenWindowAction) {
+    NSApp.activate(ignoringOtherApps: true)
+    openWindow(id: onboardingWindowID)
 }

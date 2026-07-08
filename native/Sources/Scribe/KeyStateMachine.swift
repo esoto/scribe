@@ -26,6 +26,15 @@ enum HotKey: String, CaseIterable {
         case .f13: return nil
         }
     }
+
+    /// Human-readable label for the onboarding "try it" prompt.
+    var displayName: String {
+        switch self {
+        case .rightCommand: return "Right \u{2318}"
+        case .rightOption: return "Right \u{2325}"
+        case .f13: return "F13"
+        }
+    }
 }
 
 enum KeyAction {

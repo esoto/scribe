@@ -17,6 +17,12 @@ final class KeyStateMachineTests: XCTestCase {
         XCTAssertNil(HotKey.f13.modifierMask)
     }
 
+    func testDisplayNameTable() {
+        XCTAssertEqual(HotKey.rightCommand.displayName, "Right \u{2318}")
+        XCTAssertEqual(HotKey.rightOption.displayName, "Right \u{2325}")
+        XCTAssertEqual(HotKey.f13.displayName, "F13")
+    }
+
     func testRightCommandDownUp() {
         let m = KeyStateMachine(key: .rightCommand)
         XCTAssertEqual(m.handle(eventType: 12, keycode: 54, flags: cmd), .down)

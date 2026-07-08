@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// Menu bar UI (SwiftUI/MenuBarExtra). Pure helpers up top; the view below
@@ -33,6 +34,7 @@ private let engineOptions: [(id: String, label: String)] = [
 
 struct MenuBarView: View {
     @ObservedObject var model: AppModel
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         Menu("Engine") {
@@ -74,7 +76,7 @@ struct MenuBarView: View {
         Divider()
 
         Button("Setup / Doctor…") {
-            model.openDoctor()
+            openOnboarding(openWindow)
         }
 
         Toggle(
