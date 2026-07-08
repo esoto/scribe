@@ -191,3 +191,9 @@ for every turn.
 Timings (warm, model cached): `GoldenEvalTests` full run ~37 s (10 cases, ~3 s each
 after ~5 s model load); `ScribeTests` full suite ~0.6 s (all pure-logic, no model
 loads); `PromptDumpTests` single-case dump ~6 s.
+
+### Full-scheme post-fix run (controller verification, 2026-07-07 ~21:5x)
+
+`xcodebuild test -scheme ScribeModelTests` (unscoped, all models cached): **8/8, TEST SUCCEEDED, 51.7 s total.**
+FixtureTests 7/7 — concurrency 0.90 s, Parakeet en 0.13 s / es 0.12 s / silence 0.09 s, Whisper en 9.5 s (cached; earlier 2596 s figure was the one-time model download).
+GoldenEvalTests: **10/10** (per-case 3.2–9.3 s, total 40.9 s).
