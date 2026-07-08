@@ -43,9 +43,17 @@ final class GemmaBackend: UnloadableCleaner {
 
             // Build few-shot history from CleanupPrompt.fewShots, mapping each
             // (input, output) pair to [.user(input), .assistant(output)] messages.
+            // The user turn must go through CleanupPrompt.wrap(), same as the
+            // real query below — Python's build_messages() (src/scribe/cleanup/base.py)
+            // wraps every few-shot AND real user turn in <transcript> tags. Leaving
+            // the few-shots unwrapped rendered a prompt where only the final query
+            // carried the <transcript> markup the examples never demonstrated,
+            // which measurably weakened the "never translate" instruction (2/10
+            // golden cases regressed, both English inputs translated to Spanish;
+            // fixed in Task 15).
             let history = CleanupPrompt.fewShots.flatMap { input, output in
                 [
-                    Chat.Message.user(input),
+                    Chat.Message.user(CleanupPrompt.wrap(input)),
                     Chat.Message.assistant(output)
                 ]
             }
