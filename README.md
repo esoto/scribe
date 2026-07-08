@@ -15,6 +15,55 @@ run once with `HF_HUB_OFFLINE=0 make run`.
 
 Design and evidence: [docs/superpowers/specs/2026-07-06-scribe-dictation-app-design.md](docs/superpowers/specs/2026-07-06-scribe-dictation-app-design.md)
 
+## Native app (scribe.app)
+
+A Swift rewrite (`native/`) is replacing the Python app below. It runs as a
+real `.app` bundle with its own TCC identity — System Settings shows
+**"scribe"** with an icon in Microphone / Accessibility / Input Monitoring,
+not a hidden `Python.app` inside a Homebrew framework, and grants survive
+`.venv` rebuilds because there's no `.venv`. Same product behavior: Parakeet
+v3 → Gemma 3 4B cleanup → paste, same gates, same cleanup prompt, same
+golden eval as the parity oracle.
+
+Design: [docs/superpowers/specs/2026-07-07-scribe-native-design.md](docs/superpowers/specs/2026-07-07-scribe-native-design.md)
+
+**Build:**
+
+```sh
+brew install xcodegen   # if not already installed
+cd native
+xcodegen generate
+xcodebuild -project Scribe.xcodeproj -scheme Scribe \
+  -destination 'platform=macOS' \
+  -skipPackagePluginValidation -skipMacroValidation build
+```
+
+The built `.app` lands under DerivedData, not in `native/`. Find it with:
+
+```sh
+xcodebuild -project Scribe.xcodeproj -scheme Scribe -showBuildSettings \
+  | grep BUILT_PRODUCTS_DIR
+```
+
+— or skip the CLI entirely and open `native/Scribe.xcodeproj` in Xcode, ⌘R.
+
+**First run:** a setup window opens automatically and walks through three
+system permission dialogs (Microphone, Accessibility, Input Monitoring).
+Each grant auto-adds "scribe" to the right System Settings pane, a live
+checkmark lands within ~2 s of granting, and nothing needs a restart —
+Input Monitoring installs the hotkey tap live, mid-session.
+
+**Dev hotkey:** the native app defaults to **Right ⌥**, not Right ⌘, so it
+can run side by side with the Python app below during validation without
+double-pasting. See `docs/pending-validation.md` for the cutover checklist
+and the switch to Right ⌘.
+
+---
+
+Everything from here down describes the Python app — *(reference
+implementation — the native app is replacing it; Python stays as oracle +
+eval harness)*.
+
 ## Install
 
 ```sh
