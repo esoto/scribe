@@ -562,3 +562,46 @@ generalizing to every possible transcript.
   for test-only access. The three new tests are the practical, non-invasive substitute the
   task's own fallback framing allows for ("if forcing a guard-trip synthetically is
   impractical, at minimum...").
+
+## AFM cleanup experiment (2026-07-08)
+
+**Question:** with the evolved `CleanupPrompt` (few-shots + guided output) rather than the
+bare system prompt the 2026-07-06 hand probe used, does Apple's on-device FoundationModels
+(AFM) become viable as the cleanup backend, replacing Gemma 3 4B QAT? Full detail:
+`.superpowers/sdd/afm-experiment-report.md` (gitignored — not committed). Harness:
+`native/Tests/ScribeModelTests/AFMExperimentTests.swift`, gated behind
+`AFM_EXPERIMENT=1` (`TEST_RUNNER_AFM_EXPERIMENT=1` when invoked via `xcodebuild`) so it's
+excluded from the default `ScribeModelTests` run.
+
+**Verdict: REJECT.** Ran the full 10-case golden set through 3 variants against
+`SystemLanguageModel(guardrails: .permissiveContentTransformations)`, all with
+`temperature: 0.0` / greedy sampling:
+
+| Variant | Score | Avg ms/case |
+|---|---|---|
+| BASELINE (system prompt only, no few-shots) | 7/10 | 475 ms |
+| FEWSHOT-TRANSCRIPT (`Transcript`-seeded with the 3 few-shot pairs) | **8/10** (best) | 433 ms |
+| GUIDED (`@Generable` + `respond(to:generating:)`, no few-shots) | 5/10 | 546 ms |
+
+Gemma (same-day default run, `GoldenEvalTests`): **10/10**, steady-state avg ≈1130 ms/case.
+
+No variant reached parity. Most importantly, the July-6 probe's headline failure —
+resolving "Tuesday no wait Wednesday" to the wrong side (Tuesday) — reproduced in BASELINE
+and GUIDED; only FEWSHOT-TRANSCRIPT fixed it. GUIDED output, which the July-6 probe
+suggested would fix instruction-execution risk, instead **regressed** two previously-passing
+cases (dropped a "?", stopped restoring Spanish accents) while only partially helping the
+one case it targeted — a net loss vs. BASELINE. Zero guardrail/refusal or rate-limit errors
+across all 30 generations; AFM ran directly from the `xctest` process with no TCC/entitlement
+issue (the `ScribeSpike`-CLI fallback the ticket anticipated was not needed on this machine).
+
+Verification: `ScribeTests` 101/101 green; default `ScribeModelTests` run (no env var) shows
+`AFMExperimentTests` skipped via `XCTSkip` and `GoldenEvalTests` still 10/10 — the experiment
+harness has zero effect on the existing parity gate.
+
+**Worth revisiting, not adopting today:** FEWSHOT-TRANSCRIPT is ~2.5x faster than Gemma's
+steady-state latency with no model-load cost and fixed one of the three original failure
+classes outright, using the existing 3 Gemma-tuned few-shots verbatim (no AFM-specific
+tuning attempted). If the two remaining failure classes (Spanish correction-resolution not
+fully closing; benign instruction-looking requests still being executed) can be closed with
+few-shots that specifically demonstrate those two scenarios, AFM could become viable as a
+secondary/fast-path candidate — future work, out of scope for this experiment.
