@@ -35,32 +35,49 @@ final class GemmaBackend: UnloadableCleaner {
         }
     }
 
+    /// Builds the exact message sequence sent to Gemma for a cleanup
+    /// request: the system prompt, then each `CleanupPrompt.fewShots` pair
+    /// mapped to `[.user(wrapped input), .assistant(output)]`, then the
+    /// final wrapped query — `1 + 2 * fewShots.count + 1` messages in
+    /// total. Pure and independent of MLX/ChatSession so it's directly
+    /// testable — see GemmaChatStructureTests.swift.
+    ///
+    /// The few-shot user turns MUST go through `CleanupPrompt.wrap()`, same
+    /// as the real query — Python's build_messages() (src/scribe/cleanup/base.py)
+    /// wraps every few-shot AND real user turn in <transcript> tags. Leaving
+    /// the few-shots unwrapped rendered a prompt where only the final query
+    /// carried the <transcript> markup the examples never demonstrated,
+    /// which measurably weakened the "never translate" instruction (2/10
+    /// golden cases regressed, both English inputs translated to Spanish;
+    /// fixed in Task 15 — this function, and its regression test, exist to
+    /// keep that from recurring silently).
+    static func buildChat(for text: String) -> [Chat.Message] {
+        var messages: [Chat.Message] = [.system(CleanupPrompt.systemPrompt)]
+        for (input, output) in CleanupPrompt.fewShots {
+            messages.append(.user(CleanupPrompt.wrap(input)))
+            messages.append(.assistant(output))
+        }
+        messages.append(.user(CleanupPrompt.wrap(text)))
+        return messages
+    }
+
     /// Cleans a raw dictation transcript using the Gemma 3 4B model with
     /// few-shot examples. Wraps errors into `CleanupError`.
     func clean(_ text: String) async throws -> String {
         do {
             let container = try await lazyModel.get()
 
-            // Build few-shot history from CleanupPrompt.fewShots, mapping each
-            // (input, output) pair to [.user(input), .assistant(output)] messages.
-            // The user turn must go through CleanupPrompt.wrap(), same as the
-            // real query below — Python's build_messages() (src/scribe/cleanup/base.py)
-            // wraps every few-shot AND real user turn in <transcript> tags. Leaving
-            // the few-shots unwrapped rendered a prompt where only the final query
-            // carried the <transcript> markup the examples never demonstrated,
-            // which measurably weakened the "never translate" instruction (2/10
-            // golden cases regressed, both English inputs translated to Spanish;
-            // fixed in Task 15).
-            let history = CleanupPrompt.fewShots.flatMap { input, output in
-                [
-                    Chat.Message.user(CleanupPrompt.wrap(input)),
-                    Chat.Message.assistant(output)
-                ]
-            }
+            // buildChat(for:) returns [system, few-shot user/assistant
+            // pairs..., final user query]; ChatSession takes those back
+            // apart as instructions/history/prompt.
+            let chat = GemmaBackend.buildChat(for: text)
+            let instructions = chat.first?.content ?? CleanupPrompt.systemPrompt
+            let history = Array(chat.dropFirst().dropLast())
+            let query = chat.last?.content ?? CleanupPrompt.wrap(text)
 
             let session = ChatSession(
                 container,
-                instructions: CleanupPrompt.systemPrompt,
+                instructions: instructions,
                 history: history,
                 generateParameters: GenerateParameters(
                     maxTokens: CleanupPrompt.maxTokens(inputTokens: text.count / 4),
@@ -68,7 +85,7 @@ final class GemmaBackend: UnloadableCleaner {
                 )
             )
 
-            let cleaned = try await session.respond(to: CleanupPrompt.wrap(text))
+            let cleaned = try await session.respond(to: query)
             return cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
         } catch let error as CleanupError {
             throw error

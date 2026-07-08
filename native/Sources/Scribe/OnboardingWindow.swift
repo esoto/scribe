@@ -179,12 +179,20 @@ struct OnboardingWindow: View {
         }
     }
 
-    /// Re-reads all three probes and updates `model.grants`. Input
-    /// Monitoring is special-cased: on a false→true flip we hand off to
-    /// `AppModel.activateHotkeyIfNeeded()` so the hotkey tap live-activates
-    /// immediately, without requiring an app restart.
+    /// Re-reads all three probes and updates `model.grants`. Microphone and
+    /// Input Monitoring are both special-cased: on a false→true flip we
+    /// hand off to `AppModel` so it can react immediately, without
+    /// requiring an app restart — `prewarmRecorderIfGranted()` starts the
+    /// audio engine ahead of the first key-down, and
+    /// `activateHotkeyIfNeeded()` live-activates the hotkey tap.
     private func refreshGrants() {
-        model.grants.microphone = TCC.microphoneGranted()
+        let microphone = TCC.microphoneGranted()
+        let microphoneNewlyGranted = microphone && !model.grants.microphone
+        model.grants.microphone = microphone
+        if microphoneNewlyGranted {
+            model.prewarmRecorderIfGranted()
+        }
+
         model.grants.accessibility = TCC.accessibilityGranted()
 
         let inputMonitoring = TCC.inputMonitoringGranted()

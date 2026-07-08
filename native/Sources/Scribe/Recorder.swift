@@ -70,6 +70,18 @@ final class Recorder: RecorderLike {
         lock.unlock()
         return buffer.drain()
     }
+
+    /// Best-effort starts the underlying audio engine WITHOUT arming it —
+    /// the ring buffer stays unarmed, so no samples are captured. Used by
+    /// `AppModel` to absorb the engine's cold-start latency ahead of the
+    /// first real key-down (at launch when the microphone grant is already
+    /// present, and again the moment onboarding observes a false→true grant
+    /// flip), so the opening syllable of the first dictation is never
+    /// clipped. A no-op if the engine is already running.
+    func prewarm() throws {
+        guard !engineControl.isRunning else { return }
+        try engineControl.start()
+    }
 }
 
 /// Real AVAudioEngine adapter: installs an input tap at the node's native

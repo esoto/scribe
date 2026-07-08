@@ -112,8 +112,11 @@ exercised through a real launch. Confirm on first real run:
    isolation, not the full mic → STT → cleanup → paste pipeline on real
    speech.
 3. **Retire the Python agent** — `make uninstall-agent`.
-4. **Switch the native hotkey to Right ⌘** — in the native app's Settings,
-   change the hotkey from Right ⌥ to `right_command`.
+4. **Switch the native hotkey to Right ⌘** — `defaults write dev.esoto.scribe
+   hotkey right_command`, then relaunch scribe (the hotkey is read once at
+   init from `AppSettings`; there is no live rebind). A Settings window to
+   change this from the UI instead of `defaults` is a tracked follow-up, not
+   yet built.
 5. **Enable Launch at Login** — native Settings toggle
    (`SMAppService.mainApp`), replacing the Python launchd plist.
 

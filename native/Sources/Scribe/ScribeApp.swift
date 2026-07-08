@@ -22,6 +22,10 @@ final class AppModel: ObservableObject {
 
     private(set) var pipeline: DictationPipeline!
     private var hotkeyMonitor: HotkeyMonitor!
+    // Held concretely (not just as the pipeline's private RecorderLike) so
+    // start() and prewarmRecorderIfGranted() can prewarm its audio engine
+    // ahead of the first key-down — see Recorder.prewarm().
+    private var recorder: Recorder!
 
     @Published private(set) var state: PipelineState = .idle
     // Seeded from TCC probes in start(); the onboarding window's 2 s poll
@@ -82,8 +86,10 @@ final class AppModel: ObservableObject {
         // arrive off the main actor, from DictationPipeline's serial worker)
         // can hop back to it.
         let engine = self.engines[startingEngine]!
+        let recorder = Recorder(sampleRate: pipelineConfig.sampleRate)
+        self.recorder = recorder
         self.pipeline = DictationPipeline(
-            recorder: Recorder(sampleRate: pipelineConfig.sampleRate),
+            recorder: recorder,
             stt: engine,
             cleaner: self.cleaner,
             paster: self.paster,
@@ -129,6 +135,11 @@ final class AppModel: ObservableObject {
         // correct even before the onboarding window's poll loop starts.
         grants.microphone = TCC.microphoneGranted()
         grants.accessibility = TCC.accessibilityGranted()
+        // Never triggers the TCC prompt itself — only fires when the probe
+        // above already reports granted (e.g. a prior run completed
+        // onboarding). The prompt only ever comes from the onboarding
+        // window's own Request button (TCC.requestMicrophone()).
+        prewarmRecorderIfGranted()
 
         do {
             try hotkeyMonitor.install()
@@ -320,6 +331,26 @@ final class AppModel: ObservableObject {
         } catch {
             logger.log("hotkey reinstall failed: \(error)")
             grants.inputMonitoring = false
+        }
+    }
+
+    /// Best-effort starts the recorder's audio engine (without arming it) —
+    /// see `Recorder.prewarm()`. Called from `start()` at launch when the
+    /// microphone TCC probe already reports granted, and from
+    /// `OnboardingWindow`'s poll loop right after it observes a
+    /// microphone false→true flip, so a dictation immediately following
+    /// either onboarding step doesn't pay the engine's cold-start latency
+    /// on its first syllable. Guards on the current grant so it can never
+    /// itself trigger the OS microphone prompt — that only ever comes from
+    /// the onboarding window's Request button. Failure is logged, never
+    /// fatal: the engine still starts lazily on the next real `arm()`.
+    func prewarmRecorderIfGranted() {
+        guard grants.microphone else { return }
+        do {
+            try recorder.prewarm()
+            logger.log("recorder prewarmed")
+        } catch {
+            logger.log("recorder prewarm failed: \(error)")
         }
     }
 }
