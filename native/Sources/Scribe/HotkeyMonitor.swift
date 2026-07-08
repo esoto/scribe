@@ -22,6 +22,11 @@ final class HotkeyMonitor {
     private let onDown: () -> Void
     private let onUp: () -> Void
 
+    /// Diagnostic hook, fired ONLY for flagsChanged (modifier) events — never
+    /// for regular keystrokes, so wiring it to a log file cannot capture
+    /// typed text. Called on the tap's run-loop thread.
+    var onModifierEvent: ((String) -> Void)?
+
     private var tap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
 
@@ -145,6 +150,11 @@ final class HotkeyMonitor {
         let action = monitor.machine.handle(
             eventType: Int(type.rawValue), keycode: keycode, flags: event.flags.rawValue
         )
+        if type == .flagsChanged {
+            monitor.onModifierEvent?(
+                "flagsChanged keycode=\(keycode) flags=0x\(String(event.flags.rawValue, radix: 16)) -> \(action.map(String.init(describing:)) ?? "nil")"
+            )
+        }
         switch action {
         case .down: monitor.onDown()
         case .up: monitor.onUp()

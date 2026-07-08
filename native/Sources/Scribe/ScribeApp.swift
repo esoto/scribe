@@ -141,9 +141,11 @@ final class AppModel: ObservableObject {
         // window's own Request button (TCC.requestMicrophone()).
         prewarmRecorderIfGranted()
 
+        hotkeyMonitor.onModifierEvent = { [logger] line in logger.log("tap: \(line)") }
         do {
             try hotkeyMonitor.install()
             grants.inputMonitoring = true
+            logger.log("hotkey installed (key=\(settings.hotkey.rawValue))")
         } catch {
             logger.log("hotkey install failed: \(error)")
             grants.inputMonitoring = false
