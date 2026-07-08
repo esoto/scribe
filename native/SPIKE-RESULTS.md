@@ -354,3 +354,100 @@ stayed **101/101** green.
 | `ScribeTests` (full suite) | **101/101**, 0 failures |
 | Temporary `GenPerfTests.swift` | deleted after use (loaded the full 4B model per test, not fast-suite material) |
 GoldenEvalTests: **10/10** (per-case 3.2–9.3 s, total 40.9 s).
+
+## Cleanup speed — prefix cache (2026-07-08)
+
+**Goal:** close the follow-up gap flagged above — the system prompt + 3 few-shot pairs
+are IDENTICAL on every `clean()` call, so re-rendering (Jinja chat template) and
+re-prefilling that fixed ~270-290-token prefix on every call was pure waste. Implemented
+warm KV-cache reuse in `GemmaBackend.swift`: build the prefix's KV cache once (lazily, on
+first `clean()`), then reuse a `.copy()` of it (never mutated in place) on every
+subsequent call.
+
+### Design: two tiers, SAFE always on, FAST gated by an empirical parity check
+
+- **SAFE tier** (always available once warmed): still renders the full 8-message
+  conversation every call (so it does NOT save the ~1.5s template render) but skips
+  re-prefilling the ~0.6s prefix — feeds the model only `fullTokens[prefixLen...]`, a
+  *literal suffix* of that render, so parity is exact by construction. A per-call check
+  (`fullTokens[0..<prefixLen] == prefixTokens`) verifies this call's actual render still
+  shares the cached prefix before trusting it; on any mismatch it falls back to an
+  uncached fresh generation for just that call.
+- **FAST tier** (opportunistic): additionally skips the full-conversation render by
+  rendering only the incremental turn (`[.user(wrap(text))]`, ~0.4s vs ~1.5s). Only
+  trusted after a one-time startup parity gate proves
+  `prefixTokens + strip(incrementalRender) == fullRenderTokens` EXACTLY for both an EN and
+  an ES sample; any mismatch permanently falls back to SAFE for the process.
+
+`prefixLen` is found via the "two-dummy-query" trick (render two full conversations
+differing only in the final query, take their common leading-token length) — this avoids
+needing `addGenerationPrompt: false`, which `MLXLMCommon.Tokenizer`'s bridge doesn't
+expose. The warm cache is prefilled by constructing (but never iterating) a
+`TokenIterator` over just the prefix tokens — its `init` mutates the passed-in `KVCache`
+objects in place via `model.prepare(...)`, matching `ChatSession`'s own internal
+multi-turn continuation pattern.
+
+**Model detail that mattered:** this model resolves through `LLMModelFactory`'s
+text-only `LLMUserInputProcessor` (a `*_text` Gemma3 config), which renders
+`LMInput(tokens: MLXArray(promptTokens))` — a **1-D** token array with no batch
+dimension and no mask. (The initial implementation assumed the VLM `Gemma3Processor`'s
+2-D `[1, N]` shape from reading the wrong file in the vendored source and crashed with
+`Fatal error: SmallVector out of range` on the first warm-up call — indexing a 1-D array
+with two axis specifiers. Fixed by single-axis slicing throughout.)
+
+**Parity gate found a real structural issue, and self-corrected.** The naive
+`prefixTokens + strip_bos(incrementalRender)` check failed on first run: `prefixLen`
+(270) lands 7 tokens past the few-shot region, *inside* the shared
+`<start_of_turn>user\n<transcript>\n` open-wrap text that an isolated single-turn render
+also reconstructs from scratch — so that 7-token wrap-open appeared twice in the
+concatenation. Confirmed by diffing the mismatching token arrays (first divergence
+exactly at index 270, extra `[105, 2364, 107, 236820, 109532, 236813, 107]` block).
+Generalized the gate: measure this "wrap overlap" once per warm-up sample, REQUIRE it to
+be IDENTICAL across the EN and ES samples (same rigor as `prefixLen` itself — trusted
+because two maximally-different probes agree, not assumed from one), and only enable
+FAST if every sample both agrees on the overlap AND reproduces the full render exactly
+with it stripped. Both samples agreed (`wrapOverlap=7`) and parity now holds exactly —
+FAST engaged.
+
+### Before/after (GoldenEvalTests, per-case wall time, same machine)
+
+| Case | Before (SAFE didn't exist; ChatSession per call) | After (FAST engaged, `wrapOverlap=7`) |
+|---|---|---|
+| 1st case (incl. one-time warm-up: 2 dummy renders + prefill + parity gate) | ~7.5–11.8 s (incl. cold model load in some runs) | ~11.0–11.1 s (model already loaded via `LazyModel`; warm-up itself adds ~4s here) |
+| Steady-state (cases 2–10) | ~3.0–3.4 s/case (2871–3126 ms warm, per prior investigation) | **~0.95–1.7 s/case**, avg ≈ **1.17 s/case** across two full runs |
+
+Two consecutive full `GoldenEvalTests` runs (10/10 both times) for stability:
+- Run A: 11117, 1481, 1660, 941, 1069, 1188, 1078, 1132, 966, 989 ms — total 21.6 s.
+- Run B: 10925, 1467, 1663, 954, 1088, 1214, 1127, 1159, 960, 1009 ms — total 21.6 s.
+
+Steady-state average (cases 2–10, both runs): **~1.15 s/utterance** — down from the
+documented ~2.87s baseline (~1.5s render + ~0.6s prefill + ~0.7s generation), and now
+close to the Python oracle's ~1.3s. The remaining per-call cost is dominated by the
+short incremental-turn render (~0.4s) + generation (~0.7s); the fixed prefix's render and
+prefill are fully eliminated from the steady-state path.
+
+### Verification
+
+| Check | Result |
+|---|---|
+| `GoldenEvalTests` (native, 10 cases), 2 consecutive runs | **10/10** both times, `fastPath=true wrapOverlap=7` both times |
+| `ScribeTests` (full suite) | **101/101**, 0 failures |
+| Path engaged | **FAST** (parity gate passed for both EN and ES samples after the wrap-overlap generalization) |
+
+### Concerns
+
+- FAST's per-call trust is inherently a one-time, warm-up-validated guarantee — it is
+  NOT re-verified against a full render on every call (that would defeat its purpose).
+  The two-diverse-sample parity gate (requiring exact agreement between maximally
+  different EN/ES probes) is the same rigor already accepted for `prefixLen` itself, and
+  the golden eval's 10 realistic, linguistically-varied cases passing at 10/10 is
+  additional empirical evidence, but this is a residual, accepted risk of the FAST tier
+  by design (per the task brief).
+- SAFE tier's per-call safety check (`fullTokens[0..<prefixLen] == prefixTokens`) fully
+  protects against any tokenizer-boundary surprise for a specific real utterance, at the
+  cost of falling back to an uncached generation for that one call only — this path was
+  not exercised in the 10 golden cases (no mismatches observed) but exists as a
+  correctness backstop.
+- Warm-up cost (~4s: 2 dummy renders + prefix prefill + parity gate) is paid once per
+  process, on the first real `clean()` call — this inflates that first call's latency
+  but is a one-time cost, not per-utterance.
