@@ -139,3 +139,13 @@ model tests validate against.
   annoyance if it ever gets old.
 - **launchd agent behavior after reboot** — `make install-agent` written per
   launchctl docs but not yet exercised through a real login cycle.
+
+### Tracked follow-ups (from the final whole-branch review — none block cutover)
+
+- Settings window (required before actual cutover OR keep the `defaults write` procedure as the permanent path)
+- Doctor completeness: model cache status + log location (spec §5.5)
+- OSLog + log rotation for `~/Library/Logs/scribe/scribe.log` (currently append-only)
+- Recorder: format-change tap staleness + silent chunk drop on converter failure; add a mic-device-swap item to manual QA
+- Off-main WAV write for `saveFailedAudio` (rare error path)
+- `Recorder.prewarm()` unit test (3 assertions on the FakeEngineControl seam)
+- Swift 6 language-mode migration (incl. `LazyModel M: Sendable`); test-target module-duplication convention cleanup
