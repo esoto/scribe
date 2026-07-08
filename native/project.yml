@@ -57,6 +57,7 @@ targets:
     type: bundle.unit-test
     platform: macOS
     sources: [Tests/ScribeTests, Sources/Scribe]
+    dependencies: *mlDeps
     settings:
       base:
         GENERATE_INFOPLIST_FILE: YES
