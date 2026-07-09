@@ -68,7 +68,7 @@ final class AppModel: ObservableObject {
             "parakeet": ParakeetEngine(),
             "whisper": WhisperEngine(),
         ]
-        self.cleaner = GemmaBackend()
+        self.cleaner = GemmaBackend(customModelPath: settings.cleanupModelPath)
         self.idleTracker = IdleTracker(unloadAfterMinutes: settings.idleUnloadMinutes)
         self.logger = FileLogger()
 

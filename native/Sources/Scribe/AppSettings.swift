@@ -23,6 +23,7 @@ final class AppSettings {
         static let sounds = "sounds"
         static let historySize = "historySize"
         static let idleUnloadMinutes = "idleUnloadMinutes"
+        static let cleanupModelPath = "cleanupModelPath"
         static let didImportToml = "didImportToml"
     }
 
@@ -102,6 +103,22 @@ final class AppSettings {
     var idleUnloadMinutes: Double {
         get { defaults.object(forKey: Key.idleUnloadMinutes) as? Double ?? 15 }
         set { defaults.set(newValue, forKey: Key.idleUnloadMinutes) }
+    }
+
+    /// Filesystem path to a local MLX model folder to use for cleanup
+    /// instead of the stock Gemma 3 4B; nil/empty = stock. Set via
+    /// `defaults write dev.esoto.scribe cleanupModelPath <path>` and
+    /// relaunch — no menu UI by design (see the 2026-07-09 model-store
+    /// spec). A blank string counts as unset so a stray
+    /// `defaults write … ""` can't select an empty directory.
+    var cleanupModelPath: String? {
+        get {
+            guard let raw = defaults.string(forKey: Key.cleanupModelPath),
+                !raw.trimmingCharacters(in: .whitespaces).isEmpty
+            else { return nil }
+            return raw
+        }
+        set { defaults.set(newValue, forKey: Key.cleanupModelPath) }
     }
 
     // MARK: - Legacy TOML import

@@ -122,11 +122,22 @@ final class GemmaBackend: UnloadableCleaner, @unchecked Sendable {
     private static let warmupSampleES =
         "este esto es solo una frase de calentamiento para el cache sin problema"
 
-    init() {
+    /// `customModelPath` (from `AppSettings.cleanupModelPath`) points at a
+    /// local MLX model folder to use instead of the stock Gemma; nil =
+    /// stock. See `modelConfiguration(customPath:)` for the differences.
+    init(customModelPath: String? = nil) {
+        let configuration = GemmaBackend.modelConfiguration(customPath: customModelPath)
         lazyModel = LazyModel(label: "gemma-cleanup") {
-            try await #huggingFaceLoadModelContainer(
-                configuration: GemmaBackend.modelConfiguration()
-            )
+            // Expanded form of #huggingFaceLoadModelContainer so the hub
+            // client can be pointed at the app-managed model store instead
+            // of the default ~/.cache/huggingface (same Python-compatible
+            // hub layout, different root).
+            try await loadModelContainer(
+                from: #hubDownloader(
+                    HubClient(
+                        cache: HubCache(location: .fixed(directory: ModelStore.gemmaDirectory)))),
+                using: #huggingFaceTokenizerLoader(),
+                configuration: configuration)
         }
     }
 
@@ -153,8 +164,18 @@ final class GemmaBackend: UnloadableCleaner, @unchecked Sendable {
     /// `<end_of_turn>` until hitting the 200-token ceiling (`stopReason:
     /// .length`) instead of stopping after ~10 tokens like the validated
     /// Python oracle (`stopReason: .stop`).
-    static func modelConfiguration() -> ModelConfiguration {
-        ModelConfiguration(
+    /// With `customPath` set (a local MLX model folder), loads that
+    /// directory instead — and deliberately WITHOUT `extraEOSTokens`:
+    /// `<end_of_turn>` is Gemma's turn token, and forcing it onto another
+    /// model family would truncate or corrupt its output. A custom model
+    /// must stop via its own tokenizer/generation config; if it can't, the
+    /// cleanup timeout + length/language gates paste the raw transcript,
+    /// so dictations degrade to verbatim rather than breaking.
+    static func modelConfiguration(customPath: String? = nil) -> ModelConfiguration {
+        if let customPath {
+            return ModelConfiguration(directory: URL(fileURLWithPath: customPath))
+        }
+        return ModelConfiguration(
             id: "mlx-community/gemma-3-4b-it-qat-4bit",
             extraEOSTokens: ["<end_of_turn>"]
         )

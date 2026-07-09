@@ -89,7 +89,10 @@ final class ParakeetEngine: UnloadableEngine {
 
     init() {
         lazyModel = LazyModel(label: "parakeet") {
-            let models = try await AsrModels.downloadAndLoad(version: .v3)
+            // Downloaded into the app-managed store, not FluidAudio's
+            // default Application Support/FluidAudio cache.
+            let models = try await AsrModels.downloadAndLoad(
+                to: ModelStore.parakeetDirectory, version: .v3)
             let manager = AsrManager(config: .default)
             try await manager.loadModels(models)
             return manager
@@ -126,7 +129,12 @@ final class WhisperEngine: UnloadableEngine {
 
     init() {
         lazyModel = LazyModel(label: "whisper") {
-            try await WhisperKit(WhisperKitConfig(model: "openai_whisper-large-v3-v20240930_turbo"))
+            // downloadBase roots WhisperKit's models/argmaxinc/… tree in
+            // the app-managed store instead of ~/Documents/huggingface.
+            try await WhisperKit(
+                WhisperKitConfig(
+                    model: "openai_whisper-large-v3-v20240930_turbo",
+                    downloadBase: ModelStore.whisperDirectory))
         }
     }
 
