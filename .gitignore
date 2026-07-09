@@ -10,3 +10,5 @@ native/Scribe.xcodeproj/project.xcworkspace/xcshareddata/*
 !native/Scribe.xcodeproj/project.xcworkspace/xcshareddata/swiftpm
 native/Info.plist
 dist/
+.coverage
+__pycache__/
