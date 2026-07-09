@@ -500,6 +500,10 @@ final class GemmaBackend: UnloadableCleaner, @unchecked Sendable {
             input: LMInput(text: inputText), cache: cache, parameters: parameters, context: context)
         var output = ""
         for await generation in stream {
+            // Honor cleanWithTimeout's cancellation (Pipeline.swift):
+            // without this, a timed-out cleanup blocks the task group for
+            // the full generation and holds the model mutex.
+            try Task.checkCancellation()
             if case .chunk(let piece) = generation {
                 output += piece
             }
@@ -520,6 +524,8 @@ final class GemmaBackend: UnloadableCleaner, @unchecked Sendable {
         let stream = try generate(input: input, parameters: parameters, context: context)
         var output = ""
         for await generation in stream {
+            // Same cancellation contract as the warm path above.
+            try Task.checkCancellation()
             if case .chunk(let piece) = generation {
                 output += piece
             }
