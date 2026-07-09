@@ -111,6 +111,18 @@ struct OnboardingWindow: View {
         .task {
             await pollLoop()
         }
+        // scribe is a menu-bar app (LSUIElement) with no Dock icon or
+        // ⌘Tab entry — correct while idle, but it makes an open setup
+        // window unreachable once it's buried behind other apps. Promote
+        // to a regular app while this window is open so ⌘Tab can reach
+        // it, and drop back to menu-bar-only when it closes.
+        .onAppear {
+            NSApp.setActivationPolicy(.regular)
+            NSApp.activate(ignoringOtherApps: true)
+        }
+        .onDisappear {
+            NSApp.setActivationPolicy(.accessory)
+        }
     }
 
     @ViewBuilder
