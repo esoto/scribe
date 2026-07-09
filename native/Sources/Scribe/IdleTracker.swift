@@ -21,9 +21,10 @@ final class IdleTracker {
     }
 
     /// True when models should unload: enabled, there was activity, and the
-    /// timeout has elapsed. Never-used models are not unloaded (they are the
-    /// startup warm-up; unloading them would cause a surprise cold start with
-    /// no memory to reclaim).
+    /// timeout has elapsed. Without any touch, never due — callers that
+    /// preload models up front must seed a touch themselves (AppModel does,
+    /// at startup) or an unused launch would keep the preload resident
+    /// forever.
     func due(now: Double) -> Bool {
         guard enabled, let lastActivity else { return false }
         return (now - lastActivity) >= timeoutSeconds

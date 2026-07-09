@@ -165,6 +165,11 @@ final class AppModel: ObservableObject {
         }
 
         preloadAtStartup()
+        // Seed the idle tracker: the startup preload above loads ~3 GB of
+        // models, so "launched but never dictated" must count as activity
+        // that can go idle — without this seed, due() never fires (it
+        // requires a touch) and an unused launch pins the memory forever.
+        idleTracker.touch(now: ProcessInfo.processInfo.systemUptime)
         startIdleUnloadLoop()
     }
 
