@@ -259,15 +259,21 @@ final class DictationPipeline {
 /// safe for concurrent use from multiple callers.
 private final class SerialWorker: @unchecked Sendable {
     private let continuation: AsyncStream<() async -> Void>.Continuation
+    private let drainTask: Task<Void, Never>
 
     init() {
         let (stream, continuation) = AsyncStream<() async -> Void>.makeStream()
         self.continuation = continuation
-        Task {
+        self.drainTask = Task {
             for await work in stream {
                 await work()
             }
         }
+    }
+
+    deinit {
+        drainTask.cancel()
+        continuation.finish()
     }
 
     func enqueue(_ work: @escaping () async -> Void) {

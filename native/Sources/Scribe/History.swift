@@ -1,7 +1,10 @@
 import Foundation
 
 /// A single completed dictation, held only in memory (privacy: never persisted).
-struct DictationRecord {
+struct DictationRecord: Identifiable {
+    // Defaulted `let` — excluded from the synthesized memberwise init, so
+    // callers still construct records without an id.
+    let id = UUID()
     let raw: String
     let final: String
     let engine: String

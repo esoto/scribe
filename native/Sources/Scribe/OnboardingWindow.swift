@@ -122,7 +122,7 @@ struct OnboardingWindow: View {
                 .imageScale(.large)
 
             VStack(alignment: .leading, spacing: 2) {
-                Label(title, systemImage: systemImage)
+                Text(title)
                     .font(.headline)
                 Text(detail)
                     .font(.caption)
@@ -175,6 +175,10 @@ struct OnboardingWindow: View {
     private func pollLoop() async {
         while !Task.isCancelled {
             refreshGrants()
+            // Fixed 2 s even once all grants are green: this loop is also
+            // how a revocation (or the TCC-reset dance) is noticed, and
+            // AppModel documents the 2 s contract. The probes are cheap
+            // cached-TCC reads, so backing off buys nothing meaningful.
             try? await Task.sleep(nanoseconds: 2_000_000_000)
         }
     }

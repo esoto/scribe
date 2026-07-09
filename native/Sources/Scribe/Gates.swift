@@ -1,3 +1,4 @@
+import Accelerate
 import Foundation
 
 /// Pure decision helpers for the dictation pipeline.
@@ -9,9 +10,13 @@ import Foundation
 enum Gates {
     static func rms(_ pcm: [Float]) -> Double {
         guard !pcm.isEmpty else { return 0.0 }
-        let sumOfSquares = pcm.reduce(0.0) { acc, sample in
-            acc + Double(sample) * Double(sample)
-        }
+        // Widen to Double before accumulating: a Float accumulator can flip
+        // a borderline energy-gate decision on long quiet buffers. Not
+        // vDSP.rootMeanSquare, which accumulates in Float too.
+        var doubles = [Double](repeating: 0, count: pcm.count)
+        vDSP_vspdp(pcm, 1, &doubles, 1, vDSP_Length(pcm.count))
+        var sumOfSquares = 0.0
+        vDSP_svesqD(doubles, 1, &sumOfSquares, vDSP_Length(pcm.count))
         return (sumOfSquares / Double(pcm.count)).squareRoot()
     }
 

@@ -7,6 +7,17 @@ final class GatesTests: XCTestCase {
         let tone = (0..<1600).map { Float(0.1 * sin(Double($0) * 100.0 / 1600.0)) }
         XCTAssertGreaterThan(Gates.rms(tone), 0.05)
     }
+    /// Pins Double accumulation in the vDSP rms: on a long quiet buffer a
+    /// Float accumulator drifts from the true value, which can flip a
+    /// borderline energy-gate decision and silently discard a dictation.
+    func testRmsMatchesDoubleReferenceOnLongQuietBuffer() {
+        // 60 s at 16 kHz of a quiet tone right at the default gate scale.
+        let pcm = (0..<960_000).map { Float(0.0005 * sin(Double($0) * 0.037)) }
+        let reference = (pcm.reduce(0.0) { $0 + Double($1) * Double($1) } / Double(pcm.count))
+            .squareRoot()
+        XCTAssertEqual(Gates.rms(pcm), reference, accuracy: reference * 1e-9)
+    }
+
     func testEnergyGate() {
         XCTAssertFalse(Gates.passesEnergyGate([Float](repeating: 0, count: 100), threshold: 0.0005))
         XCTAssertFalse(Gates.passesEnergyGate([], threshold: 0.0005))
