@@ -36,3 +36,11 @@ install-agent:
 uninstall-agent:
 	launchctl bootout gui/$$(id -u)/dev.esoto.scribe || true
 	rm -f $(AGENT)
+
+# Package the native app: Release build -> dist/scribe-<version>.zip.
+# `make install-app` additionally replaces /Applications/Scribe.app.
+app:
+	scripts/package_app.sh
+
+install-app:
+	scripts/package_app.sh --install
