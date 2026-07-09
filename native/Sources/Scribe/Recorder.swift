@@ -15,7 +15,13 @@ protocol EngineControl: AnyObject {
     /// Called by the adapter for every converted sample chunk it produces.
     /// `Recorder` wires this to `ingest(_:)` right after construction.
     var onSamples: (([Float]) -> Void)? { get set }
+    /// Preallocates engine resources without capturing — the OS microphone
+    /// indicator must NOT light up.
+    func prepare()
     func start() throws
+    /// Halts capture so the OS microphone indicator turns off. Prepared
+    /// resources may be retained for a fast next `start()`.
+    func stop()
 }
 
 /// Mic capture: an armed ring buffer fed by a pre-installed input tap.
@@ -68,19 +74,26 @@ final class Recorder: RecorderLike {
         lock.lock()
         armed = false
         lock.unlock()
-        return buffer.drain()
+        let pcm = buffer.drain()
+        // Every dictation ends here (including short-hold cancels), so this
+        // is the single point that releases the microphone — the OS mic
+        // indicator is lit only between arm() and disarm().
+        if engineControl.isRunning {
+            engineControl.stop()
+        }
+        return pcm
     }
 
-    /// Best-effort starts the underlying audio engine WITHOUT arming it —
-    /// the ring buffer stays unarmed, so no samples are captured. Used by
-    /// `AppModel` to absorb the engine's cold-start latency ahead of the
+    /// Best-effort preallocates the audio engine's resources WITHOUT
+    /// starting capture — the OS mic indicator stays off. Used by `AppModel`
+    /// to absorb setup cost (tap install, resource allocation) ahead of the
     /// first real key-down (at launch when the microphone grant is already
     /// present, and again the moment onboarding observes a false→true grant
-    /// flip), so the opening syllable of the first dictation is never
-    /// clipped. A no-op if the engine is already running.
+    /// flip), so the first `arm()`'s engine start is fast. A no-op if the
+    /// engine is already running.
     func prewarm() throws {
         guard !engineControl.isRunning else { return }
-        try engineControl.start()
+        engineControl.prepare()
     }
 }
 
@@ -100,6 +113,11 @@ final class AVEngineControl: EngineControl {
 
     var isRunning: Bool { engine.isRunning }
 
+    func prepare() {
+        installTapIfNeeded()
+        engine.prepare()
+    }
+
     func start() throws {
         installTapIfNeeded()
         do {
@@ -107,6 +125,13 @@ final class AVEngineControl: EngineControl {
         } catch {
             throw RecorderError(message: "could not start audio engine: \(error)")
         }
+    }
+
+    func stop() {
+        // pause(), not stop(): the io unit halts (mic indicator goes off)
+        // but prepared resources are kept, so the next start() at key-down
+        // doesn't repay the full cold-start cost.
+        engine.pause()
     }
 
     private func installTapIfNeeded() {

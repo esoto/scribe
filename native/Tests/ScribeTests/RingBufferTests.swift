@@ -23,12 +23,18 @@ final class RingBufferTests: XCTestCase {
 
         var isRunning: Bool { running }
 
+        func prepare() {}
+
         func start() throws {
             startCalls += 1
             if failStart {
                 throw RecorderError(message: "no device")
             }
             running = true
+        }
+
+        func stop() {
+            running = false
         }
     }
 
