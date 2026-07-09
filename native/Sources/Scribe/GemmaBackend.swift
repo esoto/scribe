@@ -565,6 +565,23 @@ final class GemmaBackend: UnloadableCleaner, @unchecked Sendable {
         await lazyModel.unload()
         Memory.clearCache()
     }
-    func preload() async { await lazyModel.preload() }
+    /// Loads AND warms up. The warm-up (two template renders, the prefix
+    /// prefill, the parity gate — plus first-use Metal kernel compilation)
+    /// otherwise runs inside the first clean() call, adding seconds to the
+    /// first dictation after an idle unload. AppModel fires preload() on
+    /// key-down, so doing the warm-up here overlaps it with the user still
+    /// speaking; warmUpIfNeeded's guard makes repeat calls no-ops.
+    func preload() async {
+        guard let container = try? await lazyModel.get() else { return }
+        let parameters = GenerateParameters(temperature: 0.0)
+        await container.perform { context in
+            await self.warmUpIfNeeded(context: context, parameters: parameters)
+        }
+    }
+
+    /// Whether the warm prefix cache is ready (i.e. the next clean() skips
+    /// warm-up). Exposed for tests.
+    var isWarm: Bool { warmPrefix != nil }
+
     var isLoaded: Bool { get async { await lazyModel.isLoaded } }
 }
