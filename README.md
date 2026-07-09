@@ -37,14 +37,16 @@ Each grant auto-adds "scribe" to the right System Settings pane, a live
 checkmark lands within ~2 s of granting, and nothing needs a restart —
 Input Monitoring installs the hotkey tap live, mid-session.
 
-**Models** are not bundled; each engine caches its weights outside the app
-and downloads them on first use:
+**Models** are not bundled; they download on first use into a single
+app-managed store — `~/Library/Application Support/scribe/models/` —
+one subfolder per engine. Deleting that folder is a clean full reset;
+everything re-downloads on next use.
 
-| Model | Size | Location |
+| Model | Size | Store subfolder |
 |---|---|---|
-| Gemma 3 4B (cleanup) | ~2.5 GB | `~/.cache/huggingface/hub/` |
-| Parakeet v3 (STT) | ~0.5 GB | `~/Library/Application Support/FluidAudio/Models/` |
-| Whisper (optional STT) | ~1.5 GB | `~/Documents/huggingface/models/argmaxinc/` |
+| Gemma 3 4B (cleanup) | ~2.8 GB | `gemma/` |
+| Parakeet v3 (STT) | ~0.5 GB | `parakeet/` |
+| Whisper (optional STT) | ~1.5 GB | `whisper/` |
 
 ## Usage
 
@@ -80,6 +82,15 @@ Change via `defaults write dev.esoto.scribe <key> <value>` and relaunch:
 | `sounds` | true | start/error sounds |
 | `historySize` | 10 | menu history length |
 | `idleUnloadMinutes` | 15 | unload models after idle (0 = keep resident) |
+| `cleanupModelPath` | _(unset)_ | local MLX model folder to use for cleanup instead of stock Gemma |
+
+**Custom cleanup model:** point `cleanupModelPath` at any local MLX model
+folder (config.json + safetensors + tokenizer) and relaunch;
+`defaults delete dev.esoto.scribe cleanupModelPath` restores stock Gemma.
+A misbehaving model degrades to pasting the raw transcript (timeout +
+length/language gates) — it can never lose words. Judge candidates with
+`make test-models`: the golden eval is the quality bar (stock Gemma
+scores 10/10).
 
 ## Memory behavior
 
