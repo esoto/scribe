@@ -26,6 +26,10 @@ final class AppModel: ObservableObject {
     // start() and prewarmRecorderIfGranted() can prewarm its audio engine
     // ahead of the first key-down — see Recorder.prewarm().
     private var recorder: Recorder!
+    private var engineSwitchTask: Task<Void, Never>?
+    // Target of the in-flight (not yet committed) engine switch, nil when
+    // none — see EngineSwitch for the selection rules it feeds.
+    private var pendingEngineName: String?
 
     @Published private(set) var state: PipelineState = .idle
     // Seeded from TCC probes in start(); the onboarding window's 2 s poll
@@ -263,7 +267,9 @@ final class AppModel: ObservableObject {
         if let engine = engines[activeEngineName] {
             let cleaner = self.cleaner
             let cleanupEnabled = self.cleanupEnabled
-            Task.detached {
+            // Fire-and-forget: LazyModel coalesces concurrent loads, and a
+            // load in flight can't be cancelled anyway (SttEngines.swift).
+            Task {
                 if await !engine.isLoaded {
                     await engine.preload()
                 }
@@ -281,18 +287,42 @@ final class AppModel: ObservableObject {
     // MARK: - Menu actions
 
     func switchEngine(to name: String) {
-        guard name != activeEngineName, let newEngine = engines[name] else { return }
-        let previousName = activeEngineName
-        let previousEngine = engines[previousName]
-        let logger = self.logger
-        Task { [weak self] in
-            await newEngine.preload()
-            guard let self else { return }
-            self.pipeline.setEngine(newEngine, name: name)
-            self.activeEngineName = name
-            self.settings.engine = name
-            logger.log("switched engine to \(name)")
-            await previousEngine?.unload()
+        guard let newEngine = engines[name] else { return }
+        switch EngineSwitch.action(selecting: name, active: activeEngineName, pending: pendingEngineName) {
+        case .ignore:
+            return
+        case .revert:
+            // Re-selected the committed engine while a switch was still
+            // preloading: abandon it. The cancelled task unloads the
+            // superseded engine itself once its preload finishes.
+            engineSwitchTask?.cancel()
+            engineSwitchTask = nil
+            pendingEngineName = nil
+        case .begin:
+            engineSwitchTask?.cancel()
+            pendingEngineName = name
+            let previousEngine = engines[activeEngineName]
+            let logger = self.logger
+            engineSwitchTask = Task { [weak self] in
+                await newEngine.preload()
+                guard let self else { return }
+                if Task.isCancelled {
+                    // Superseded mid-preload: drop the speculative load
+                    // unless a newer selection landed back on this engine.
+                    if EngineSwitch.shouldUnloadSuperseded(
+                        name, active: self.activeEngineName, pending: self.pendingEngineName)
+                    {
+                        await newEngine.unload()
+                    }
+                    return
+                }
+                self.pipeline.setEngine(newEngine, name: name)
+                self.activeEngineName = name
+                self.pendingEngineName = nil
+                self.settings.engine = name
+                logger.log("switched engine to \(name)")
+                await previousEngine?.unload()
+            }
         }
     }
 
@@ -337,15 +367,16 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// Best-effort starts the recorder's audio engine (without arming it) —
-    /// see `Recorder.prewarm()`. Called from `start()` at launch when the
+    /// Best-effort preallocates the recorder's audio engine resources
+    /// (without starting capture — the OS mic indicator stays off) — see
+    /// `Recorder.prewarm()`. Called from `start()` at launch when the
     /// microphone TCC probe already reports granted, and from
     /// `OnboardingWindow`'s poll loop right after it observes a
     /// microphone false→true flip, so a dictation immediately following
-    /// either onboarding step doesn't pay the engine's cold-start latency
-    /// on its first syllable. Guards on the current grant so it can never
-    /// itself trigger the OS microphone prompt — that only ever comes from
-    /// the onboarding window's Request button. Failure is logged, never
+    /// either onboarding step doesn't pay the engine's full cold-start
+    /// latency on its first syllable. Guards on the current grant so it can
+    /// never itself trigger the OS microphone prompt — that only ever comes
+    /// from the onboarding window's Request button. Failure is logged, never
     /// fatal: the engine still starts lazily on the next real `arm()`.
     func prewarmRecorderIfGranted() {
         guard grants.microphone else { return }
