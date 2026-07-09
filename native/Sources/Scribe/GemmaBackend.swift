@@ -545,7 +545,26 @@ final class GemmaBackend: UnloadableCleaner, @unchecked Sendable {
         return n
     }
 
-    func unload() async { await lazyModel.unload() }
+    /// Unloading must do three things or the ~2.5 GB stays resident (proved
+    /// by MemoryReclaimTests: dropping only the container reclaimed 0 bytes
+    /// — mlxCache held ~3 GB and the warm KV-cache pinned ~50 MB live):
+    /// 1. Drop the warm-prefix KV-cache — its MLXArrays keep model buffers
+    ///    reachable. Cleared inside `container.perform` so it can't race a
+    ///    clean() mid-generation (see the class doc on serialization).
+    /// 2. Drop the container reference.
+    /// 3. Clear MLX's buffer cache — freed Metal buffers otherwise sit in
+    ///    its recycling pool forever; they count against phys_footprint
+    ///    (Activity Monitor) even though they're invisible to RSS.
+    func unload() async {
+        if await lazyModel.isLoaded, let container = try? await lazyModel.get() {
+            await container.perform { _ in
+                self.warmPrefix = nil
+                self.warmupAttempted = false
+            }
+        }
+        await lazyModel.unload()
+        Memory.clearCache()
+    }
     func preload() async { await lazyModel.preload() }
     var isLoaded: Bool { get async { await lazyModel.isLoaded } }
 }
