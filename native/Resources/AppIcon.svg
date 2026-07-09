@@ -1,0 +1,41 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#5B4FE9"/>
+      <stop offset="55%" stop-color="#6D28D9"/>
+      <stop offset="100%" stop-color="#3B1D8F"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="30%" cy="18%" r="80%">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.22"/>
+      <stop offset="45%" stop-color="#FFFFFF" stop-opacity="0.06"/>
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="barfill" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#4C1D95"/>
+      <stop offset="100%" stop-color="#5B21B6"/>
+    </linearGradient>
+    <filter id="softshadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="14" stdDeviation="22" flood-color="#1E1145" flood-opacity="0.45"/>
+    </filter>
+  </defs>
+
+  <!-- squircle background (Big Sur icon grid: 824pt in 1024 canvas) -->
+  <rect x="100" y="100" width="824" height="824" rx="186" fill="url(#bg)"/>
+  <rect x="100" y="100" width="824" height="824" rx="186" fill="url(#glow)"/>
+
+  <!-- mic glyph -->
+  <g filter="url(#softshadow)">
+    <!-- capsule -->
+    <rect x="387" y="228" width="250" height="384" rx="125" fill="#FFFFFF"/>
+    <!-- waveform bars inside the capsule -->
+    <rect x="448" y="380" width="26" height="120" rx="13" fill="url(#barfill)"/>
+    <rect x="499" y="332" width="26" height="216" rx="13" fill="url(#barfill)"/>
+    <rect x="550" y="380" width="26" height="120" rx="13" fill="url(#barfill)"/>
+    <!-- bracket -->
+    <path d="M 320 552 A 192 192 0 0 0 704 552" fill="none" stroke="#FFFFFF" stroke-width="58" stroke-linecap="round"/>
+    <!-- stem -->
+    <line x1="512" y1="746" x2="512" y2="822" stroke="#FFFFFF" stroke-width="58" stroke-linecap="round"/>
+    <!-- base -->
+    <line x1="404" y1="836" x2="620" y2="836" stroke="#FFFFFF" stroke-width="58" stroke-linecap="round"/>
+  </g>
+</svg>
