@@ -12,3 +12,5 @@ native/Info.plist
 dist/
 .coverage
 __pycache__/
+.DS_Store
+.playwright-mcp/
