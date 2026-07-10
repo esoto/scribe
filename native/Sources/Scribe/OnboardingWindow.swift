@@ -134,8 +134,16 @@ struct OnboardingWindow: View {
                 .imageScale(.large)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.headline)
+                // Per the design system's PermissionRow: the permission's
+                // own symbol rides inline with the title, small and
+                // secondary — the leading ✓/✗ circle stays the status.
+                HStack(spacing: 4) {
+                    Image(systemName: systemImage)
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                    Text(title)
+                        .font(.headline)
+                }
                 Text(detail)
                     .font(.caption)
                     .foregroundStyle(.secondary)
