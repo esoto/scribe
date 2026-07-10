@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>scribe — hold a key, speak, it's typed</title>
+<meta name="description" content="Personal hold-to-talk dictation for macOS — fully local, English + Spanish. No cloud, no accounts. Audio and text never leave the machine.">
+<meta property="og:title" content="scribe — hold a key, speak, it's typed">
+<meta property="og:description" content="Fully local hold-to-talk dictation for macOS. No cloud, no accounts. Audio and text never leave the machine.">
+<meta property="og:url" content="https://scribe.estebansoto.dev">
+<link rel="icon" href="appicon.svg" type="image/svg+xml">
+<style>
+  :root {
+    --brand-violet-1: #5B4FE9;
+    --brand-violet-2: #6D28D9;
+    --brand-violet-3: #3B1D8F;
+    --brand-gradient: linear-gradient(135deg, #5B4FE9 0%, #6D28D9 55%, #3B1D8F 100%);
+    --accent: #007AFF;
+    --page-bg: #FFFFFF;
+    --card-bg: #FFFFFF;
+    --control-border: rgba(0, 0, 0, 0.12);
+    --separator: rgba(0, 0, 0, 0.08);
+    --text-primary: rgba(0, 0, 0, 0.85);
+    --text-secondary: rgba(0, 0, 0, 0.50);
+    --text-tertiary: rgba(0, 0, 0, 0.26);
+    --demo-shadow: 0 12px 40px rgba(30, 17, 69, 0.10);
+    --font-system: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", "Helvetica Neue", sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page-bg: #1E1E1E;
+      --card-bg: #2E2E2E;
+      --control-border: rgba(255, 255, 255, 0.18);
+      --separator: rgba(255, 255, 255, 0.12);
+      --text-primary: rgba(255, 255, 255, 0.88);
+      --text-secondary: rgba(255, 255, 255, 0.55);
+      --text-tertiary: rgba(255, 255, 255, 0.28);
+      --demo-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+    }
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: var(--font-system); background: var(--page-bg); color: var(--text-primary); -webkit-font-smoothing: antialiased; }
+  a { text-decoration: none; }
+  .wrap { max-width: 1080px; margin: 0 auto; padding-left: 48px; padding-right: 48px; }
+
+  nav { display: flex; align-items: center; gap: 12px; padding-top: 20px; padding-bottom: 20px; }
+  nav .name { font-size: 17px; font-weight: 600; color: var(--text-primary); }
+  nav .gh { margin-left: auto; font-size: 13px; color: var(--text-secondary); }
+  nav .gh:hover { color: var(--text-primary); }
+
+  header { padding: 72px 48px 64px; text-align: center; }
+  h1 { font-size: 56px; font-weight: 700; letter-spacing: -0.02em; text-wrap: balance; }
+  h1 .violet { color: var(--brand-violet-2); }
+  header p { font-size: 18px; color: var(--text-secondary); max-width: 560px; margin: 20px auto 0; line-height: 1.5; }
+  .cta { display: flex; gap: 12px; justify-content: center; margin-top: 32px; flex-wrap: wrap; }
+  .btn-primary { background: var(--brand-violet-2); color: #fff; font-size: 14px; font-weight: 500; padding: 10px 22px; border-radius: 8px; }
+  .btn-primary:hover { background: var(--brand-violet-1); }
+  .btn-demo { background: transparent; border: 1px solid var(--control-border); color: var(--text-primary); font-size: 14px; font-weight: 500; padding: 10px 22px; border-radius: 8px; cursor: pointer; font-family: var(--font-system); display: flex; align-items: center; gap: 8px; }
+  .btn-demo .glyph { font-size: 13px; width: 1em; display: inline-block; }
+  .btn-demo .glyph.rec { color: #FF3B30; }
+
+  .demo { max-width: 640px; margin: 0 auto; padding: 0 48px; }
+  .demo-box { background: var(--card-bg); border: 1px solid var(--separator); border-radius: 12px; box-shadow: var(--demo-shadow); padding: 18px 20px; min-height: 56px; font-size: 15px; line-height: 1.5; text-align: left; color: var(--text-tertiary); }
+  .demo-box.filled { color: var(--text-primary); }
+
+  .steps { padding-top: 72px; padding-bottom: 72px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; }
+  .step { border-top: 1px solid var(--separator); padding-top: 20px; }
+  .step .n { font-size: 13px; font-weight: 600; color: var(--brand-violet-2); }
+  .step .t { font-size: 17px; font-weight: 600; margin-top: 6px; }
+  .step .d { font-size: 13px; color: var(--text-secondary); line-height: 1.5; margin-top: 6px; }
+
+  .privacy { background: var(--brand-gradient); padding: 64px 0; }
+  .privacy h2 { font-size: 32px; font-weight: 700; color: #fff; letter-spacing: -0.01em; }
+  .privacy .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; margin-top: 36px; }
+  .privacy .cell { background: rgba(255, 255, 255, 0.10); border-radius: 12px; padding: 20px 22px; }
+  .privacy .cell .t { font-size: 15px; font-weight: 600; color: #fff; }
+  .privacy .cell .d { font-size: 13px; color: rgba(255, 255, 255, 0.75); line-height: 1.5; margin-top: 6px; }
+
+  footer { padding-top: 40px; padding-bottom: 40px; display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--text-tertiary); }
+  footer a { margin-left: auto; color: var(--text-secondary); }
+  footer a:hover { color: var(--text-primary); }
+
+  @media (max-width: 720px) {
+    .wrap, header, .demo { padding-left: 20px; padding-right: 20px; }
+    h1 { font-size: 36px; }
+    .steps, .privacy .grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<nav class="wrap">
+  <img src="appicon.svg" width="28" height="28" alt="">
+  <span class="name">scribe</span>
+  <a class="gh" href="https://github.com/esoto/scribe">GitHub</a>
+</nav>
+
+<header>
+  <h1>Hold a key. Speak.<br><span class="violet">It's typed.</span></h1>
+  <p>Personal hold-to-talk dictation for macOS — fully local, English + Spanish.
+     No cloud, no accounts. Audio and text never leave the machine.</p>
+  <div class="cta">
+    <a class="btn-primary" href="https://github.com/esoto/scribe">Get scribe</a>
+    <button class="btn-demo" id="demoBtn" type="button">
+      <span class="glyph" id="demoGlyph">◦</span><span id="demoLabel">See it dictate</span>
+    </button>
+  </div>
+</header>
+
+<div class="demo">
+  <div class="demo-box" id="demoBox">Hold Right ⌥ and speak — the cleaned-up text lands here.</div>
+</div>
+
+<section class="wrap steps">
+  <div class="step">
+    <div class="n">1</div>
+    <div class="t">Hold Right ⌥</div>
+    <div class="d">The mic is captured only while the key is held — the orange indicator turns off at key-up.</div>
+  </div>
+  <div class="step">
+    <div class="n">2</div>
+    <div class="t">Speak</div>
+    <div class="d">Parakeet transcribes in ~0.2 s. Gemma 3 4B strips fillers and resolves self-corrections.</div>
+  </div>
+  <div class="step">
+    <div class="n">3</div>
+    <div class="t">Release</div>
+    <div class="d">Text is pasted into whatever app has focus. If cleanup ever misbehaves, the raw transcript is pasted — you never lose words.</div>
+  </div>
+</section>
+
+<section class="privacy">
+  <div class="wrap">
+    <h2>Full privacy. Your conversations go nowhere.</h2>
+    <div class="grid">
+      <div class="cell">
+        <div class="t">Local models only</div>
+        <div class="d">Parakeet TDT v3 for speech, Gemma 3 4B for cleanup — downloaded once, then everything runs offline.</div>
+      </div>
+      <div class="cell">
+        <div class="t">Nothing persisted</div>
+        <div class="d">History keeps the last 10 dictations in memory only, never on disk.</div>
+      </div>
+      <div class="cell">
+        <div class="t">Nothing sent</div>
+        <div class="d">No cloud, no accounts, no telemetry. Audio and text never leave the machine.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer class="wrap">
+  <img src="appicon.svg" width="18" height="18" alt="">
+  <span>scribe — open source, macOS · MIT</span>
+  <a href="https://github.com/esoto/scribe">github.com/esoto/scribe</a>
+</footer>
+
+<script>
+  // Demo: ◦ → ● raw words stream in → ⋯ → cleaned sentence. Mirrors the
+  // real pipeline (raw transcript, then Gemma cleanup) with README-true copy.
+  const btn = document.getElementById("demoBtn");
+  const glyph = document.getElementById("demoGlyph");
+  const label = document.getElementById("demoLabel");
+  const box = document.getElementById("demoBox");
+  const RAW = "so um move the meeting to tuesday no wait wednesday at uh three";
+  const CLEAN = "Move the meeting to Wednesday at 3.";
+  let running = false;
+
+  btn.addEventListener("click", async () => {
+    if (running) return;
+    running = true;
+    const words = RAW.split(" ");
+    box.classList.add("filled");
+    box.textContent = "";
+    glyph.textContent = "●";
+    glyph.className = "glyph rec";
+    label.textContent = "Recording…";
+    for (const w of words) {
+      box.textContent += (box.textContent ? " " : "") + w;
+      await new Promise(r => setTimeout(r, 140));
+    }
+    glyph.textContent = "⋯";
+    glyph.className = "glyph";
+    label.textContent = "Transcribing…";
+    await new Promise(r => setTimeout(r, 700));
+    box.textContent = CLEAN;
+    glyph.textContent = "◦";
+    label.textContent = "See it dictate";
+    running = false;
+  });
+</script>
+
+</body>
+</html>

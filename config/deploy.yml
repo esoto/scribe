@@ -1,0 +1,33 @@
+# Kamal deploy for the scribe landing page (site/) — a static nginx
+# container behind the VPS's shared kamal-proxy, same pattern as the
+# other personal apps.
+service: scribe-site
+
+image: esoto/scribe-site
+
+servers:
+  web:
+    - 178.104.88.183
+
+# SSL via Let's Encrypt + kamal-proxy
+proxy:
+  ssl: true
+  host: scribe.estebansoto.dev
+  healthcheck:
+    path: /
+
+# GitHub Container Registry
+registry:
+  server: ghcr.io
+  username: esoto
+  password:
+    - KAMAL_REGISTRY_PASSWORD
+
+# Build only the static site directory, for the Hetzner amd64 server.
+builder:
+  arch: amd64
+  context: site
+  dockerfile: site/Dockerfile
+
+ssh:
+  user: deploy
