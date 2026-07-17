@@ -39,6 +39,7 @@ final class AppModel: ObservableObject {
     @Published var grants: GrantStatus = GrantStatus(microphone: false, accessibility: false, inputMonitoring: false)
     @Published private(set) var activeEngineName: String
     @Published private(set) var cleanupEnabled: Bool
+    @Published private(set) var microphoneUID: String?
     @Published private(set) var launchAtLoginEnabled: Bool = LoginItem.isEnabled
 
     private let pipelineConfig: PipelineConfig
@@ -75,6 +76,7 @@ final class AppModel: ObservableObject {
         let startingEngine = engines[settings.engine] != nil ? settings.engine : "parakeet"
         self.activeEngineName = startingEngine
         self.cleanupEnabled = settings.cleanupEnabled
+        self.microphoneUID = settings.microphoneUID
 
         self.pipelineConfig = PipelineConfig(
             holdThreshold: settings.holdThreshold,
@@ -91,6 +93,7 @@ final class AppModel: ObservableObject {
         // can hop back to it.
         let engine = self.engines[startingEngine]!
         let recorder = Recorder(sampleRate: pipelineConfig.sampleRate)
+        recorder.setPreferredInput(uid: settings.microphoneUID)
         self.recorder = recorder
         self.pipeline = DictationPipeline(
             recorder: recorder,
@@ -329,6 +332,25 @@ final class AppModel: ObservableObject {
                 await previousEngine?.unload()
             }
         }
+    }
+
+    /// Live list for the menu's Microphone picker — enumerated on each
+    /// menu open so plugged/unplugged devices appear without a restart.
+    nonisolated func availableMicrophones() -> [AudioInputDevice] {
+        AudioDevices.inputDevices()
+    }
+
+    /// Switches the capture device (nil = system default) and re-prepares
+    /// the engine so the next dictation starts on it. Selecting the
+    /// built-in mic avoids the per-dictation Bluetooth HFP renegotiation
+    /// delay when headphones are connected.
+    func setMicrophone(uid: String?) {
+        guard uid != microphoneUID else { return }
+        microphoneUID = uid
+        settings.microphoneUID = uid
+        recorder.setPreferredInput(uid: uid)
+        logger.log("microphone set to \(uid ?? "system default")")
+        prewarmRecorderIfGranted()
     }
 
     func setCleanupEnabled(_ on: Bool) {

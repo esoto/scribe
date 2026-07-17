@@ -1,5 +1,4 @@
 import XCTest
-@testable import Scribe
 
 /// Codable mirror of `tests_models/golden.json` — the cleanup-prompt golden
 /// set. Field names match the JSON via `CodingKeys` (snake_case on disk).

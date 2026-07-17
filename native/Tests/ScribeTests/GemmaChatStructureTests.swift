@@ -1,6 +1,5 @@
 import MLXLMCommon
 import XCTest
-@testable import Scribe
 
 /// Regression guard for the exact 8/10-message bug fixed in Task 15
 /// (see GemmaBackend.buildChat's doc comment): leaving the few-shot user

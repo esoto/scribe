@@ -1,3 +1,4 @@
+import AudioToolbox
 import AVFoundation
 import Foundation
 
@@ -22,6 +23,9 @@ protocol EngineControl: AnyObject {
     /// Halts capture so the OS microphone indicator turns off. Prepared
     /// resources may be retained for a fast next `start()`.
     func stop()
+    /// Selects which input device feeds the tap (CoreAudio device UID);
+    /// nil = system default. Takes effect on the next `prepare()`/`start()`.
+    func setPreferredInput(uid: String?)
 }
 
 /// Mic capture: an armed ring buffer fed by a pre-installed input tap.
@@ -95,6 +99,13 @@ final class Recorder: RecorderLike {
         guard !engineControl.isRunning else { return }
         engineControl.prepare()
     }
+
+    /// Selects the capture device (CoreAudio UID, nil = system default).
+    /// Applied by the engine on its next start — mid-dictation calls can't
+    /// happen (the menu is unreachable while the hotkey is held).
+    func setPreferredInput(uid: String?) {
+        engineControl.setPreferredInput(uid: uid)
+    }
 }
 
 /// Real AVAudioEngine adapter: installs an input tap at the node's native
@@ -108,8 +119,9 @@ final class Recorder: RecorderLike {
 final class AVEngineControl: EngineControl {
     var onSamples: (([Float]) -> Void)?
 
-    private let engine = AVAudioEngine()
+    private var engine = AVAudioEngine()
     private var tapInstalled = false
+    private var preferredInputUID: String?
 
     var isRunning: Bool { engine.isRunning }
 
@@ -134,9 +146,44 @@ final class AVEngineControl: EngineControl {
         engine.pause()
     }
 
+    func setPreferredInput(uid: String?) {
+        guard uid != preferredInputUID else { return }
+        preferredInputUID = uid
+        // Rebuild the engine: the installed tap and converter were created
+        // for the previous device's native format, and AVAudioEngine can't
+        // swap the input device under a live tap. The next
+        // prepare()/start() reinstalls everything against the new device.
+        engine.stop()
+        engine = AVAudioEngine()
+        tapInstalled = false
+    }
+
+    /// Points the engine's input unit at the preferred device, if it is
+    /// currently connected — otherwise the system default input is used
+    /// (same behavior as no selection, so an unplugged headset can never
+    /// brick dictation).
+    private func applyPreferredInput() {
+        guard let uid = preferredInputUID,
+            let devID = AudioDevices.deviceID(forUID: uid),
+            let audioUnit = engine.inputNode.audioUnit
+        else { return }
+        var dev = devID
+        AudioUnitSetProperty(
+            audioUnit,
+            kAudioOutputUnitProperty_CurrentDevice,
+            kAudioUnitScope_Global,
+            0,
+            &dev,
+            UInt32(MemoryLayout<AudioDeviceID>.size))
+    }
+
     private func installTapIfNeeded() {
         guard !tapInstalled else { return }
         tapInstalled = true
+
+        // Must happen BEFORE reading the input format below — the format
+        // is the selected device's native format.
+        applyPreferredInput()
 
         let inputNode = engine.inputNode
         let inputFormat = inputNode.outputFormat(forBus: 0)

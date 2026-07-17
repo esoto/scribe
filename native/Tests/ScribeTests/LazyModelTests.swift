@@ -1,5 +1,4 @@
 import XCTest
-@testable import Scribe
 
 /// Counting fake factory — records how many times it was invoked and can be
 /// told to fail on demand, so tests can assert load-once/reload/error-vs-

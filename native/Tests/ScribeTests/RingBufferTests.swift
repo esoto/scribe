@@ -1,5 +1,4 @@
 import XCTest
-@testable import Scribe
 
 /// Ported from tests/test_recorder.py — RingBuffer cases 1:1, plus the
 /// armed-capture cases run against `Recorder`'s pure `ingest`/`arm`/`disarm`
@@ -24,6 +23,8 @@ final class RingBufferTests: XCTestCase {
         var isRunning: Bool { running }
 
         func prepare() {}
+
+        func setPreferredInput(uid: String?) {}
 
         func start() throws {
             startCalls += 1

@@ -24,6 +24,7 @@ final class AppSettings {
         static let historySize = "historySize"
         static let idleUnloadMinutes = "idleUnloadMinutes"
         static let cleanupModelPath = "cleanupModelPath"
+        static let microphoneUID = "microphoneUID"
         static let didImportToml = "didImportToml"
     }
 
@@ -119,6 +120,19 @@ final class AppSettings {
             return raw
         }
         set { defaults.set(newValue, forKey: Key.cleanupModelPath) }
+    }
+
+    /// CoreAudio UID of the capture device; nil = system default. Set from
+    /// the menu's Microphone picker. Selecting the built-in mic avoids the
+    /// Bluetooth HFP renegotiation delay that the system default incurs
+    /// when headphones are connected.
+    var microphoneUID: String? {
+        get {
+            guard let raw = defaults.string(forKey: Key.microphoneUID), !raw.isEmpty
+            else { return nil }
+            return raw
+        }
+        set { defaults.set(newValue, forKey: Key.microphoneUID) }
     }
 
     // MARK: - Legacy TOML import

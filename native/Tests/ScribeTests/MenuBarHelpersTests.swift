@@ -2,7 +2,6 @@ import XCTest
 
 // `Sources/Scribe` compiles directly into the `ScribeTests` module (see
 // project.yml), so `glyphFor`/`truncateLabel`/`PipelineState` are already
-// visible here without an import. `@testable import Scribe` is deliberately
 // omitted: it would additionally pull in the separately built `Scribe` app
 // module's own copy of these same top-level symbols, and `glyphFor(.idle)`
 // below needs to pick a single overload — with both copies in scope, the

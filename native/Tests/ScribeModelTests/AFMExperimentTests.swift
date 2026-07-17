@@ -1,7 +1,6 @@
 import FoundationModels
 import XCTest
 
-@testable import Scribe
 
 /// **EXPERIMENT, NOT A GATE (2026-07-08).** Asks whether Apple's on-device
 /// FoundationModels (AFM) — with the NOW-evolved `CleanupPrompt` (few-shots +

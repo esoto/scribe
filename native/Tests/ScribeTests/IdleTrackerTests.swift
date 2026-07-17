@@ -2,7 +2,6 @@ import XCTest
 
 // `Sources/Scribe` compiles directly into the `ScribeTests` module (see
 // project.yml), so `IdleTracker` is already visible here without an import.
-// A `@testable import Scribe` would additionally pull in the separately
 // built `Scribe` app module's copy of the same symbols — harmless for type
 // references, but see MenuBarHelpersTests.swift for why it's avoided here.
 

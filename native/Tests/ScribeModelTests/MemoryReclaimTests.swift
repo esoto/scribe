@@ -1,7 +1,6 @@
 import MLX
 import XCTest
 
-@testable import Scribe
 
 /// Proves that `GemmaBackend.unload()` actually returns the ~2.5 GB of
 /// unified memory the 4-bit model occupies — not just drops the Swift

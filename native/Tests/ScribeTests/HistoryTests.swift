@@ -1,5 +1,4 @@
 import XCTest
-@testable import Scribe
 
 final class HistoryTests: XCTestCase {
     private func rec(_ i: Int) -> DictationRecord {

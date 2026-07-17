@@ -1,5 +1,4 @@
 import XCTest
-@testable import Scribe
 
 final class GatesTests: XCTestCase {
     func testRmsSilenceVsTone() {

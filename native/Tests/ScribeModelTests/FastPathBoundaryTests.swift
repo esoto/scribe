@@ -1,5 +1,4 @@
 import XCTest
-@testable import Scribe
 
 /// Regression coverage for the FAST-tier per-call boundary guard added to
 /// `GemmaBackend.generateCleaned` (see the adversarial-review fix for the

@@ -1,6 +1,5 @@
 import XCTest
 
-@testable import Scribe
 
 /// Pins the key-down preload contract: `preload()` must leave the backend
 /// fully warm (weights loaded AND prefix cache built), because AppModel

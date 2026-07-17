@@ -1,5 +1,4 @@
 import XCTest
-@testable import Scribe
 
 /// Tier-2 integration tests against real models and the committed benchmark
 /// fixtures (`tests_models/fixtures/`) — port of `tests_models/test_stt_fixtures.py`.

@@ -1,6 +1,5 @@
 import XCTest
 
-@testable import Scribe
 
 /// The engine-switch decision rules, including the two bugs they exist to
 /// prevent: a switch-back mid-preload being silently ignored (the app would

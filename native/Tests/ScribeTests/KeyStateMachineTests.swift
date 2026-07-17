@@ -1,5 +1,4 @@
 import XCTest
-@testable import Scribe
 
 final class KeyStateMachineTests: XCTestCase {
     private let cmd: UInt64 = 0x100000

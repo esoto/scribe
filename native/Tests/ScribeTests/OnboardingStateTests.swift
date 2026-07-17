@@ -1,5 +1,4 @@
 import XCTest
-@testable import Scribe
 
 final class OnboardingStateTests: XCTestCase {
     // MARK: - missing(_:)

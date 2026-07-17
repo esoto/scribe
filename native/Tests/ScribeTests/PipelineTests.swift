@@ -1,5 +1,4 @@
 import XCTest
-@testable import Scribe
 
 /// Ported 1:1 from tests/test_pipeline.py (17 cases) plus one Swift-specific
 /// addition for `RecorderLike.arm() throws`, a contract Python's recorder

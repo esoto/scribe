@@ -1,5 +1,4 @@
 import Foundation
-@testable import Scribe
 
 // Ported 1:1 from tests/fakes.py — used by PipelineTests.swift.
 

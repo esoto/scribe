@@ -1,6 +1,5 @@
 import XCTest
 
-@testable import Scribe
 
 /// Engine-lifecycle tests for `Recorder`: the microphone must be live only
 /// between arm() and disarm(), and prewarm() must preallocate without
@@ -17,6 +16,11 @@ final class RecorderTests: XCTestCase {
         private(set) var prepareCalls = 0
         private(set) var startCalls = 0
         private(set) var stopCalls = 0
+        private(set) var preferredInputs: [String?] = []
+
+        func setPreferredInput(uid: String?) {
+            preferredInputs.append(uid)
+        }
 
         func prepare() {
             prepareCalls += 1
@@ -82,6 +86,12 @@ final class RecorderTests: XCTestCase {
         try recorder.arm()
         try recorder.prewarm()
         XCTAssertEqual(engine.prepareCalls, 0)
+    }
+
+    func testPreferredInputPassesThroughToEngine() {
+        recorder.setPreferredInput(uid: "BuiltInMicrophoneDevice")
+        recorder.setPreferredInput(uid: nil)
+        XCTAssertEqual(engine.preferredInputs, ["BuiltInMicrophoneDevice", nil])
     }
 
     func testDisarmStopsCaptureAndReturnsSamples() throws {
