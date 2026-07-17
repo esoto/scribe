@@ -40,6 +40,12 @@ final class AppModel: ObservableObject {
     @Published private(set) var activeEngineName: String
     @Published private(set) var cleanupEnabled: Bool
     @Published private(set) var microphoneUID: String?
+    // Stable snapshot for the menu's Microphone picker. Enumerating inside
+    // the menu body re-ran CoreAudio queries (Bluetooth ones are slow) on
+    // every hover re-render, which flickered the submenu and broke click
+    // registration — so the list is published here and refreshed only on
+    // real device changes.
+    @Published private(set) var microphones: [AudioInputDevice] = []
     @Published private(set) var launchAtLoginEnabled: Bool = LoginItem.isEnabled
 
     private let pipelineConfig: PipelineConfig
@@ -165,6 +171,11 @@ final class AppModel: ObservableObject {
             } else if !granted {
                 logger.log("notification authorization denied")
             }
+        }
+
+        microphones = AudioDevices.inputDevices()
+        AudioDevices.onDevicesChanged { [weak self] in
+            self?.microphones = AudioDevices.inputDevices()
         }
 
         preloadAtStartup()
@@ -332,12 +343,6 @@ final class AppModel: ObservableObject {
                 await previousEngine?.unload()
             }
         }
-    }
-
-    /// Live list for the menu's Microphone picker — enumerated on each
-    /// menu open so plugged/unplugged devices appear without a restart.
-    nonisolated func availableMicrophones() -> [AudioInputDevice] {
-        AudioDevices.inputDevices()
     }
 
     /// Switches the capture device (nil = system default) and re-prepares

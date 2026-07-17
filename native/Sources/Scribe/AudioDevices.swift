@@ -30,6 +30,19 @@ enum AudioDevices {
         allDeviceIDs().first { stringProperty($0, kAudioDevicePropertyDeviceUID) == uid }
     }
 
+    /// Calls `handler` on the main queue whenever the system's device list
+    /// changes (plug/unplug, Bluetooth connect). Installed once for the
+    /// app's lifetime — no removal path needed.
+    static func onDevicesChanged(_ handler: @escaping () -> Void) {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDevices,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain)
+        AudioObjectAddPropertyListenerBlock(
+            AudioObjectID(kAudioObjectSystemObject), &address, .main
+        ) { _, _ in handler() }
+    }
+
     // MARK: - CoreAudio plumbing
 
     private static func allDeviceIDs() -> [AudioDeviceID] {

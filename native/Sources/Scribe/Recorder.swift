@@ -168,13 +168,18 @@ final class AVEngineControl: EngineControl {
             let audioUnit = engine.inputNode.audioUnit
         else { return }
         var dev = devID
-        AudioUnitSetProperty(
+        let status = AudioUnitSetProperty(
             audioUnit,
             kAudioOutputUnitProperty_CurrentDevice,
             kAudioUnitScope_Global,
             0,
             &dev,
             UInt32(MemoryLayout<AudioDeviceID>.size))
+        if status != noErr {
+            // Capture proceeds on the system default — audible, verifiable
+            // via the menu, and strictly better than a dead engine.
+            print("[AVEngineControl] could not select input device \(uid): OSStatus \(status)")
+        }
     }
 
     private func installTapIfNeeded() {

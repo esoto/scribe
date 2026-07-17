@@ -67,13 +67,12 @@ struct MenuBarView: View {
             set: { model.setMicrophone(uid: $0.isEmpty ? nil : $0) }
         )) {
             Text("System Default").tag("")
-            let devices = model.availableMicrophones()
-            ForEach(devices) { device in
+            ForEach(model.microphones) { device in
                 Text(device.name).tag(device.id)
             }
             // Keep a stale selection visible (and revertable) after its
             // device unplugs — capture falls back to the default meanwhile.
-            if let uid = model.microphoneUID, !devices.contains(where: { $0.id == uid }) {
+            if let uid = model.microphoneUID, !model.microphones.contains(where: { $0.id == uid }) {
                 Text("(disconnected)").tag(uid)
             }
         }
