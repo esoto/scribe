@@ -14,10 +14,15 @@ struct AudioInputDevice: Equatable, Identifiable {
 /// tested (see MicSelectionTests).
 enum AudioDevices {
     /// All devices with at least one input channel, in system order.
+    /// Excludes CoreAudio's transient private aggregates
+    /// (`CADefaultDeviceAggregate-…`): they appear/disappear while apps use
+    /// the default device — they're not something a user can meaningfully
+    /// pick, and their churn is exactly what a picker must not display.
     static func inputDevices() -> [AudioInputDevice] {
         allDeviceIDs().compactMap { devID in
             guard inputChannelCount(devID) > 0,
                 let uid = stringProperty(devID, kAudioDevicePropertyDeviceUID),
+                !uid.hasPrefix("CADefaultDeviceAggregate"),
                 let name = stringProperty(devID, kAudioObjectPropertyName)
             else { return nil }
             return AudioInputDevice(id: uid, name: name)

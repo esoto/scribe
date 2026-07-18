@@ -175,7 +175,16 @@ final class AppModel: ObservableObject {
 
         microphones = AudioDevices.inputDevices()
         AudioDevices.onDevicesChanged { [weak self] in
-            self?.microphones = AudioDevices.inputDevices()
+            guard let self else { return }
+            // Republish only on a REAL change: the listener also fires for
+            // CoreAudio's transient private aggregates (created/destroyed
+            // whenever apps touch the default device — including our own
+            // engine), and a no-op republish rebuilds the open menu, which
+            // closes the Microphone submenu under the cursor.
+            let fresh = AudioDevices.inputDevices()
+            if fresh != self.microphones {
+                self.microphones = fresh
+            }
         }
 
         preloadAtStartup()

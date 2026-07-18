@@ -38,6 +38,7 @@ targets:
       path: Info.plist
       properties:
         CFBundleDisplayName: scribe
+        CFBundleShortVersionString: "1.0.1"
         CFBundleIconFile: AppIcon
         LSUIElement: true
         NSMicrophoneUsageDescription: "scribe listens while you hold the dictation key."

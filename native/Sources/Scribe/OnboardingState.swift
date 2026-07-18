@@ -6,7 +6,7 @@ enum Grant: String, CaseIterable {
     case inputMonitoring
 }
 
-struct GrantStatus {
+struct GrantStatus: Equatable {
     var microphone: Bool
     var accessibility: Bool
     var inputMonitoring: Bool

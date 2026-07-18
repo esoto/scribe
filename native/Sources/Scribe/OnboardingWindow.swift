@@ -210,20 +210,29 @@ struct OnboardingWindow: View {
     /// audio engine ahead of the first key-down, and
     /// `activateHotkeyIfNeeded()` live-activates the hotkey tap.
     private func refreshGrants() {
-        let microphone = TCC.microphoneGranted()
-        let microphoneNewlyGranted = microphone && !model.grants.microphone
-        model.grants.microphone = microphone
+        let fresh = GrantStatus(
+            microphone: TCC.microphoneGranted(),
+            accessibility: TCC.accessibilityGranted(),
+            inputMonitoring: TCC.inputMonitoringGranted())
+
+        let microphoneNewlyGranted = fresh.microphone && !model.grants.microphone
+        let inputMonitoringNewlyGranted = fresh.inputMonitoring && !model.grants.inputMonitoring
+
+        // Publish at most once, and ONLY on a real change: every published
+        // write rebuilds the menu bar menu, and a rebuild closes any open
+        // submenu — the old per-field unconditional writes fired three
+        // times per 2 s poll tick and made the Microphone submenu
+        // unusable whenever this window was open.
+        if fresh != model.grants {
+            model.grants = fresh
+        }
         if microphoneNewlyGranted {
             model.prewarmRecorderIfGranted()
         }
-
-        model.grants.accessibility = TCC.accessibilityGranted()
-
-        let inputMonitoring = TCC.inputMonitoringGranted()
-        if inputMonitoring && !model.grants.inputMonitoring {
+        if inputMonitoringNewlyGranted {
+            // Reinstalls the tap; on failure it flips
+            // grants.inputMonitoring back to false itself.
             model.activateHotkeyIfNeeded()
-        } else {
-            model.grants.inputMonitoring = inputMonitoring
         }
     }
 }
