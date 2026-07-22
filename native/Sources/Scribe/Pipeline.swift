@@ -69,6 +69,10 @@ final class DictationPipeline {
     /// learning hook. Harvesting relies on LLM-normalized casing, so raw
     /// STT output is deliberately never offered to it.
     private let onCleaned: ((String) -> Void)?
+    /// The user's manual replacement pairs, read fresh each dictation.
+    /// Applied deterministically here rather than via the cleanup prompt —
+    /// see TermReplacer for why.
+    private let replacementPairs: () -> [ReplacementPair]
     private let saveFailedAudio: ([Float]) -> Void
 
     private(set) var engineName: String
@@ -91,7 +95,8 @@ final class DictationPipeline {
         saveFailedAudio: @escaping ([Float]) -> Void,
         cleanupEnabled: Bool = true,
         onLog: ((String) -> Void)? = nil,
-        onCleaned: ((String) -> Void)? = nil
+        onCleaned: ((String) -> Void)? = nil,
+        replacementPairs: @escaping () -> [ReplacementPair] = { [] }
     ) {
         self.recorder = recorder
         self.stt = stt
@@ -108,6 +113,7 @@ final class DictationPipeline {
         self.cleanupEnabled = cleanupEnabled
         self.onLog = onLog
         self.onCleaned = onCleaned
+        self.replacementPairs = replacementPairs
     }
 
     // MARK: - Public API
@@ -181,13 +187,24 @@ final class DictationPipeline {
             return
         }
 
-        var final = raw
+        // Applied BEFORE cleanup so the model reads the words the speaker
+        // actually said, and again after, so the pair's exact spelling
+        // survives whatever cleanup did with it (it likes to capitalize).
+        // Unconditional by design: this is the only path that also covers
+        // utterances too short to be cleaned, cleanup switched off, and
+        // cleanup failing its gates.
+        let pairs = replacementPairs()
+        let transcript = TermReplacer.apply(pairs, to: raw)
+
+        var final = transcript
         var cleaned = false
         var cleanupMs = 0
-        if let cleaner, Gates.shouldClean(raw, enabled: cleanupEnabled, minWords: config.minWords) {
+        if let cleaner,
+            Gates.shouldClean(transcript, enabled: cleanupEnabled, minWords: config.minWords)
+        {
             let cleanStart = clock()
-            if let out = await tryClean(raw, cleaner: cleaner) {
-                final = out
+            if let out = await tryClean(transcript, cleaner: cleaner) {
+                final = TermReplacer.apply(pairs, to: out)
                 cleaned = true
             }
             cleanupMs = Int((clock() - cleanStart) * 1000)

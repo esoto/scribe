@@ -148,7 +148,8 @@ final class AppModel: ObservableObject {
             onLog: { [logger] line in logger.log(line) },
             // The store is thread-safe and observe() is fire-and-forget, so
             // no main-actor hop — capture the collaborator like onLog does.
-            onCleaned: { [dictionary] text in dictionary.observe(cleanedText: text) }
+            onCleaned: { [dictionary] text in dictionary.observe(cleanedText: text) },
+            replacementPairs: { [dictionary] in dictionary.snapshot.pairs }
         )
 
         dictionary.onChange = { [weak self] snapshot in

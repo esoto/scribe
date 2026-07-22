@@ -17,15 +17,15 @@ func pairRowLabel(_ original: String, _ replacement: String) -> String {
     "\(truncateLabel(original, n: 24)) → \(truncateLabel(replacement, n: 24))"
 }
 
-/// Add-button enablement: both sides must reach the model intact. An entry
-/// that sanitizes to nil would be dropped at render time, and one past the
-/// length cap would be shortened — either way the saved pair and the pair
-/// the model applies would disagree, with nothing on screen saying so.
-/// Free function, unit-tested.
+/// Add-button enablement. Pairs are applied as literal text substitutions
+/// (see TermReplacer), never as prompt instructions, so they are NOT
+/// sanitized or length-capped the way vocabulary terms are — a replacement
+/// of `<div>` or a lone quote character is legitimate and must survive
+/// verbatim. Only genuinely empty input is refused. Free function,
+/// unit-tested.
 func canAddPair(original: String, replacement: String) -> Bool {
-    [original, replacement].allSatisfy { field in
-        guard let checked = CleanupPrompt.sanitizeTermChecked(field) else { return false }
-        return !checked.truncated
+    [original, replacement].allSatisfy {
+        !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 }
 

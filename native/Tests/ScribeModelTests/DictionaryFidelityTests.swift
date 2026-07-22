@@ -87,7 +87,11 @@ final class DictionaryFidelityTests: XCTestCase {
         var failures: [String] = []
         for testCase in Self.cases where testCase.condition == condition {
             Self.gemma.setDictionary(testCase.snapshot)
-            let out = try await Self.gemma.clean(testCase.input)
+            // Mirrors DictationPipeline.process exactly: pairs are applied
+            // around the model, not by it.
+            let pairs = testCase.snapshot.pairs
+            let transcript = TermReplacer.apply(pairs, to: testCase.input)
+            let out = TermReplacer.apply(pairs, to: try await Self.gemma.clean(transcript))
             let low = out.lowercased()
             let missing = testCase.mustContain.filter { !low.contains($0.lowercased()) }
             print("[fidelity][\(condition)] \(missing.isEmpty ? "PASS" : "FAIL lost=\(missing)")")

@@ -70,6 +70,6 @@ final class GemmaChatStructureTests: XCTestCase {
         XCTAssertEqual(chat[0].role, .system)
         XCTAssertEqual(chat[0].content, prompt)
         XCTAssertTrue(chat[0].content.contains("\"MLX\", \"Parakeet\""))
-        XCTAssertTrue(chat[0].content.contains("write \"camel\" as \"kamal\""))
+        XCTAssertFalse(chat[0].content.contains("kamal"), "pairs never reach the prompt")
     }
 }

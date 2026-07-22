@@ -13,18 +13,16 @@ final class DictionaryWindowHelpersTests: XCTestCase {
         XCTAssertTrue(canAddPair(original: "camel", replacement: "kamal"))
         XCTAssertFalse(canAddPair(original: "   ", replacement: "kamal"))
         XCTAssertFalse(canAddPair(original: "camel", replacement: ""))
-        XCTAssertFalse(canAddPair(original: "<>\"", replacement: "kamal"))
+        XCTAssertFalse(canAddPair(original: "\n\t ", replacement: "kamal"))
     }
 
-    func testCanAddPairRejectsInputTheModelWouldOnlySeePartOf() {
-        // The prompt caps a term at 48 chars. Accepting a longer one would
-        // save what the user typed but apply a fragment, with nothing on
-        // screen showing the difference.
-        let atLimit = String(repeating: "a", count: CleanupPrompt.maxTermLength)
-        let overLimit = atLimit + "b"
-        XCTAssertTrue(canAddPair(original: "acme", replacement: atLimit))
-        XCTAssertFalse(canAddPair(original: "acme", replacement: overLimit))
-        XCTAssertFalse(canAddPair(original: overLimit, replacement: "acme"))
+    func testCanAddPairAllowsLongAndMarkupReplacements() {
+        // Pairs are pasted verbatim, never sent to the model, so neither the
+        // prompt length cap nor the markup stripping applies to them.
+        let long = String(repeating: "a", count: 200)
+        XCTAssertTrue(canAddPair(original: "acme", replacement: long))
+        XCTAssertTrue(canAddPair(original: "div tag", replacement: "<div>"))
+        XCTAssertTrue(canAddPair(original: "quote", replacement: "\""))
     }
 
     func testMenuGlossaryTermsExcludesSeededAndRanksByUse() {

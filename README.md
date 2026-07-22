@@ -71,12 +71,18 @@ Cleanup knows generic English and Spanish, not *your* nouns. The dictionary
 teaches it — menu bar → **Dictionary**, or **Edit Dictionary…** for the
 full editor.
 
-**Replacements (manual).** "Heard as → Replace with" pairs, applied every
-time — this is the part that works, and the one to reach for. A word the
-STT mishears comes out *differently each time* ("Hetzner" produced
-Headstar, Hatsner, Heftner and Headsnar in one sitting), so add a pair for
-whichever spelling you see most; add a second if another variant keeps
-showing up.
+**Replacements (manual).** "Heard as → Replace with" pairs — this is the
+part that works, and the one to reach for. A word the STT mishears comes
+out *differently each time* ("Hetzner" produced Headstar, Hatsner, Heftner
+and Headsnar in one sitting), so add a pair for whichever spelling you see
+most; add a second if another variant keeps showing up.
+
+Replacements are applied directly to the transcript, not by the cleanup
+model, so they hold **on every dictation** — including ones too short to be
+cleaned (under `minWords`), with cleanup switched off, and when cleanup
+times out or trips its gates. Matching is whole-word and case-insensitive,
+punctuation is preserved, and the replacement is pasted verbatim, so
+`camel` fixes "Camel," but leaves `camelCase` alone.
 
 **Learned terms (automatic) — off by default, and it should stay off for
 now.** The intent: distinctive vocabulary in cleaned dictations (proper
@@ -94,9 +100,8 @@ Terms** enables it anyway if you want to experiment.
 
 Both are stored in `~/Library/Application Support/scribe/dictionary.json`
 — **individual words only, never transcripts.** Delete the file for a clean
-reset. At most 20 replacements and 30 learned terms reach the prompt
-(highest-use first), which keeps the cleanup model's cached prompt prefix
-cheap; the prefix rebuilds automatically when the dictionary changes.
+reset. Only learned terms reach the cleanup prompt (at most 30, highest-use
+first); editing a replacement costs nothing, since the model never sees it.
 
 ## Configuration
 

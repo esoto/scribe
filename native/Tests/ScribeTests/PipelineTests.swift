@@ -39,7 +39,8 @@ final class PipelineTests: XCTestCase {
         cleaner: CleanupBackend? = FakeCleaner(),
         paster: Pasting = FakePaster(),
         history: History = History(maxLen: 10),
-        config: PipelineConfig = PipelineConfig()
+        config: PipelineConfig = PipelineConfig(),
+        pairs: [ReplacementPair] = []
     ) -> Harness {
         let clock = FakeClock()
         let states = Box<PipelineState>()
@@ -58,7 +59,8 @@ final class PipelineTests: XCTestCase {
             onState: { states.append($0) },
             onNotice: { notices.append($0) },
             saveFailedAudio: { saved.append($0) },
-            onCleaned: { cleanedTexts.append($0) }
+            onCleaned: { cleanedTexts.append($0) },
+            replacementPairs: { pairs }
         )
         return Harness(
             pipeline: pipeline, clock: clock, states: states, notices: notices, saved: saved,
@@ -264,6 +266,61 @@ final class PipelineTests: XCTestCase {
         clock.t += 1.0
         pipeline.keyUp()
         XCTAssertEqual(paster.pasted, ["hello there world"])
+    }
+
+    // MARK: - Replacement pairs (applied outside the cleanup model)
+
+    private var camelPair: [ReplacementPair] {
+        [ReplacementPair(original: "camel", replacement: "kamal", addedAt: Date(timeIntervalSince1970: 0))]
+    }
+
+    func testReplacementAppliesWhenUtteranceIsTooShortToClean() {
+        // The real-world bug: "deploy with camel" is 3 words, under the
+        // minWords gate, so cleanup never ran and the dictionary never
+        // applied. It must apply anyway.
+        let paster = FakePaster()
+        let cleaner = FakeCleaner()
+        let h = make(
+            stt: FakeStt(text: "deploy with camel"), cleaner: cleaner, paster: paster,
+            pairs: camelPair)
+        dictate(h)
+        XCTAssertEqual(cleaner.calls, 0, "precondition: cleanup skipped")
+        XCTAssertEqual(paster.pasted, ["deploy with kamal"])
+    }
+
+    func testReplacementAppliesWhenCleanupIsDisabled() {
+        let paster = FakePaster()
+        let h = make(stt: FakeStt(text: "so um deploy with camel today"), paster: paster, pairs: camelPair)
+        h.pipeline.cleanupEnabled = false
+        dictate(h)
+        XCTAssertEqual(paster.pasted, ["so um deploy with kamal today"])
+    }
+
+    func testReplacementAppliesWhenCleanupFails() {
+        let paster = FakePaster()
+        let h = make(
+            stt: FakeStt(text: "so um deploy with camel today"),
+            cleaner: FakeCleaner(err: TestError(message: "boom")), paster: paster, pairs: camelPair)
+        dictate(h)
+        XCTAssertEqual(paster.pasted, ["so um deploy with kamal today"])
+    }
+
+    func testReplacementIsReappliedAfterCleanup() {
+        // Cleanup likes to capitalize; the pair's exact spelling wins.
+        let paster = FakePaster()
+        let h = make(
+            stt: FakeStt(text: "so um deploy with camel today"),
+            cleaner: FakeCleaner(out: "Deploy with Camel today."), paster: paster, pairs: camelPair)
+        dictate(h)
+        XCTAssertEqual(paster.pasted, ["Deploy with kamal today."])
+    }
+
+    func testCleanerReceivesTheCorrectedTranscript() {
+        // The model should read what the speaker said, not the mishearing.
+        let cleaner = FakeCleaner()
+        let h = make(stt: FakeStt(text: "so um deploy with camel today"), cleaner: cleaner, pairs: camelPair)
+        dictate(h)
+        XCTAssertEqual(cleaner.received, ["so um deploy with kamal today"])
     }
 
     /// Swift-specific: `RecorderLike.arm() throws` has no equivalent in the

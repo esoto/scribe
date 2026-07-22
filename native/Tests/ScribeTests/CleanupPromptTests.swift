@@ -41,23 +41,23 @@ final class CleanupPromptTests: XCTestCase {
         XCTAssertFalse(prompt.contains("spelling corrections"))
     }
 
-    func testPairsOnlySection() {
+    func testPairsAreNotRenderedIntoThePrompt() {
+        // Pairs are applied by TermReplacer, not by the model, so they must
+        // leave no trace in the prompt — and therefore never invalidate the
+        // warm KV-cache prefix.
         let snap = DictionarySnapshot(pairs: [pair("camel", "kamal")], glossary: [])
-        let prompt = CleanupPrompt.systemPrompt(with: snap)
-        XCTAssertTrue(prompt.contains("spelling corrections"))
-        XCTAssertTrue(prompt.contains("write \"camel\" as \"kamal\""))
-        XCTAssertFalse(prompt.contains("personal vocabulary"))
+        XCTAssertEqual(CleanupPrompt.systemPrompt(with: snap), CleanupPrompt.systemPrompt)
     }
 
-    func testBothSectionsAndDeterminism() {
+    func testOnlyTheGlossaryIsRenderedAndItIsDeterministic() {
         let snap = DictionarySnapshot(
             pairs: [pair("camel", "kamal"), pair("wisper", "Whisper")],
             glossary: ["MLX", "Parakeet"])
         let a = CleanupPrompt.systemPrompt(with: snap)
-        let b = CleanupPrompt.systemPrompt(with: snap)
-        XCTAssertEqual(a, b)
-        XCTAssertTrue(a.contains("write \"camel\" as \"kamal\"; write \"wisper\" as \"Whisper\""))
+        XCTAssertEqual(a, CleanupPrompt.systemPrompt(with: snap))
         XCTAssertTrue(a.contains("\"MLX\", \"Parakeet\""))
+        XCTAssertFalse(a.contains("kamal"))
+        XCTAssertFalse(a.contains("Whisper"))
     }
 
     func testSanitizeTerm() {
@@ -80,12 +80,10 @@ final class CleanupPromptTests: XCTestCase {
         XCTAssertNil(CleanupPrompt.sanitizeTerm(""))
     }
 
-    func testUnsanitizableEntriesAreDropped() {
-        let snap = DictionarySnapshot(
-            pairs: [pair("<>", "kamal"), pair("ok", "fine")], glossary: ["\"\"", "MLX"])
+    func testUnsanitizableGlossaryTermsAreDropped() {
+        let snap = DictionarySnapshot(pairs: [], glossary: ["\"\"", "MLX"])
         let prompt = CleanupPrompt.systemPrompt(with: snap)
-        XCTAssertTrue(prompt.contains("write \"ok\" as \"fine\""))
-        XCTAssertFalse(prompt.contains("kamal"))  // pair with empty original dropped whole
         XCTAssertTrue(prompt.contains("\"MLX\""))
+        XCTAssertFalse(prompt.contains("\"\"\"\""))
     }
 }

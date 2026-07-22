@@ -16,19 +16,24 @@ final class DictionaryWarmRebuildTests: XCTestCase {
 
         // Publishing a snapshot makes the prefix stale; preload rebuilds it
         // for the new prompt.
-        let snapshot = DictionarySnapshot(
-            pairs: [
-                ReplacementPair(
-                    original: "camel", replacement: "kamal",
-                    addedAt: Date(timeIntervalSince1970: 0))
-            ],
-            glossary: ["Parakeet"])
+        let pair = ReplacementPair(
+            original: "camel", replacement: "kamal", addedAt: Date(timeIntervalSince1970: 0))
+
+        // Pairs never reach the prompt (TermReplacer applies them), so a
+        // pairs-only dictionary must leave the warm prefix completely alone.
+        backend.setDictionary(DictionarySnapshot(pairs: [pair], glossary: []))
+        await backend.preload()
+        XCTAssertEqual(
+            backend.warmSystemPromptForTesting, CleanupPrompt.systemPrompt,
+            "editing a replacement pair must not cost a prefix rebuild")
+
+        let snapshot = DictionarySnapshot(pairs: [pair], glossary: ["Parakeet"])
         backend.setDictionary(snapshot)
         await backend.preload()
         XCTAssertTrue(backend.isWarm)
         let warmPrompt = try XCTUnwrap(backend.warmSystemPromptForTesting)
         XCTAssertTrue(warmPrompt.contains("\"Parakeet\""))
-        XCTAssertTrue(warmPrompt.contains("write \"camel\" as \"kamal\""))
+        XCTAssertFalse(warmPrompt.contains("kamal"))
 
         // Cleaning with the dictionary-augmented prompt still produces
         // sane output (and must not fall back on a prefix mismatch).

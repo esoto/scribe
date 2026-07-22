@@ -56,6 +56,9 @@ final class FakeCleaner: CleanupBackend {
     let err: Error?
     let delay: Double
     private(set) var calls = 0
+    /// Text handed to `clean` — lets tests assert the model saw the
+    /// dictionary-corrected transcript, not the raw mishearing.
+    private(set) var received: [String] = []
 
     init(out: String = "hello there world", err: Error? = nil, delay: Double = 0.0) {
         self.out = out
@@ -65,6 +68,7 @@ final class FakeCleaner: CleanupBackend {
 
     func clean(_ text: String) async throws -> String {
         calls += 1
+        received.append(text)
         if delay > 0 {
             try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
         }

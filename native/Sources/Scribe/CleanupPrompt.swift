@@ -16,29 +16,17 @@ enum CleanupPrompt {
                 "\n\nThe speaker's personal vocabulary includes these exact terms — when the transcript contains one of them (or a close mishearing of one), spell it exactly like this: "
                 + glossary.map { "\"\($0)\"" }.joined(separator: ", ") + "."
         }
-        let pairs = snapshot.pairs.compactMap { pair -> (String, String)? in
-            guard let o = sanitizeTerm(pair.original), let r = sanitizeTerm(pair.replacement)
-            else { return nil }
-            return (o, r)
-        }
-        if !pairs.isEmpty {
-            // Rendered as "write X as Y", never with an arrow. `"X" -> "Y"`
-            // reads as "X to Y", so a transcript saying "deploy with camel
-            // to hetzner" looked to the model like a replacement rule
-            // camel -> hetzner; it applied it and the word "camel" vanished
-            // from the sentence. Every dropped-word case in
-            // DictionaryFidelityTests had that "X to Y" shape.
-            prompt +=
-                "\n\nAlways apply these spelling corrections when the word appears in the transcript: "
-                + pairs.map { "write \"\($0.0)\" as \"\($0.1)\"" }.joined(separator: "; ") + "."
-        }
+        // Replacement pairs are NOT rendered here. They are applied
+        // deterministically in the pipeline (see TermReplacer) — telling a
+        // 4B model to perform a literal substitution cost words, and the
+        // prompt only runs when cleanup does. A consequence worth keeping:
+        // because the warm KV-cache prefix is keyed on this string, editing
+        // a pair no longer invalidates it at all.
         return prompt
     }
 
     /// Longest term that reaches the prompt. Learned terms are single
-    /// words so this never bites; it exists to bound what dictated text can
-    /// inject. Manual entries are checked against it up front (see
-    /// `canAddPair`) rather than being silently shortened.
+    /// words so this never bites; it bounds what dictated text can inject.
     static let maxTermLength = 48
 
     /// Makes a dictionary term inert before it enters the system prompt:
