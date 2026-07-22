@@ -16,6 +16,17 @@ final class DictionaryWindowHelpersTests: XCTestCase {
         XCTAssertFalse(canAddPair(original: "<>\"", replacement: "kamal"))
     }
 
+    func testCanAddPairRejectsInputTheModelWouldOnlySeePartOf() {
+        // The prompt caps a term at 48 chars. Accepting a longer one would
+        // save what the user typed but apply a fragment, with nothing on
+        // screen showing the difference.
+        let atLimit = String(repeating: "a", count: CleanupPrompt.maxTermLength)
+        let overLimit = atLimit + "b"
+        XCTAssertTrue(canAddPair(original: "acme", replacement: atLimit))
+        XCTAssertFalse(canAddPair(original: "acme", replacement: overLimit))
+        XCTAssertFalse(canAddPair(original: overLimit, replacement: "acme"))
+    }
+
     func testGlossaryRowDetail() {
         let now = Date(timeIntervalSince1970: 1_000_000)
         XCTAssertEqual(

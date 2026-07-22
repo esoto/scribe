@@ -17,11 +17,16 @@ func pairRowLabel(_ original: String, _ replacement: String) -> String {
     "\(truncateLabel(original, n: 24)) → \(truncateLabel(replacement, n: 24))"
 }
 
-/// Add-button enablement: both sides must survive prompt sanitization,
-/// since an entry that sanitizes to nil would be silently dropped at
-/// render time. Free function, unit-tested.
+/// Add-button enablement: both sides must reach the model intact. An entry
+/// that sanitizes to nil would be dropped at render time, and one past the
+/// length cap would be shortened — either way the saved pair and the pair
+/// the model applies would disagree, with nothing on screen saying so.
+/// Free function, unit-tested.
 func canAddPair(original: String, replacement: String) -> Bool {
-    CleanupPrompt.sanitizeTerm(original) != nil && CleanupPrompt.sanitizeTerm(replacement) != nil
+    [original, replacement].allSatisfy { field in
+        guard let checked = CleanupPrompt.sanitizeTermChecked(field) else { return false }
+        return !checked.truncated
+    }
 }
 
 /// Detail line for a learned term row. Free function, unit-tested.

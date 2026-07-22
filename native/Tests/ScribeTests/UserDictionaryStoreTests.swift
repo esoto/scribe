@@ -168,6 +168,59 @@ final class UserDictionaryStoreTests: XCTestCase {
         XCTAssertEqual(store.snapshot.glossary, ["Ansible", "Hetzner", "kamal"])
     }
 
+    /// Fills the glossary past the 30-term snapshot cap, highest-count first,
+    /// so terms[30...] are stored but never reach the prompt.
+    private func makeOverCappedStore() -> (UserDictionaryStore, [String]) {
+        let store = makeStore()
+        let terms = (0..<40).map { String(format: "Term%02dx", $0) }
+        for (i, term) in terms.enumerated() {
+            for _ in 0..<(40 - i + 3) { store.observe(cleanedText: "we discussed \(term) today") }
+        }
+        _ = store.snapshot
+        return (store, terms)
+    }
+
+    func testRemovingTermBelowPromptCapStillNotifies() {
+        // The editor window lists every stored term, not just the 30 that
+        // reach the prompt. Removing one of the others changes that list
+        // without changing the snapshot — if it doesn't notify, the row
+        // stays on screen after the user deletes it.
+        let (store, terms) = makeOverCappedStore()
+        let belowCap = terms[39]
+        XCTAssertFalse(store.snapshot.glossary.contains(belowCap), "precondition: outside prompt")
+
+        let fired = Box<DictionarySnapshot>()
+        store.onChange = { fired.append($0) }
+        store.removeGlossaryTerm(belowCap)
+        _ = store.snapshot
+
+        XCTAssertEqual(store.allGlossaryEntries.count, 39)
+        XCTAssertEqual(fired.value.count, 1)
+    }
+
+    func testPromotionIntoFullGlossaryStillNotifies() {
+        let (store, _) = makeOverCappedStore()
+        let fired = Box<DictionarySnapshot>()
+        store.onChange = { fired.append($0) }
+        for _ in 0..<3 { store.observe(cleanedText: "brand new NewTermZ here") }
+        _ = store.snapshot
+        XCTAssertTrue(store.allGlossaryEntries.map(\.term).contains("NewTermZ"))
+        XCTAssertEqual(fired.value.count, 1, "a promotion is visible in the editor even below the cap")
+    }
+
+    func testCountBumpsStillDoNotNotify() {
+        // The other half of the contract: re-seeing a known term happens
+        // every dictation and must stay silent.
+        let store = makeStore()
+        for _ in 0..<3 { store.observe(cleanedText: "ship with Kamal now") }
+        _ = store.snapshot
+        let fired = Box<DictionarySnapshot>()
+        store.onChange = { fired.append($0) }
+        for _ in 0..<5 { store.observe(cleanedText: "ship with Kamal now") }
+        _ = store.snapshot
+        XCTAssertEqual(fired.value.count, 0)
+    }
+
     func testAddPairReplacesSameOriginal() {
         let store = makeStore()
         store.addPair(original: "camel", replacement: "kamal")

@@ -412,9 +412,17 @@ final class AppModel: ObservableObject {
     /// next key-down preload rebuilds with the fresh prompt anyway, and a
     /// bare preload() here would force-load ~2.5 GB just to warm a prompt.
     private func applyDictionaryChange(_ snapshot: DictionarySnapshot) {
-        dictionarySnapshot = snapshot
+        // Always refresh what the editor window lists — the store also
+        // notifies for changes below the prompt's 30-term cap, which move
+        // these lists without moving the snapshot.
         glossaryEntries = dictionary.allGlossaryEntries
         replacementPairs = dictionary.allPairs
+
+        // Cache work only when the prompt itself actually changes.
+        // Rebuilding the warm prefix costs ~1 s, so a list-only change must
+        // not trigger it.
+        guard snapshot != dictionarySnapshot else { return }
+        dictionarySnapshot = snapshot
         cleaner.setDictionary(snapshot)
         logger.log(
             "dictionary updated: \(snapshot.glossary.count) learned terms, \(snapshot.pairs.count) pairs"

@@ -67,7 +67,20 @@ final class UserDictionaryStore: @unchecked Sendable {
     private var candidates: [GlossaryEntry] = []
     private var enabled = true
     private var lastSnapshot = DictionarySnapshot.empty
+    private var lastStructure = Structure.empty
     private var changeHandler: ((DictionarySnapshot) -> Void)?
+
+    /// Identity of everything the editor window lists: which terms and
+    /// pairs exist, ignoring counts. Kept separate from the snapshot
+    /// because the two answer different questions — the snapshot is what
+    /// the model sees (capped at 30 terms), this is what the user sees
+    /// (everything stored). A term can be added or removed below the cap,
+    /// changing the list without changing the prompt.
+    private struct Structure: Equatable {
+        var terms: [String]
+        var pairs: [String]
+        static let empty = Structure(terms: [], pairs: [])
+    }
 
     init(fileURL: URL = UserDictionaryStore.defaultURL, now: @escaping () -> Date = Date.init) {
         self.fileURL = fileURL
@@ -78,6 +91,7 @@ final class UserDictionaryStore: @unchecked Sendable {
         decayLocked()
         capLocked()
         lastSnapshot = computeSnapshotLocked()
+        lastStructure = computeStructureLocked()
     }
 
     /// Fired on the store's internal queue whenever the snapshot changes —
@@ -191,11 +205,29 @@ final class UserDictionaryStore: @unchecked Sendable {
         if let data = try? encoder.encode(file) {
             try? data.write(to: fileURL, options: .atomic)
         }
+        // Two independent reasons to notify, and both matter:
+        //   - the snapshot moved  -> the model's prompt changes, so the
+        //     cleanup backend must rebuild its cached prompt prefix;
+        //   - the structure moved -> a term or pair the editor window
+        //     lists appeared or vanished, even if it never reached the
+        //     prompt (removing a term ranked below the 30-term cap, or
+        //     promoting one into a full glossary).
+        // Notifying on only the first left the editor showing rows that no
+        // longer existed. Plain count bumps deliberately notify on
+        // NEITHER: those happen every dictation, and republishing that
+        // often can close an open menu.
         let snap = computeSnapshotLocked()
-        if snap != lastSnapshot {
-            lastSnapshot = snap
-            changeHandler?(snap)
-        }
+        let structure = computeStructureLocked()
+        guard snap != lastSnapshot || structure != lastStructure else { return }
+        lastSnapshot = snap
+        lastStructure = structure
+        changeHandler?(snap)
+    }
+
+    private func computeStructureLocked() -> Structure {
+        Structure(
+            terms: glossary.map(\.term).sorted(),
+            pairs: pairs.map { "\($0.original)=>\($0.replacement)" }.sorted())
     }
 
     private func decayLocked() {

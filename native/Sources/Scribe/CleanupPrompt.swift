@@ -29,11 +29,24 @@ enum CleanupPrompt {
         return prompt
     }
 
+    /// Longest term that reaches the prompt. Learned terms are single
+    /// words so this never bites; it exists to bound what dictated text can
+    /// inject. Manual entries are checked against it up front (see
+    /// `canAddPair`) rather than being silently shortened.
+    static let maxTermLength = 48
+
     /// Makes a dictionary term inert before it enters the system prompt:
     /// terms originate from dictated text, so they must not be able to
     /// smuggle markup or extra instruction lines. Returns nil when nothing
     /// usable remains — callers drop the entry.
     static func sanitizeTerm(_ raw: String) -> String? {
+        sanitizeTermChecked(raw)?.term
+    }
+
+    /// `sanitizeTerm` plus whether the length cap actually cut the term.
+    /// The UI uses `truncated` to refuse input the model would only ever
+    /// see a fragment of.
+    static func sanitizeTermChecked(_ raw: String) -> (term: String, truncated: Bool)? {
         var cleaned = ""
         for ch: Character in raw {
             if ch == "<" || ch == ">" || ch == "\"" { continue }
@@ -46,8 +59,9 @@ enum CleanupPrompt {
             cleaned = cleaned.replacingOccurrences(of: "  ", with: " ")
         }
         cleaned = cleaned.trimmingCharacters(in: .whitespaces)
-        if cleaned.count > 48 { cleaned = String(cleaned.prefix(48)) }
-        return cleaned.isEmpty ? nil : cleaned
+        let truncated = cleaned.count > maxTermLength
+        if truncated { cleaned = String(cleaned.prefix(maxTermLength)) }
+        return cleaned.isEmpty ? nil : (cleaned, truncated)
     }
 
     static let fewShots: [(String, String)] = [
