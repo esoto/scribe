@@ -12,6 +12,11 @@ final class GlossaryHarvesterTests: XCTestCase {
             ("the KVCache warms early", ["KVCache"], #line),
             ("rename it to snake_case now", ["snake_case"], #line),
             ("load gemma3 on the laptop", ["gemma3"], #line),
+            // Leading-digit tokens are quantities and ordinals, not vocabulary.
+            ("meeting at 10am tomorrow", [], #line),
+            ("the 3rd attempt failed", [], #line),
+            ("quantized to 4bit weights", [], #line),
+            ("ran 5k this morning", [], #line),
             // Mid-sentence capitalized word is a proper-noun signal.
             ("deploy with Kamal tonight", ["Kamal"], #line),
             // Sentence-initial capitalized words are NOT learned.

@@ -71,7 +71,14 @@ enum GlossaryHarvester {
         let hasLower = token.contains(where: \.isLowercase)
         if token.dropFirst().contains(where: \.isUppercase) && hasLower { return true }
         if token.contains("_"), token.contains(where: \.isLetter) { return true }
-        if token.contains(where: \.isNumber) { return true }
+        // Digits qualify a token only when it STARTS with a letter
+        // (`gemma3`, `v2`). Leading-digit tokens are overwhelmingly
+        // quantities and ordinals — `10am`, `3rd`, `4bit` — which would
+        // otherwise promote after three dictations and burn slots in the
+        // capped vocabulary the model is told to spell exactly.
+        if token.contains(where: \.isNumber), let first = token.first, first.isLetter {
+            return true
+        }
 
         // Rule 3 — mid-sentence Capitalized word (Kamal, México).
         if !sentenceInitial, count >= 3, let first = token.first, first.isUppercase,

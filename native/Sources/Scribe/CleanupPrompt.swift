@@ -60,7 +60,12 @@ enum CleanupPrompt {
         }
         cleaned = cleaned.trimmingCharacters(in: .whitespaces)
         let truncated = cleaned.count > maxTermLength
-        if truncated { cleaned = String(cleaned.prefix(maxTermLength)) }
+        if truncated {
+            // Trim AFTER cutting too, or the cut can land on a space and
+            // the prompt ends up quoting a term with a dangling space.
+            cleaned = String(cleaned.prefix(maxTermLength))
+                .trimmingCharacters(in: .whitespaces)
+        }
         return cleaned.isEmpty ? nil : (cleaned, truncated)
     }
 

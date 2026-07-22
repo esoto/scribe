@@ -221,6 +221,31 @@ final class UserDictionaryStoreTests: XCTestCase {
         XCTAssertEqual(fired.value.count, 0)
     }
 
+    func testSeededTermCannotBeRemovedAsIfItWereLearned() {
+        // A pair-seeded term has no independent existence: it is derived
+        // from the pair, so removing or clearing "it" does nothing. That is
+        // correct store behavior — it is why the menu must not offer these
+        // terms a Remove button (see menuGlossaryTerms).
+        let store = makeStore()
+        store.addPair(original: "camel", replacement: "kamal")
+        let fired = Box<DictionarySnapshot>()
+        store.onChange = { fired.append($0) }
+
+        store.removeGlossaryTerm("kamal")
+        _ = store.snapshot
+        XCTAssertEqual(store.snapshot.glossary, ["kamal"])
+
+        store.clearLearned()
+        _ = store.snapshot
+        XCTAssertEqual(store.snapshot.glossary, ["kamal"])
+        XCTAssertEqual(fired.value.count, 0, "nothing changed, so nothing to notify")
+
+        // Removing the pair is what actually retires the term.
+        store.removePair(original: "camel")
+        _ = store.snapshot
+        XCTAssertEqual(store.snapshot.glossary, [])
+    }
+
     func testAddPairReplacesSameOriginal() {
         let store = makeStore()
         store.addPair(original: "camel", replacement: "kamal")

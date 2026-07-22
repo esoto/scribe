@@ -27,6 +27,22 @@ func truncateLabel(_ text: String, n: Int = 40) -> String {
     return String(text[..<cutIndex]) + "…"
 }
 
+/// Learned terms to offer in the Dictionary submenu, most-used first and
+/// capped so the menu stays navigable.
+///
+/// Built from the store's learned entries, NOT from the prompt snapshot:
+/// the snapshot also carries vocabulary seeded by replacement pairs, and
+/// such a term has no independent existence to delete — `removeGlossaryTerm`
+/// would find nothing, leaving a Remove button that silently does nothing
+/// forever. Pairs are retired in the editor window, where removing one is
+/// unambiguous.
+func menuGlossaryTerms(_ entries: [GlossaryEntry], limit: Int = 20) -> [String] {
+    entries
+        .sorted { $0.count != $1.count ? $0.count > $1.count : $0.lastSeen > $1.lastSeen }
+        .prefix(limit)
+        .map(\.term)
+}
+
 private let engineOptions: [(id: String, label: String)] = [
     ("parakeet", "Parakeet (fast)"),
     ("whisper", "Whisper (best Spanish)"),
@@ -114,10 +130,11 @@ struct MenuBarView: View {
                 openDictionaryWindow(openWindow)
             }
             Divider()
-            if model.dictionarySnapshot.glossary.isEmpty {
+            let learned = menuGlossaryTerms(model.glossaryEntries)
+            if learned.isEmpty {
                 Text("(no learned terms)")
             } else {
-                ForEach(model.dictionarySnapshot.glossary, id: \.self) { term in
+                ForEach(learned, id: \.self) { term in
                     Menu(truncateLabel(term)) {
                         Button("Remove") {
                             model.removeGlossaryTerm(term)

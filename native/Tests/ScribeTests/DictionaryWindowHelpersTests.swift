@@ -27,6 +27,20 @@ final class DictionaryWindowHelpersTests: XCTestCase {
         XCTAssertFalse(canAddPair(original: overLimit, replacement: "acme"))
     }
 
+    func testMenuGlossaryTermsExcludesSeededAndRanksByUse() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        let entries = [
+            GlossaryEntry(term: "Rare", count: 3, firstSeen: now, lastSeen: now),
+            GlossaryEntry(term: "Common", count: 40, firstSeen: now, lastSeen: now),
+            GlossaryEntry(term: "Middle", count: 9, firstSeen: now, lastSeen: now),
+        ]
+        XCTAssertEqual(menuGlossaryTerms(entries), ["Common", "Middle", "Rare"])
+        XCTAssertEqual(menuGlossaryTerms(entries, limit: 2), ["Common", "Middle"])
+        // Learned entries only — a pair's seeded vocabulary never appears
+        // here, because the menu's Remove could not honor it.
+        XCTAssertEqual(menuGlossaryTerms([]), [])
+    }
+
     func testGlossaryRowDetail() {
         let now = Date(timeIntervalSince1970: 1_000_000)
         XCTAssertEqual(

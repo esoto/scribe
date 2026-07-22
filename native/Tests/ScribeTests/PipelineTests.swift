@@ -218,10 +218,6 @@ final class PipelineTests: XCTestCase {
         XCTAssertEqual(paster.pasted, ["digamos que el deploy se hace el viernes antes de las cinco"])
     }
 
-    /// Swift-specific: `RecorderLike.arm() throws` has no equivalent in the
-    /// Python contract (FakeRecorder.arm() never raises there). Locks in the
-    /// behavior chosen for this native-only failure mode: notify, stay idle,
-    /// never reach the STT engine.
     func testOnCleanedFiresWithCleanedTextOnSuccess() {
         let h = make()
         dictate(h)
@@ -270,6 +266,10 @@ final class PipelineTests: XCTestCase {
         XCTAssertEqual(paster.pasted, ["hello there world"])
     }
 
+    /// Swift-specific: `RecorderLike.arm() throws` has no equivalent in the
+    /// Python contract (FakeRecorder.arm() never raises there). Locks in the
+    /// behavior chosen for this native-only failure mode: notify, stay idle,
+    /// never reach the STT engine.
     func testRecorderArmFailureSkipsRecording() {
         let stt = FakeStt()
         let recorder = FakeRecorder(armError: TestError(message: "mic grant missing"))
