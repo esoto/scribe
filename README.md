@@ -58,10 +58,42 @@ everything re-downloads on next use.
 - **Cleanup** toggle: off = verbatim transcription pasted raw.
 - **History**: last 10 dictations (in memory only, never persisted); click
   one to copy it back to the clipboard.
+- **Dictionary**: your vocabulary and corrections, fed to the cleanup pass
+  so names and jargon come out spelled right — see below.
 - If cleanup ever misbehaves (timeout, length/language sanity gates), the
   raw transcript is pasted instead — you never lose words.
 - The microphone is captured **only while the key is held** — the orange
   mic indicator turns off at key-up.
+
+## Dictionary
+
+Cleanup knows generic English and Spanish, not *your* nouns. The dictionary
+teaches it — menu bar → **Dictionary**, or **Edit Dictionary…** for the
+full editor.
+
+**Learned terms (automatic).** Distinctive vocabulary in cleaned dictations
+— proper nouns, acronyms, `camelCase`/`snake_case`, words with digits — is
+counted, and anything appearing in **3 separate dictations** is promoted and
+starts being injected into the cleanup prompt, which locks in its spelling.
+Ordinary lowercase words are never learned. Terms go stale and are dropped
+after 60 days unused (14 days for ones that never got promoted). Turn the
+whole thing off with **Learn New Terms**, or wipe it with **Clear Learned
+Terms**.
+
+**Replacements (manual).** "Heard as → Replace with" pairs, applied every
+time. Use these when the transcription is wrong in a way learning can't
+fix — which is more often than you'd guess, because a word the STT
+mishears usually comes out *differently each time* ("Hetzner" produced
+Headstar, Hatsner, Heftner and Headsnar in one sitting), so it never
+reaches the 3-sighting threshold. Adding one replacement also adds its
+target to your vocabulary, so the cleanup pass corrects near-misses that
+no exact pair would ever match.
+
+Both are stored in `~/Library/Application Support/scribe/dictionary.json`
+— **individual words only, never transcripts.** Delete the file for a clean
+reset. At most 20 replacements and 30 learned terms reach the prompt
+(highest-use first), which keeps the cleanup model's cached prompt prefix
+cheap; the prefix rebuilds automatically when the dictionary changes.
 
 ## Configuration
 
@@ -82,6 +114,7 @@ Change via `defaults write dev.esoto.scribe <key> <value>` and relaunch:
 | `sounds` | true | start/error sounds |
 | `historySize` | 10 | menu history length |
 | `idleUnloadMinutes` | 15 | unload models after idle (0 = keep resident) |
+| `dictionaryLearningEnabled` | true | auto-learn vocabulary from cleaned dictations |
 | `cleanupModelPath` | _(unset)_ | local MLX model folder to use for cleanup instead of stock Gemma |
 
 **Custom cleanup model:** point `cleanupModelPath` at any local MLX model
@@ -111,6 +144,10 @@ column). scribe manages them on demand:
 - **Hotkey does nothing** → Input Monitoring grant missing (common after
   replacing the app binary: re-toggle scribe in System Settings → Privacy &
   Security → Input Monitoring, or use the setup window's Request button).
+  If the log shows `flagsChanged` lines while you type, the tap is alive and
+  the grant is fine — check the keycode: Right ⌥ is **61**, and an external
+  keyboard may report its Option key as 58 (Left ⌥), which won't match. A
+  press that registers logs `keycode=61 ... -> down`.
 - **Old clipboard contents got pasted** → increase `restoreDelay`.
 - **Transcription failed** → the audio was saved to
   `~/Library/Logs/scribe/last_failed.wav`.

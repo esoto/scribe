@@ -69,6 +69,16 @@
   .step .t { font-size: 17px; font-weight: 600; margin-top: 6px; }
   .step .d { font-size: 13px; color: var(--text-secondary); line-height: 1.5; margin-top: 6px; }
 
+  .learns { padding-bottom: 80px; }
+  .learns h2 { font-size: 32px; font-weight: 700; letter-spacing: -0.01em; text-wrap: balance; }
+  .learns h2 .violet { color: var(--brand-violet-2); }
+  .learns .lede { font-size: 15px; color: var(--text-secondary); line-height: 1.5; max-width: 560px; margin-top: 14px; }
+  .learns .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 24px; margin-top: 32px; }
+  .learns .cell { background: var(--card-bg); border: 1px solid var(--separator); border-radius: 12px; padding: 20px 22px; }
+  .learns .cell .t { font-size: 15px; font-weight: 600; }
+  .learns .cell .d { font-size: 13px; color: var(--text-secondary); line-height: 1.5; margin-top: 6px; }
+  .learns .note { font-size: 13px; color: var(--text-secondary); line-height: 1.5; margin-top: 20px; }
+
   .privacy { background: var(--brand-gradient); padding: 64px 0; }
   .privacy h2 { font-size: 32px; font-weight: 700; color: #fff; letter-spacing: -0.01em; }
   .privacy .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; margin-top: 36px; }
@@ -83,7 +93,7 @@
   @media (max-width: 720px) {
     .wrap, header, .demo { padding-left: 20px; padding-right: 20px; }
     h1 { font-size: 36px; }
-    .steps, .privacy .grid { grid-template-columns: 1fr; }
+    .steps, .privacy .grid, .learns .grid { grid-template-columns: 1fr; }
   }
 </style>
 </head>
@@ -129,6 +139,28 @@
   </div>
 </section>
 
+<section class="wrap learns">
+  <h2>It learns <span class="violet">your</span> words.</h2>
+  <p class="lede">Cleanup knows English and Spanish — not the names of your projects,
+     tools and teammates. Teach it once, or let it pick them up as you go.</p>
+  <div class="grid">
+    <div class="cell">
+      <div class="t">Learned terms</div>
+      <div class="d">Distinctive vocabulary — proper nouns, acronyms, camelCase — is
+        picked up after it turns up in three separate dictations, then spelled your way
+        from there on. Ordinary words are never learned, and unused terms are forgotten.</div>
+    </div>
+    <div class="cell">
+      <div class="t">Replacements</div>
+      <div class="d">Correct it once — heard as → replace with — and it sticks. Speech
+        recognition mangles an unfamiliar name differently every time, so one correction
+        also teaches the right spelling and catches the near-misses.</div>
+    </div>
+  </div>
+  <p class="note">Stored on your Mac as individual words — never transcripts. Turn
+     learning off or clear it whenever you like.</p>
+</section>
+
 <section class="privacy">
   <div class="wrap">
     <h2>Full privacy. Your conversations go nowhere.</h2>
@@ -138,8 +170,8 @@
         <div class="d">Parakeet TDT v3 for speech, Gemma 3 4B for cleanup — downloaded once, then everything runs offline.</div>
       </div>
       <div class="cell">
-        <div class="t">Nothing persisted</div>
-        <div class="d">History keeps the last 10 dictations in memory only, never on disk.</div>
+        <div class="t">Transcripts never saved</div>
+        <div class="d">History keeps the last 10 dictations in memory only. The one thing written to disk is your dictionary — individual words, never transcripts.</div>
       </div>
       <div class="cell">
         <div class="t">Nothing sent</div>
