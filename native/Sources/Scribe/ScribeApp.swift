@@ -56,6 +56,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var dictionaryLearningEnabled: Bool
     @Published private(set) var glossaryEntries: [GlossaryEntry] = []
     @Published private(set) var replacementPairs: [ReplacementPair] = []
+    @Published private(set) var unmatchedHeardWords: [GlossaryEntry] = []
 
     private let pipelineConfig: PipelineConfig
 
@@ -95,6 +96,7 @@ final class AppModel: ObservableObject {
         self.dictionarySnapshot = dictionary.snapshot
         self.glossaryEntries = dictionary.allGlossaryEntries
         self.replacementPairs = dictionary.allPairs
+        self.unmatchedHeardWords = dictionary.unmatchedHeardWords
         // Before any preload can run, so the first warm-up prefills the
         // dictionary-augmented prompt rather than a stale base one.
         self.cleaner.setDictionary(dictionary.snapshot)
@@ -418,6 +420,7 @@ final class AppModel: ObservableObject {
         // these lists without moving the snapshot.
         glossaryEntries = dictionary.allGlossaryEntries
         replacementPairs = dictionary.allPairs
+        unmatchedHeardWords = dictionary.unmatchedHeardWords
 
         // Cache work only when the prompt itself actually changes.
         // Rebuilding the warm prefix costs ~1 s, so a list-only change must
@@ -440,6 +443,17 @@ final class AppModel: ObservableObject {
     func refreshDictionaryState() {
         glossaryEntries = dictionary.allGlossaryEntries
         replacementPairs = dictionary.allPairs
+        unmatchedHeardWords = dictionary.unmatchedHeardWords
+    }
+
+    /// Binds a mangling scribe heard to a correction the user already has,
+    /// as an ordinary exact-match pair.
+    func bindHeardWord(_ heard: String, toReplacement replacement: String) {
+        dictionary.addPair(original: heard, replacement: replacement)
+    }
+
+    func ignoreHeardWord(_ heard: String) {
+        dictionary.ignoreHeardWord(heard)
     }
 
     func setDictionaryLearning(_ on: Bool) {

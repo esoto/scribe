@@ -84,6 +84,19 @@ times out or trips its gates. Matching is whole-word and case-insensitive,
 punctuation is preserved, and the replacement is pasted verbatim, so
 `camel` fixes "Camel," but leaves `camelCase` alone.
 
+**Heard but not matched.** Matching is exact, so one pair catches one
+spelling — and a mangled name comes back differently every time. The editor
+therefore lists words scribe heard that match nothing it knows, with a
+**Bind to…** button to attach each to a correction you already have.
+Several manglings can share one target.
+
+It suggests rather than guessing because guessing isn't safe: the variants
+aren't further from your pair than ordinary words are. Real measurements
+against `headsner` — `Headstar` and `Hatsner` are 2 edits away, but so is
+**"header"**; `Heftner` is 3, and so is **"headers"**. For `camel`, `Kamal`
+is 2 edits — and so are **"camera"** and **"cancel"**. No threshold
+separates them, so a human confirms instead.
+
 **Learned terms (automatic) — off by default, and it should stay off for
 now.** The intent: distinctive vocabulary in cleaned dictations (proper
 nouns, acronyms, `camelCase`, words with digits) is counted, and anything

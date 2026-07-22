@@ -113,10 +113,48 @@ final class UserDictionaryStore: @unchecked Sendable {
     var allPairs: [ReplacementPair] { queue.sync { pairs } }
     var allGlossaryEntries: [GlossaryEntry] { queue.sync { glossary } }
 
+    /// Words heard in dictations that match nothing the dictionary knows —
+    /// no replacement, no learned term. Speech recognition mangles an
+    /// unfamiliar name differently on every attempt, so these are mostly
+    /// one-off manglings of words the user has ALREADY corrected once
+    /// ("Headstar", "Hatsner", "Heftner" for one "hetzner"), which an
+    /// exact-match pair can never catch. Offering them for binding is the
+    /// only safe way to close that gap: edit distance can't separate a real
+    /// variant from an ordinary word ("header" sits closer to "headsner"
+    /// than "Heftner" does), so a human confirms instead.
+    ///
+    /// Most recently heard first — a mangling you just saw is the one you
+    /// want to fix.
+    var unmatchedHeardWords: [GlossaryEntry] {
+        queue.sync {
+            var known = Set(glossary.map { $0.term.lowercased() })
+            for pair in pairs {
+                known.insert(pair.original.lowercased())
+                known.insert(pair.replacement.lowercased())
+            }
+            return candidates
+                .filter { !known.contains($0.term.lowercased()) }
+                .sorted { $0.lastSeen > $1.lastSeen }
+        }
+    }
+
+    /// Drops a heard word without binding it — it was noise, not a mangling.
+    func ignoreHeardWord(_ term: String) {
+        queue.async {
+            self.candidates.removeAll { $0.term.lowercased() == term.lowercased() }
+            self.persistAndNotifyLocked()
+        }
+    }
+
     /// Learns from the final text of one successfully cleaned dictation.
     func observe(cleanedText: String) {
         queue.async {
-            guard self.enabled else { return }
+            // Collection is NOT gated by `enabled`. Recording which words
+            // were heard is local, words-only, and harmless — it's what
+            // powers the "heard but unmatched" suggestions, which are the
+            // useful half of this feature. `enabled` gates only whether
+            // learned terms are handed to the cleanup model, which is the
+            // half known to cost words. See `computeSnapshotLocked`.
             let terms = GlossaryHarvester.candidates(in: cleanedText)
             guard !terms.isEmpty else { return }
             // Sweep BEFORE counting: a stale candidate must not be
@@ -130,7 +168,11 @@ final class UserDictionaryStore: @unchecked Sendable {
                 } else if let i = self.candidates.firstIndex(where: { $0.term == term }) {
                     self.candidates[i].count += 1
                     self.candidates[i].lastSeen = t
-                    if self.candidates[i].count >= Self.promotionThreshold {
+                    // Promotion is gated, collection is not. With learning
+                    // off a word stays a candidate forever, which is what
+                    // keeps it offered as a bindable mangling instead of
+                    // quietly becoming "known vocabulary" nobody asked for.
+                    if self.enabled, self.candidates[i].count >= Self.promotionThreshold {
                         self.glossary.append(self.candidates.remove(at: i))
                     }
                 } else {
@@ -226,7 +268,11 @@ final class UserDictionaryStore: @unchecked Sendable {
 
     private func computeStructureLocked() -> Structure {
         Structure(
-            terms: glossary.map(\.term).sorted(),
+            // Candidates are included so a newly heard word appears in the
+            // editor's suggestion list while the window is open. Only the
+            // SET of words counts, never their counts, so the common case —
+            // re-hearing a word already known — still notifies nobody.
+            terms: (glossary.map(\.term) + candidates.map(\.term)).sorted(),
             pairs: pairs.map { "\($0.original)=>\($0.replacement)" }.sorted())
     }
 
@@ -264,6 +310,12 @@ final class UserDictionaryStore: @unchecked Sendable {
         // is both learned and a pair target violates it by coincidence, so
         // filter those out here. The pair already guarantees the spelling,
         // which is all the vocabulary entry would have added.
+        guard enabled else {
+            // Learned vocabulary withheld from the prompt — see
+            // AppSettings.dictionaryLearningEnabled. Terms stay stored and
+            // visible in the editor; they just aren't injected.
+            return DictionarySnapshot(pairs: Array(topPairs), glossary: [])
+        }
         let pairTargets = Set(topPairs.map { $0.replacement.lowercased() })
         let learned = glossary.sorted(by: Self.byUsage)
             .map(\.term)

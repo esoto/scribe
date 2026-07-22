@@ -38,22 +38,32 @@ final class UserDictionaryStoreTests: XCTestCase {
         XCTAssertEqual(store.snapshot.glossary, ["Kamal"])
     }
 
-    func testOnChangeFiresOnlyOnSnapshotChange() {
+    func testOnChangeFiresWhenTheWordSetChangesButNotOnCountBumps() {
         let store = makeStore()
         let fired = Box<DictionarySnapshot>()
         store.onChange = { fired.append($0) }
-        store.observe(cleanedText: "check Kamal now")
-        store.observe(cleanedText: "check Kamal now")
-        XCTAssertEqual(store.snapshot.glossary, [])
-        XCTAssertEqual(fired.value.count, 0)
-        store.observe(cleanedText: "check Kamal now")
-        XCTAssertEqual(store.snapshot.glossary, ["Kamal"])
-        XCTAssertEqual(fired.value.count, 1)
-        XCTAssertEqual(fired.value.first?.glossary, ["Kamal"])
-        // A fourth sighting bumps counts but not the snapshot — no callback.
+
+        // First sighting introduces a word the editor now lists.
         store.observe(cleanedText: "check Kamal now")
         _ = store.snapshot
         XCTAssertEqual(fired.value.count, 1)
+
+        // Re-hearing it changes only a count — nobody is told, which is what
+        // keeps an open menu from redrawing on every dictation.
+        store.observe(cleanedText: "check Kamal now")
+        _ = store.snapshot
+        XCTAssertEqual(store.snapshot.glossary, [])
+        XCTAssertEqual(fired.value.count, 1)
+
+        // Promotion moves it into the prompt, which is a snapshot change.
+        store.observe(cleanedText: "check Kamal now")
+        XCTAssertEqual(store.snapshot.glossary, ["Kamal"])
+        XCTAssertEqual(fired.value.count, 2)
+        XCTAssertEqual(fired.value.last?.glossary, ["Kamal"])
+
+        store.observe(cleanedText: "check Kamal now")
+        _ = store.snapshot
+        XCTAssertEqual(fired.value.count, 2)
     }
 
     func testPersistenceRoundTrip() {
@@ -207,6 +217,66 @@ final class UserDictionaryStoreTests: XCTestCase {
         XCTAssertEqual(fired.value.count, 0)
     }
 
+    // MARK: - Heard-but-unmatched suggestions
+
+    func testUnmatchedHeardWordsExcludesEverythingKnown() {
+        let store = makeStore()
+        store.addPair(original: "camel", replacement: "kamal")
+        for _ in 0..<3 { store.observe(cleanedText: "the Postgres box is warm") }
+        store.observe(cleanedText: "deploy to Headstar tonight")
+        store.observe(cleanedText: "ask Camel about it")   // a pair original
+        store.observe(cleanedText: "ping Kamal directly")  // a pair replacement
+
+        let heard = store.unmatchedHeardWords.map(\.term)
+        XCTAssertEqual(heard, ["Headstar"])
+    }
+
+    func testUnmatchedHeardWordsAreMostRecentFirst() {
+        let store = makeStore()
+        store.observe(cleanedText: "deploy to Headstar tonight")
+        _ = store.snapshot
+        clock.advance(days: 1)
+        store.observe(cleanedText: "deploy to Hatsner tonight")
+        XCTAssertEqual(store.unmatchedHeardWords.map(\.term), ["Hatsner", "Headstar"])
+    }
+
+    func testBindingAHeardWordRemovesItFromTheList() {
+        let store = makeStore()
+        store.addPair(original: "camel", replacement: "kamal")
+        store.observe(cleanedText: "deploy to Headstar tonight")
+        XCTAssertEqual(store.unmatchedHeardWords.map(\.term), ["Headstar"])
+
+        // Binding is just another exact pair sharing the same target.
+        store.addPair(original: "Headstar", replacement: "hetzner")
+        XCTAssertEqual(store.unmatchedHeardWords, [])
+        XCTAssertEqual(
+            TermReplacer.apply(store.snapshot.pairs, to: "deploy to Headstar tonight"),
+            "deploy to hetzner tonight")
+    }
+
+    func testIgnoringAHeardWordDropsIt() {
+        let store = makeStore()
+        store.observe(cleanedText: "deploy to Headstar tonight")
+        let fired = Box<DictionarySnapshot>()
+        store.onChange = { fired.append($0) }
+        store.ignoreHeardWord("headstar")  // case-insensitive
+        _ = store.snapshot
+        XCTAssertEqual(store.unmatchedHeardWords, [])
+        XCTAssertEqual(fired.value.count, 1, "the editor list changed, so it must notify")
+    }
+
+    func testWordsAreStillCollectedWhileLearningIsOff() {
+        // Collection powers the suggestions; only injection is gated.
+        let store = makeStore()
+        store.learningEnabled = false
+        for _ in 0..<3 { store.observe(cleanedText: "deploy to Headstar tonight") }
+        XCTAssertEqual(store.unmatchedHeardWords.map(\.term), ["Headstar"])
+        XCTAssertEqual(store.snapshot.glossary, [], "never injected while learning is off")
+        store.learningEnabled = true
+        store.observe(cleanedText: "one more Headstar mention")
+        XCTAssertEqual(store.snapshot.glossary, ["Headstar"], "injected once enabled")
+    }
+
     func testAddPairReplacesSameOriginal() {
         let store = makeStore()
         store.addPair(original: "camel", replacement: "kamal")
@@ -239,12 +309,15 @@ final class UserDictionaryStoreTests: XCTestCase {
         XCTAssertEqual(store.snapshot.glossary, [])
     }
 
-    func testLearningDisabledIsNoOp() {
+    func testLearningDisabledStopsPromotionNotCollection() {
         let store = makeStore()
         store.learningEnabled = false
         for _ in 0..<5 { store.observe(cleanedText: "loud Kamal noises") }
-        XCTAssertEqual(store.snapshot.glossary, [])
-        XCTAssertTrue(store.allGlossaryEntries.isEmpty)
+        XCTAssertEqual(store.snapshot.glossary, [], "nothing reaches the prompt")
+        XCTAssertTrue(store.allGlossaryEntries.isEmpty, "nothing is promoted")
+        XCTAssertEqual(
+            store.unmatchedHeardWords.map(\.term), ["Kamal"],
+            "but it is still offered as a bindable word")
     }
 
     func testCorruptFileStartsEmpty() throws {

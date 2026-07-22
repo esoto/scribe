@@ -29,6 +29,18 @@ func canAddPair(original: String, replacement: String) -> Bool {
     }
 }
 
+/// The distinct right-hand sides of the user's pairs, in stable order —
+/// several manglings of one word share a single target, so duplicates are
+/// collapsed. Free function, unit-tested.
+func distinctReplacementTargets(_ pairs: [ReplacementPair]) -> [String] {
+    var seen = Set<String>()
+    var targets: [String] = []
+    for target in pairs.map(\.replacement) where seen.insert(target.lowercased()).inserted {
+        targets.append(target)
+    }
+    return targets.sorted { $0.lowercased() < $1.lowercased() }
+}
+
 /// Detail line for a learned term row. Free function, unit-tested.
 func glossaryRowDetail(count: Int, lastSeen: Date, now: Date = Date()) -> String {
     let days = Int(now.timeIntervalSince(lastSeen) / 86_400)
@@ -44,6 +56,12 @@ struct DictionaryWindow: View {
     @ObservedObject var model: AppModel
     @State private var newOriginal = ""
     @State private var newReplacement = ""
+
+    /// Distinct correction targets already configured — what a heard
+    /// mangling can be bound to.
+    private var replacementTargets: [String] {
+        distinctReplacementTargets(model.replacementPairs)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -87,6 +105,48 @@ struct DictionaryWindow: View {
                     }
                 }
                 .padding(4)
+            }
+
+            if !model.unmatchedHeardWords.isEmpty {
+                GroupBox("Heard but not matched") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(replacementTargets.isEmpty
+                            ? "Words scribe heard that it doesn't recognize. Add a replacement above, then bind these to it."
+                            : "Words scribe heard that match nothing. If one is a mangling of a word you already correct, bind it — speech recognition mangles a name differently every time, and each spelling needs its own entry.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        ScrollView {
+                            VStack(alignment: .leading, spacing: 6) {
+                                ForEach(model.unmatchedHeardWords, id: \.term) { entry in
+                                    HStack {
+                                        Text(entry.term)
+                                        Spacer()
+                                        if !replacementTargets.isEmpty {
+                                            Menu("Bind to…") {
+                                                ForEach(replacementTargets, id: \.self) { target in
+                                                    Button(target) {
+                                                        model.bindHeardWord(
+                                                            entry.term, toReplacement: target)
+                                                    }
+                                                }
+                                            }
+                                            .frame(width: 110)
+                                        }
+                                        Button {
+                                            model.ignoreHeardWord(entry.term)
+                                        } label: {
+                                            Image(systemName: "xmark")
+                                        }
+                                        .buttonStyle(.borderless)
+                                        .help("Ignore this word")
+                                    }
+                                }
+                            }
+                        }
+                        .frame(maxHeight: 160)
+                    }
+                    .padding(4)
+                }
             }
 
             GroupBox("Learned Terms") {

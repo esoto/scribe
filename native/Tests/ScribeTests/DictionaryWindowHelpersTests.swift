@@ -39,6 +39,20 @@ final class DictionaryWindowHelpersTests: XCTestCase {
         XCTAssertEqual(menuGlossaryTerms([]), [])
     }
 
+    func testDistinctReplacementTargets() {
+        let at = Date(timeIntervalSince1970: 0)
+        let pairs = [
+            ReplacementPair(original: "camel", replacement: "kamal", addedAt: at),
+            ReplacementPair(original: "camal", replacement: "kamal", addedAt: at),
+            ReplacementPair(original: "headstar", replacement: "hetzner", addedAt: at),
+            ReplacementPair(original: "hatsner", replacement: "Hetzner", addedAt: at),
+        ]
+        // Several manglings share one target, so the bind menu offers each
+        // target once — case-insensitively deduped.
+        XCTAssertEqual(distinctReplacementTargets(pairs), ["hetzner", "kamal"])
+        XCTAssertEqual(distinctReplacementTargets([]), [])
+    }
+
     func testGlossaryRowDetail() {
         let now = Date(timeIntervalSince1970: 1_000_000)
         XCTAssertEqual(
