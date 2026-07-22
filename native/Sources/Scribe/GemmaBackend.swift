@@ -21,17 +21,25 @@ protocol UnloadableCleaner: CleanupBackend {
 }
 
 /// Warm KV-cache state for the fixed prompt prefix (system prompt + 3
-/// few-shot pairs) that's IDENTICAL on every `clean()` call. Built once,
-/// lazily, on the first call; reused (via `.copy()`, NEVER mutated in
-/// place — generation mutates a cache as it runs) on every subsequent
-/// call. See `GemmaBackend.warmUpIfNeeded` / `generateCleaned` and
+/// few-shot pairs) that's IDENTICAL on every `clean()` call for as long as
+/// the user dictionary snapshot is unchanged. Built lazily on first use and
+/// rebuilt only when the rendered system prompt changes (see
+/// `systemPrompt`); reused (via `.copy()`, NEVER mutated in place —
+/// generation mutates a cache as it runs) on every other call. See
+/// `GemmaBackend.warmUpIfNeeded` / `generateCleaned` and
 /// native/SPIKE-RESULTS.md "## Cleanup speed — prefix cache".
 private struct WarmPrefix {
     /// One prefilled `KVCacheSimple` per transformer layer, holding the
     /// fixed prefix's KV state at offset == `prefixLen`.
     var cache: [KVCache]
+    /// The exact system-prompt string this prefix was prefilled with. The
+    /// prompt now varies with the user dictionary (rarely — only when the
+    /// snapshot changes), so staleness is detected by comparing this
+    /// against the current prompt; equality of the string guarantees the
+    /// prefix tokens still apply.
+    var systemPrompt: String
     /// Token count of the fixed prefix — constant across all `clean()`
-    /// calls since the prefix text never changes.
+    /// calls made with the same `systemPrompt`.
     var prefixLen: Int
     /// The literal token ids the fixed prefix (system + 3 few-shot pairs)
     /// renders to. Used both as the per-call SAFE-tier safety check
@@ -53,7 +61,8 @@ private struct WarmPrefix {
 
 /// MLX Gemma 3 4B QAT cleanup backend via `#huggingFaceLoadModelContainer`.
 ///
-/// The system prompt + 3 few-shot pairs are IDENTICAL on every `clean()`
+/// The system prompt (base + user-dictionary sections, stable between
+/// dictionary changes) + 3 few-shot pairs are IDENTICAL on every `clean()`
 /// call — only the final wrapped user turn changes. Re-rendering (Jinja
 /// chat template) and re-prefilling that ~290-token fixed prefix on every
 /// call was measured to cost ~2.1-2.4s of the ~2.87s total wall time
@@ -83,10 +92,12 @@ private struct WarmPrefix {
 ///   silently wrong prompt); a startup gate disagreement between the EN/ES
 ///   samples permanently falls back to SAFE for the rest of the process.
 ///
-/// `@unchecked Sendable`: `warmPrefix`/`warmupAttempted` are plain mutable
-/// stored properties, not actor-isolated. That's safe because every read
-/// or write of them happens exclusively from inside a `container.perform`
-/// closure (see `clean(_:)`), and `ModelContainer` serializes ALL
+/// `@unchecked Sendable`: `warmPrefix`/`warmupAttemptedFor` are plain
+/// mutable stored properties, not actor-isolated. That's safe because every
+/// read or write of them happens exclusively from inside a
+/// `container.perform` closure (see `clean(_:)`); `dictionarySnapshot` is
+/// the one exception — it must be settable before the model loads, so it
+/// gets its own `NSLock`. `ModelContainer` serializes ALL
 /// `perform` calls through a real async mutex (`SerialAccessContainer`)
 /// that holds the lock for the full duration of the async body — so two
 /// `clean()` calls can never interleave their access to this state, even
@@ -110,8 +121,34 @@ final class GemmaBackend: UnloadableCleaner, @unchecked Sendable {
     /// Set once warm-up succeeds. `nil` means either warm-up hasn't run
     /// yet or it failed — both cases fall back to `runFreshGeneration`.
     private var warmPrefix: WarmPrefix?
-    /// Guards against retrying warm-up on every call after a failure.
-    private var warmupAttempted = false
+    /// The system prompt of the most recent warm-up attempt. Guards against
+    /// retrying a failing warm-up on every call, while still allowing a
+    /// retry when the dictionary (and so the prompt) has changed since.
+    private var warmupAttemptedFor: String?
+
+    /// Current dictionary snapshot, guarded by its own lock rather than the
+    /// `container.perform` mutex: `setDictionary` must be callable from any
+    /// thread at any time — including before the ~2.5 GB model has loaded —
+    /// and must never force a load. Everything else (warm prefix, attempt
+    /// marker) stays under `container.perform` per the class doc.
+    private let dictionaryLock = NSLock()
+    private var dictionarySnapshot = DictionarySnapshot.empty
+
+    /// Publishes a new dictionary snapshot. Takes effect on the next
+    /// `clean()`/`preload()`; an in-flight call coherently finishes with
+    /// the prompt it captured at its start.
+    func setDictionary(_ snapshot: DictionarySnapshot) {
+        dictionaryLock.lock()
+        dictionarySnapshot = snapshot
+        dictionaryLock.unlock()
+    }
+
+    private func currentSystemPrompt() -> String {
+        dictionaryLock.lock()
+        let snapshot = dictionarySnapshot
+        dictionaryLock.unlock()
+        return CleanupPrompt.systemPrompt(with: snapshot)
+    }
 
     /// Internal-only warm-up probe text (EN) used to compute `prefixLen`
     /// and gate the FAST tier. Never shown to users; wrapped the same way
@@ -197,8 +234,8 @@ final class GemmaBackend: UnloadableCleaner, @unchecked Sendable {
     /// golden cases regressed, both English inputs translated to Spanish;
     /// fixed in Task 15 — this function, and its regression test, exist to
     /// keep that from recurring silently).
-    static func buildChat(for text: String) -> [Chat.Message] {
-        var messages: [Chat.Message] = [.system(CleanupPrompt.systemPrompt)]
+    static func buildChat(for text: String, systemPrompt: String) -> [Chat.Message] {
+        var messages: [Chat.Message] = [.system(systemPrompt)]
         for (input, output) in CleanupPrompt.fewShots {
             messages.append(.user(CleanupPrompt.wrap(input)))
             messages.append(.assistant(output))
@@ -235,8 +272,13 @@ final class GemmaBackend: UnloadableCleaner, @unchecked Sendable {
             // it is a cheap pure-Swift operation, so there's no reason to
             // fight the `@Sendable` closure capture checker over it.
             let cleaned = try await container.perform { context in
-                await self.warmUpIfNeeded(context: context, parameters: parameters)
-                let chat = GemmaBackend.buildChat(for: text)
+                // Captured ONCE per call: warm-up check, full render, and
+                // fallback all see the same prompt even if setDictionary
+                // lands mid-call — the new snapshot applies next call.
+                let systemPrompt = self.currentSystemPrompt()
+                await self.warmUpIfNeeded(
+                    context: context, parameters: parameters, systemPrompt: systemPrompt)
+                let chat = GemmaBackend.buildChat(for: text, systemPrompt: systemPrompt)
                 return try await self.generateCleaned(
                     text: text, chat: chat, parameters: parameters, context: context)
             }
@@ -248,19 +290,25 @@ final class GemmaBackend: UnloadableCleaner, @unchecked Sendable {
         }
     }
 
-    /// Builds and prefills the warm prefix cache exactly once per process
-    /// (idempotent: a no-op once `warmPrefix` is set, or once a prior
-    /// attempt has failed). Must be called from inside `container.perform`
-    /// — see `clean(_:)`.
+    /// Builds and prefills the warm prefix cache for `systemPrompt`
+    /// (idempotent per prompt: a no-op while `warmPrefix` matches it, or
+    /// while a prior attempt for this same prompt has failed; a CHANGED
+    /// prompt — the dictionary snapshot moved — drops the stale prefix and
+    /// rebuilds). Must be called from inside `container.perform` — see
+    /// `clean(_:)`.
     ///
     /// Failure here (e.g. an unexpected tokenizer error) is non-fatal: it
     /// just means every `clean()` call for the rest of this instance's
     /// lifetime falls back to the original, uncached full-conversation
     /// generation (`runFreshGeneration`) — slower, but exactly as correct
     /// as before this change.
-    private func warmUpIfNeeded(context: ModelContext, parameters: GenerateParameters) async {
-        guard warmPrefix == nil, !warmupAttempted else { return }
-        warmupAttempted = true
+    private func warmUpIfNeeded(
+        context: ModelContext, parameters: GenerateParameters, systemPrompt: String
+    ) async {
+        if let warm = warmPrefix, warm.systemPrompt == systemPrompt { return }
+        if warmPrefix == nil, warmupAttemptedFor == systemPrompt { return }
+        warmPrefix = nil
+        warmupAttemptedFor = systemPrompt
 
         do {
             // Two different sample queries (EN + ES) rendered through the
@@ -279,9 +327,13 @@ final class GemmaBackend: UnloadableCleaner, @unchecked Sendable {
             // `[N]`, not `[1, N]`). All indexing below uses a single axis
             // accordingly.
             let renderedEN = try await context.processor.prepare(
-                input: UserInput(chat: GemmaBackend.buildChat(for: GemmaBackend.warmupSampleEN)))
+                input: UserInput(
+                    chat: GemmaBackend.buildChat(
+                        for: GemmaBackend.warmupSampleEN, systemPrompt: systemPrompt)))
             let renderedES = try await context.processor.prepare(
-                input: UserInput(chat: GemmaBackend.buildChat(for: GemmaBackend.warmupSampleES)))
+                input: UserInput(
+                    chat: GemmaBackend.buildChat(
+                        for: GemmaBackend.warmupSampleES, systemPrompt: systemPrompt)))
 
             let tokensEN = renderedEN.text.tokens.asArray(Int.self)
             let tokensES = renderedES.text.tokens.asArray(Int.self)
@@ -315,8 +367,8 @@ final class GemmaBackend: UnloadableCleaner, @unchecked Sendable {
                 context: context)
 
             warmPrefix = WarmPrefix(
-                cache: cache, prefixLen: prefixLen, prefixTokens: prefixTokens,
-                fastPathWrapOverlap: fastPathWrapOverlap)
+                cache: cache, systemPrompt: systemPrompt, prefixLen: prefixLen,
+                prefixTokens: prefixTokens, fastPathWrapOverlap: fastPathWrapOverlap)
             print(
                 "[GemmaBackend] warm prefix ready: prefixLen=\(prefixLen) fastPath=\(fastPathWrapOverlap != nil) wrapOverlap=\(fastPathWrapOverlap.map(String.init) ?? "n/a")"
             )
@@ -580,7 +632,7 @@ final class GemmaBackend: UnloadableCleaner, @unchecked Sendable {
         if await lazyModel.isLoaded, let container = try? await lazyModel.get() {
             await container.perform { _ in
                 self.warmPrefix = nil
-                self.warmupAttempted = false
+                self.warmupAttemptedFor = nil
             }
         }
         await lazyModel.unload()
@@ -596,13 +648,23 @@ final class GemmaBackend: UnloadableCleaner, @unchecked Sendable {
         guard let container = try? await lazyModel.get() else { return }
         let parameters = GenerateParameters(temperature: 0.0)
         await container.perform { context in
-            await self.warmUpIfNeeded(context: context, parameters: parameters)
+            // Passing the current prompt means preload also REBUILDS a
+            // prefix the dictionary has made stale, not just a missing one
+            // — AppModel calls this right after a snapshot change while the
+            // model is loaded, and on every key-down.
+            await self.warmUpIfNeeded(
+                context: context, parameters: parameters,
+                systemPrompt: self.currentSystemPrompt())
         }
     }
 
     /// Whether the warm prefix cache is ready (i.e. the next clean() skips
     /// warm-up). Exposed for tests.
     var isWarm: Bool { warmPrefix != nil }
+
+    /// The system prompt the current warm prefix was built with, nil when
+    /// cold. Exposed for tests (DictionaryWarmRebuildTests).
+    var warmSystemPromptForTesting: String? { warmPrefix?.systemPrompt }
 
     var isLoaded: Bool { get async { await lazyModel.isLoaded } }
 }

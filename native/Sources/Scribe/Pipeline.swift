@@ -64,6 +64,11 @@ final class DictationPipeline {
     /// Optional diagnostic sink for per-dictation stage timings. Never carries
     /// transcript text — only durations, engine name, and stage labels.
     private let onLog: ((String) -> Void)?
+    /// Fired with the final text of a successfully CLEANED dictation (never
+    /// when cleanup was skipped or fell back to raw) — the user-dictionary
+    /// learning hook. Harvesting relies on LLM-normalized casing, so raw
+    /// STT output is deliberately never offered to it.
+    private let onCleaned: ((String) -> Void)?
     private let saveFailedAudio: ([Float]) -> Void
 
     private(set) var engineName: String
@@ -85,7 +90,8 @@ final class DictationPipeline {
         onNotice: @escaping (String) -> Void,
         saveFailedAudio: @escaping ([Float]) -> Void,
         cleanupEnabled: Bool = true,
-        onLog: ((String) -> Void)? = nil
+        onLog: ((String) -> Void)? = nil,
+        onCleaned: ((String) -> Void)? = nil
     ) {
         self.recorder = recorder
         self.stt = stt
@@ -101,6 +107,7 @@ final class DictationPipeline {
         self.saveFailedAudio = saveFailedAudio
         self.cleanupEnabled = cleanupEnabled
         self.onLog = onLog
+        self.onCleaned = onCleaned
     }
 
     // MARK: - Public API
@@ -186,6 +193,10 @@ final class DictationPipeline {
             cleanupMs = Int((clock() - cleanStart) * 1000)
         }
         onLog?("dictation: engine=\(engineName) stt=\(sttMs)ms cleanup=\(cleanupMs)ms cleaned=\(cleaned) chars=\(final.count)")
+
+        if cleaned {
+            onCleaned?(final)
+        }
 
         do {
             try paster.paste(final)

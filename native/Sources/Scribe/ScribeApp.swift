@@ -18,6 +18,7 @@ final class AppModel: ObservableObject {
     let engines: [String: UnloadableEngine]
     let cleaner: GemmaBackend
     let idleTracker: IdleTracker
+    let dictionary: UserDictionaryStore
     nonisolated let logger: FileLogger
 
     private(set) var pipeline: DictationPipeline!
@@ -47,6 +48,14 @@ final class AppModel: ObservableObject {
     // real device changes.
     @Published private(set) var microphones: [AudioInputDevice] = []
     @Published private(set) var launchAtLoginEnabled: Bool = LoginItem.isEnabled
+    // Dictionary state mirrored for the menu + editor window. Refreshed by
+    // the store's onChange (snapshot moved) and by refreshDictionaryState()
+    // when the editor opens (counts/lastSeen can drift without a snapshot
+    // change).
+    @Published private(set) var dictionarySnapshot: DictionarySnapshot = .empty
+    @Published private(set) var dictionaryLearningEnabled: Bool
+    @Published private(set) var glossaryEntries: [GlossaryEntry] = []
+    @Published private(set) var replacementPairs: [ReplacementPair] = []
 
     private let pipelineConfig: PipelineConfig
 
@@ -78,6 +87,17 @@ final class AppModel: ObservableObject {
         self.cleaner = GemmaBackend(customModelPath: settings.cleanupModelPath)
         self.idleTracker = IdleTracker(unloadAfterMinutes: settings.idleUnloadMinutes)
         self.logger = FileLogger()
+
+        let dictionary = UserDictionaryStore()
+        dictionary.learningEnabled = settings.dictionaryLearningEnabled
+        self.dictionary = dictionary
+        self.dictionaryLearningEnabled = settings.dictionaryLearningEnabled
+        self.dictionarySnapshot = dictionary.snapshot
+        self.glossaryEntries = dictionary.allGlossaryEntries
+        self.replacementPairs = dictionary.allPairs
+        // Before any preload can run, so the first warm-up prefills the
+        // dictionary-augmented prompt rather than a stale base one.
+        self.cleaner.setDictionary(dictionary.snapshot)
 
         let startingEngine = engines[settings.engine] != nil ? settings.engine : "parakeet"
         self.activeEngineName = startingEngine
@@ -125,8 +145,19 @@ final class AppModel: ObservableObject {
                 }
             },
             cleanupEnabled: settings.cleanupEnabled,
-            onLog: { [logger] line in logger.log(line) }
+            onLog: { [logger] line in logger.log(line) },
+            // The store is thread-safe and observe() is fire-and-forget, so
+            // no main-actor hop — capture the collaborator like onLog does.
+            onCleaned: { [dictionary] text in dictionary.observe(cleanedText: text) }
         )
+
+        dictionary.onChange = { [weak self] snapshot in
+            // Fires on the store's queue; hop to the main actor for the
+            // @Published mirrors and the rewarm decision.
+            Task { @MainActor in
+                self?.applyDictionaryChange(snapshot)
+            }
+        }
 
         self.hotkeyMonitor = HotkeyMonitor(
             key: settings.hotkey,
@@ -373,6 +404,65 @@ final class AppModel: ObservableObject {
         settings.cleanupEnabled = on
     }
 
+    // MARK: - User dictionary
+
+    /// Applies a changed snapshot: mirrors state for the UI, hands the new
+    /// prompt to the cleaner, and eagerly rebuilds the warm prefix — but
+    /// only when the model is already resident. If it's idle-unloaded, the
+    /// next key-down preload rebuilds with the fresh prompt anyway, and a
+    /// bare preload() here would force-load ~2.5 GB just to warm a prompt.
+    private func applyDictionaryChange(_ snapshot: DictionarySnapshot) {
+        // Always refresh what the editor window lists — the store also
+        // notifies for changes below the prompt's 30-term cap, which move
+        // these lists without moving the snapshot.
+        glossaryEntries = dictionary.allGlossaryEntries
+        replacementPairs = dictionary.allPairs
+
+        // Cache work only when the prompt itself actually changes.
+        // Rebuilding the warm prefix costs ~1 s, so a list-only change must
+        // not trigger it.
+        guard snapshot != dictionarySnapshot else { return }
+        dictionarySnapshot = snapshot
+        cleaner.setDictionary(snapshot)
+        logger.log(
+            "dictionary updated: \(snapshot.glossary.count) learned terms, \(snapshot.pairs.count) pairs"
+        )
+        Task { [cleaner] in
+            if await cleaner.isLoaded {
+                await cleaner.preload()
+            }
+        }
+    }
+
+    /// Re-reads store state whose drift doesn't fire onChange (counts,
+    /// lastSeen). Called when the dictionary editor window appears.
+    func refreshDictionaryState() {
+        glossaryEntries = dictionary.allGlossaryEntries
+        replacementPairs = dictionary.allPairs
+    }
+
+    func setDictionaryLearning(_ on: Bool) {
+        dictionaryLearningEnabled = on
+        dictionary.learningEnabled = on
+        settings.dictionaryLearningEnabled = on
+    }
+
+    func clearLearnedTerms() {
+        dictionary.clearLearned()
+    }
+
+    func addReplacementPair(original: String, replacement: String) {
+        dictionary.addPair(original: original, replacement: replacement)
+    }
+
+    func removeReplacementPair(_ original: String) {
+        dictionary.removePair(original: original)
+    }
+
+    func removeGlossaryTerm(_ term: String) {
+        dictionary.removeGlossaryTerm(term)
+    }
+
     func setLaunchAtLogin(_ on: Bool) {
         do {
             if on {
@@ -454,6 +544,10 @@ struct ScribeApp: App {
 
         Window("scribe setup", id: onboardingWindowID) {
             OnboardingWindow(model: model)
+        }
+
+        Window("scribe dictionary", id: dictionaryWindowID) {
+            DictionaryWindow(model: model)
         }
     }
 }

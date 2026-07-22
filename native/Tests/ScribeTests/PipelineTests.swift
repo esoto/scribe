@@ -12,6 +12,7 @@ final class PipelineTests: XCTestCase {
         let states: Box<PipelineState>
         let notices: Box<String>
         let saved: Box<[Float]>
+        let cleanedTexts: Box<String>
     }
 
     /// A runner that blocks the calling (test) thread until the async work
@@ -44,6 +45,7 @@ final class PipelineTests: XCTestCase {
         let states = Box<PipelineState>()
         let notices = Box<String>()
         let saved = Box<[Float]>()
+        let cleanedTexts = Box<String>()
         let pipeline = DictationPipeline(
             recorder: recorder,
             stt: stt,
@@ -55,9 +57,12 @@ final class PipelineTests: XCTestCase {
             runner: makeSyncRunner(),
             onState: { states.append($0) },
             onNotice: { notices.append($0) },
-            saveFailedAudio: { saved.append($0) }
+            saveFailedAudio: { saved.append($0) },
+            onCleaned: { cleanedTexts.append($0) }
         )
-        return Harness(pipeline: pipeline, clock: clock, states: states, notices: notices, saved: saved)
+        return Harness(
+            pipeline: pipeline, clock: clock, states: states, notices: notices, saved: saved,
+            cleanedTexts: cleanedTexts)
     }
 
     private func dictate(_ h: Harness, hold: Double = 1.0) {
@@ -217,6 +222,54 @@ final class PipelineTests: XCTestCase {
     /// Python contract (FakeRecorder.arm() never raises there). Locks in the
     /// behavior chosen for this native-only failure mode: notify, stay idle,
     /// never reach the STT engine.
+    func testOnCleanedFiresWithCleanedTextOnSuccess() {
+        let h = make()
+        dictate(h)
+        XCTAssertEqual(h.cleanedTexts.value, ["hello there world"])
+    }
+
+    func testOnCleanedNotFiredWhenCleanupDisabled() {
+        let h = make()
+        h.pipeline.cleanupEnabled = false
+        dictate(h)
+        XCTAssertEqual(h.cleanedTexts.value, [])
+    }
+
+    func testOnCleanedNotFiredOnCleanupError() {
+        let h = make(cleaner: FakeCleaner(err: TestError(message: "boom")))
+        dictate(h)
+        XCTAssertEqual(h.cleanedTexts.value, [])
+    }
+
+    func testOnCleanedNotFiredBelowMinWords() {
+        let h = make(stt: FakeStt(text: "just three words"))
+        dictate(h)
+        XCTAssertEqual(h.cleanedTexts.value, [])
+    }
+
+    func testOnCleanedNilIsSafe() {
+        // The default-nil hook must not crash a successfully cleaned dictation.
+        let paster = FakePaster()
+        let clock = FakeClock()
+        let pipeline = DictationPipeline(
+            recorder: FakeRecorder(),
+            stt: FakeStt(),
+            cleaner: FakeCleaner(),
+            paster: paster,
+            history: History(maxLen: 10),
+            config: PipelineConfig(),
+            clock: { clock.t },
+            runner: makeSyncRunner(),
+            onState: { _ in },
+            onNotice: { _ in },
+            saveFailedAudio: { _ in }
+        )
+        pipeline.keyDown()
+        clock.t += 1.0
+        pipeline.keyUp()
+        XCTAssertEqual(paster.pasted, ["hello there world"])
+    }
+
     func testRecorderArmFailureSkipsRecording() {
         let stt = FakeStt()
         let recorder = FakeRecorder(armError: TestError(message: "mic grant missing"))
