@@ -70,7 +70,8 @@ final class UserDictionaryStoreTests: XCTestCase {
         // Candidate counts persist too: two more sightings promote.
         reopened.observe(cleanedText: "call Sofía back")
         reopened.observe(cleanedText: "tell Sofía thanks")
-        XCTAssertEqual(Set(reopened.snapshot.glossary), ["KVCache", "Sofía"])
+        // "kamal" rides along as the seeded replacement of the saved pair.
+        XCTAssertEqual(Set(reopened.snapshot.glossary), ["KVCache", "Sofía", "kamal"])
     }
 
     func testCandidateDecay() {
@@ -131,6 +132,42 @@ final class UserDictionaryStoreTests: XCTestCase {
         XCTAssertFalse(store.allPairs.map(\.original).contains("orig0"))
     }
 
+    func testPairReplacementSeedsGlossary() {
+        // A manual pair exists because the STT mangles that word — and it
+        // mangles it DIFFERENTLY each time, so the pair's exact left side
+        // can't cover every variant. Seeding the replacement into the
+        // vocabulary lets the prompt's "close mishearing" clause do it.
+        let store = makeStore()
+        store.addPair(original: "camel", replacement: "kamal")
+        XCTAssertEqual(store.snapshot.glossary, ["kamal"])
+    }
+
+    func testSeededTermIsDedupedAgainstLearnedTerm() {
+        let store = makeStore()
+        for _ in 0..<3 { store.observe(cleanedText: "ship it with Kamal today") }
+        XCTAssertEqual(store.snapshot.glossary, ["Kamal"])
+        store.addPair(original: "camel", replacement: "kamal")
+        // One entry, not two spellings of the same word; the user's explicit
+        // replacement wins over the learned casing.
+        XCTAssertEqual(store.snapshot.glossary, ["kamal"])
+    }
+
+    func testRemovingPairDropsItsSeededTerm() {
+        let store = makeStore()
+        store.addPair(original: "camel", replacement: "kamal")
+        XCTAssertEqual(store.snapshot.glossary, ["kamal"])
+        store.removePair(original: "camel")
+        XCTAssertEqual(store.snapshot.glossary, [])
+    }
+
+    func testSeededTermsSortAlphabeticallyWithLearnedOnes() {
+        let store = makeStore()
+        for _ in 0..<3 { store.observe(cleanedText: "deploy to Hetzner nightly") }
+        store.addPair(original: "camel", replacement: "kamal")
+        store.addPair(original: "zed", replacement: "Ansible")
+        XCTAssertEqual(store.snapshot.glossary, ["Ansible", "Hetzner", "kamal"])
+    }
+
     func testAddPairReplacesSameOriginal() {
         let store = makeStore()
         store.addPair(original: "camel", replacement: "kamal")
@@ -145,12 +182,16 @@ final class UserDictionaryStoreTests: XCTestCase {
         for _ in 0..<3 { store.observe(cleanedText: "use MLX here") }
         store.clearLearned()
         let snap = store.snapshot
-        XCTAssertEqual(snap.glossary, [])
+        // "MLX" is forgotten; "kamal" survives only as the surviving pair's
+        // seeded replacement, not as a learned term.
+        XCTAssertEqual(snap.glossary, ["kamal"])
+        XCTAssertTrue(store.allGlossaryEntries.isEmpty)
         XCTAssertEqual(snap.pairs.map(\.original), ["camel"])
-        // Candidates were wiped too: promotion needs three fresh sightings.
+        // Candidates were wiped too: promotion needs three fresh sightings,
+        // so "MLX" stays absent and only the seeded "kamal" remains.
         store.observe(cleanedText: "use MLX here")
         store.observe(cleanedText: "use MLX here")
-        XCTAssertEqual(store.snapshot.glossary, [])
+        XCTAssertEqual(store.snapshot.glossary, ["kamal"])
     }
 
     func testRemoveGlossaryTermAlsoDropsCandidate() {
