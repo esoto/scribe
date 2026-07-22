@@ -22,9 +22,15 @@ enum CleanupPrompt {
             return (o, r)
         }
         if !pairs.isEmpty {
+            // Rendered as "write X as Y", never with an arrow. `"X" -> "Y"`
+            // reads as "X to Y", so a transcript saying "deploy with camel
+            // to hetzner" looked to the model like a replacement rule
+            // camel -> hetzner; it applied it and the word "camel" vanished
+            // from the sentence. Every dropped-word case in
+            // DictionaryFidelityTests had that "X to Y" shape.
             prompt +=
-                "\n\nAlways apply these replacements when the left side appears in the transcript: "
-                + pairs.map { "\"\($0.0)\" -> \"\($0.1)\"" }.joined(separator: "; ") + "."
+                "\n\nAlways apply these spelling corrections when the word appears in the transcript: "
+                + pairs.map { "write \"\($0.0)\" as \"\($0.1)\"" }.joined(separator: "; ") + "."
         }
         return prompt
     }

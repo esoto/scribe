@@ -36,16 +36,16 @@ final class CleanupPromptTests: XCTestCase {
         let snap = DictionarySnapshot(pairs: [], glossary: ["Kamal", "MLX"])
         let prompt = CleanupPrompt.systemPrompt(with: snap)
         XCTAssertTrue(prompt.hasPrefix(CleanupPrompt.systemPrompt))
-        XCTAssertTrue(prompt.contains("The speaker's personal vocabulary includes"))
+        XCTAssertTrue(prompt.contains("personal vocabulary includes"))
         XCTAssertTrue(prompt.contains("\"Kamal\", \"MLX\""))
-        XCTAssertFalse(prompt.contains("Always apply these replacements"))
+        XCTAssertFalse(prompt.contains("spelling corrections"))
     }
 
     func testPairsOnlySection() {
         let snap = DictionarySnapshot(pairs: [pair("camel", "kamal")], glossary: [])
         let prompt = CleanupPrompt.systemPrompt(with: snap)
-        XCTAssertTrue(prompt.contains("Always apply these replacements"))
-        XCTAssertTrue(prompt.contains("\"camel\" -> \"kamal\""))
+        XCTAssertTrue(prompt.contains("spelling corrections"))
+        XCTAssertTrue(prompt.contains("write \"camel\" as \"kamal\""))
         XCTAssertFalse(prompt.contains("personal vocabulary"))
     }
 
@@ -56,7 +56,7 @@ final class CleanupPromptTests: XCTestCase {
         let a = CleanupPrompt.systemPrompt(with: snap)
         let b = CleanupPrompt.systemPrompt(with: snap)
         XCTAssertEqual(a, b)
-        XCTAssertTrue(a.contains("\"camel\" -> \"kamal\"; \"wisper\" -> \"Whisper\""))
+        XCTAssertTrue(a.contains("write \"camel\" as \"kamal\"; write \"wisper\" as \"Whisper\""))
         XCTAssertTrue(a.contains("\"MLX\", \"Parakeet\""))
     }
 
@@ -84,7 +84,7 @@ final class CleanupPromptTests: XCTestCase {
         let snap = DictionarySnapshot(
             pairs: [pair("<>", "kamal"), pair("ok", "fine")], glossary: ["\"\"", "MLX"])
         let prompt = CleanupPrompt.systemPrompt(with: snap)
-        XCTAssertTrue(prompt.contains("\"ok\" -> \"fine\""))
+        XCTAssertTrue(prompt.contains("write \"ok\" as \"fine\""))
         XCTAssertFalse(prompt.contains("kamal"))  // pair with empty original dropped whole
         XCTAssertTrue(prompt.contains("\"MLX\""))
     }

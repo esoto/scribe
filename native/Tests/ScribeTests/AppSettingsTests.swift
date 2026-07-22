@@ -36,7 +36,9 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(settings.sounds, true)
         XCTAssertEqual(settings.historySize, 10)
         XCTAssertEqual(settings.idleUnloadMinutes, 15)
-        XCTAssertEqual(settings.dictionaryLearningEnabled, true)
+        // Off by default — the learned-vocabulary prompt section is known to
+        // drop words (DictionaryFidelityTests).
+        XCTAssertEqual(settings.dictionaryLearningEnabled, false)
     }
 
     // MARK: - Round-trip set/get
@@ -54,7 +56,7 @@ final class AppSettingsTests: XCTestCase {
         settings.sounds = false
         settings.historySize = 25
         settings.idleUnloadMinutes = 30
-        settings.dictionaryLearningEnabled = false
+        settings.dictionaryLearningEnabled = true
 
         XCTAssertEqual(settings.hotkey, .f13)
         XCTAssertEqual(settings.holdThreshold, 0.5)
@@ -69,7 +71,7 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(settings.sounds, false)
         XCTAssertEqual(settings.historySize, 25)
         XCTAssertEqual(settings.idleUnloadMinutes, 30)
-        XCTAssertEqual(settings.dictionaryLearningEnabled, false)
+        XCTAssertEqual(settings.dictionaryLearningEnabled, true)
     }
 
     // A fresh AppSettings instance reading the same underlying UserDefaults

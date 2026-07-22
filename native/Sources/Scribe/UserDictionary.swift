@@ -256,26 +256,21 @@ final class UserDictionaryStore: @unchecked Sendable {
         let topPairs = pairs.sorted { $0.addedAt > $1.addedAt }
             .prefix(Self.snapshotPairCap)
             .sorted { Self.alphabetical($0.original, $1.original) }
+        // INVARIANT: a term is never named in both the replacement list and
+        // the vocabulary list. Measured against the real model, naming one
+        // in both makes it get dropped from the sentence outright — see
+        // DictionaryFidelityTests. Seeding pair replacements INTO the
+        // vocabulary (tried, reverted) violated this maximally; a term that
+        // is both learned and a pair target violates it by coincidence, so
+        // filter those out here. The pair already guarantees the spelling,
+        // which is all the vocabulary entry would have added.
+        let pairTargets = Set(topPairs.map { $0.replacement.lowercased() })
         let learned = glossary.sorted(by: Self.byUsage)
-            .prefix(Self.snapshotGlossaryCap)
             .map(\.term)
-
-        // A manual pair exists precisely because the STT mangles that word —
-        // and it mangles it differently each time ("Hetzner" came back as
-        // Headstar / Hatsner / Heftner / Headsnar in one session), so the
-        // pair's exact left side can never cover every variant. Seeding the
-        // replacement into the vocabulary hands the job to the prompt's
-        // "or a close mishearing of one" clause, which generalizes.
-        // Replacements come first so they win the case-insensitive dedupe:
-        // an explicit user spelling beats a learned one.
-        var terms: [String] = []
-        var seen = Set<String>()
-        for term in topPairs.map(\.replacement) + learned
-        where !term.trimmingCharacters(in: .whitespaces).isEmpty {
-            if seen.insert(term.lowercased()).inserted { terms.append(term) }
-        }
-        return DictionarySnapshot(
-            pairs: Array(topPairs), glossary: terms.sorted(by: Self.alphabetical))
+            .filter { !pairTargets.contains($0.lowercased()) }
+            .prefix(Self.snapshotGlossaryCap)
+            .sorted(by: Self.alphabetical)
+        return DictionarySnapshot(pairs: Array(topPairs), glossary: Array(learned))
     }
 
     /// Highest count first, most recently seen breaking ties.

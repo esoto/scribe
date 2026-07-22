@@ -71,23 +71,26 @@ Cleanup knows generic English and Spanish, not *your* nouns. The dictionary
 teaches it — menu bar → **Dictionary**, or **Edit Dictionary…** for the
 full editor.
 
-**Learned terms (automatic).** Distinctive vocabulary in cleaned dictations
-— proper nouns, acronyms, `camelCase`/`snake_case`, words with digits — is
-counted, and anything appearing in **3 separate dictations** is promoted and
-starts being injected into the cleanup prompt, which locks in its spelling.
-Ordinary lowercase words are never learned. Terms go stale and are dropped
-after 60 days unused (14 days for ones that never got promoted). Turn the
-whole thing off with **Learn New Terms**, or wipe it with **Clear Learned
-Terms**.
-
 **Replacements (manual).** "Heard as → Replace with" pairs, applied every
-time. Use these when the transcription is wrong in a way learning can't
-fix — which is more often than you'd guess, because a word the STT
-mishears usually comes out *differently each time* ("Hetzner" produced
-Headstar, Hatsner, Heftner and Headsnar in one sitting), so it never
-reaches the 3-sighting threshold. Adding one replacement also adds its
-target to your vocabulary, so the cleanup pass corrects near-misses that
-no exact pair would ever match.
+time — this is the part that works, and the one to reach for. A word the
+STT mishears comes out *differently each time* ("Hetzner" produced
+Headstar, Hatsner, Heftner and Headsnar in one sitting), so add a pair for
+whichever spelling you see most; add a second if another variant keeps
+showing up.
+
+**Learned terms (automatic) — off by default, and it should stay off for
+now.** The intent: distinctive vocabulary in cleaned dictations (proper
+nouns, acronyms, `camelCase`, words with digits) is counted, and anything
+appearing in **3 separate dictations** gets its spelling locked in. Terms
+go stale after 60 days unused (14 for ones never promoted).
+
+It's disabled because it currently **costs you words.** Measured against
+the real model, injecting the learned-vocabulary list makes cleanup delete
+words from the sentence — including words the list never mentions. A
+vocabulary of just `"Postgres"` was enough to turn *"deploy with kamal to
+hetzner tonight"* into *"Deploy with hetzner tonight."* Replacement pairs
+show no such effect. `DictionaryFidelityTests` pins this; **Learn New
+Terms** enables it anyway if you want to experiment.
 
 Both are stored in `~/Library/Application Support/scribe/dictionary.json`
 — **individual words only, never transcripts.** Delete the file for a clean
@@ -114,7 +117,7 @@ Change via `defaults write dev.esoto.scribe <key> <value>` and relaunch:
 | `sounds` | true | start/error sounds |
 | `historySize` | 10 | menu history length |
 | `idleUnloadMinutes` | 15 | unload models after idle (0 = keep resident) |
-| `dictionaryLearningEnabled` | true | auto-learn vocabulary from cleaned dictations |
+| `dictionaryLearningEnabled` | false | auto-learn vocabulary (known to drop words — see Dictionary) |
 | `cleanupModelPath` | _(unset)_ | local MLX model folder to use for cleanup instead of stock Gemma |
 
 **Custom cleanup model:** point `cleanupModelPath` at any local MLX model

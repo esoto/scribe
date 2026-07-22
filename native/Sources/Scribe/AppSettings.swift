@@ -62,8 +62,14 @@ final class AppSettings {
 
     /// Whether the user dictionary auto-learns glossary terms from cleaned
     /// dictations (`UserDictionaryStore.learningEnabled`).
+    ///
+    /// Defaults to FALSE: measured against the real model, injecting a
+    /// learned-vocabulary list makes cleanup drop words from the sentence —
+    /// including words the list never mentions (see
+    /// DictionaryFidelityTests). Manual replacement pairs are unaffected and
+    /// stay on. Flip this back once the vocabulary wording is fixed.
     var dictionaryLearningEnabled: Bool {
-        get { defaults.object(forKey: Key.dictionaryLearningEnabled) as? Bool ?? true }
+        get { defaults.object(forKey: Key.dictionaryLearningEnabled) as? Bool ?? false }
         set { defaults.set(newValue, forKey: Key.dictionaryLearningEnabled) }
     }
 

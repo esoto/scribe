@@ -28,7 +28,7 @@ final class DictionaryWarmRebuildTests: XCTestCase {
         XCTAssertTrue(backend.isWarm)
         let warmPrompt = try XCTUnwrap(backend.warmSystemPromptForTesting)
         XCTAssertTrue(warmPrompt.contains("\"Parakeet\""))
-        XCTAssertTrue(warmPrompt.contains("\"camel\" -> \"kamal\""))
+        XCTAssertTrue(warmPrompt.contains("write \"camel\" as \"kamal\""))
 
         // Cleaning with the dictionary-augmented prompt still produces
         // sane output (and must not fall back on a prefix mismatch).
