@@ -102,6 +102,35 @@ struct MenuBarView: View {
             }
         }
 
+        Menu("Dictionary") {
+            Toggle(
+                "Learn New Terms",
+                isOn: Binding(
+                    get: { model.dictionaryLearningEnabled },
+                    set: { model.setDictionaryLearning($0) }
+                )
+            )
+            Button("Edit Dictionary…") {
+                openDictionaryWindow(openWindow)
+            }
+            Divider()
+            if model.dictionarySnapshot.glossary.isEmpty {
+                Text("(no learned terms)")
+            } else {
+                ForEach(model.dictionarySnapshot.glossary, id: \.self) { term in
+                    Menu(truncateLabel(term)) {
+                        Button("Remove") {
+                            model.removeGlossaryTerm(term)
+                        }
+                    }
+                }
+                Divider()
+                Button("Clear Learned Terms") {
+                    model.clearLearnedTerms()
+                }
+            }
+        }
+
         Divider()
 
         Button("Setup / Doctor…") {

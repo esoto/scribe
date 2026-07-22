@@ -537,6 +537,10 @@ struct ScribeApp: App {
         Window("scribe setup", id: onboardingWindowID) {
             OnboardingWindow(model: model)
         }
+
+        Window("scribe dictionary", id: dictionaryWindowID) {
+            DictionaryWindow(model: model)
+        }
     }
 }
 
