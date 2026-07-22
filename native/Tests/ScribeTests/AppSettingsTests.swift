@@ -36,6 +36,7 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(settings.sounds, true)
         XCTAssertEqual(settings.historySize, 10)
         XCTAssertEqual(settings.idleUnloadMinutes, 15)
+        XCTAssertEqual(settings.dictionaryLearningEnabled, true)
     }
 
     // MARK: - Round-trip set/get
@@ -53,6 +54,7 @@ final class AppSettingsTests: XCTestCase {
         settings.sounds = false
         settings.historySize = 25
         settings.idleUnloadMinutes = 30
+        settings.dictionaryLearningEnabled = false
 
         XCTAssertEqual(settings.hotkey, .f13)
         XCTAssertEqual(settings.holdThreshold, 0.5)
@@ -67,6 +69,7 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(settings.sounds, false)
         XCTAssertEqual(settings.historySize, 25)
         XCTAssertEqual(settings.idleUnloadMinutes, 30)
+        XCTAssertEqual(settings.dictionaryLearningEnabled, false)
     }
 
     // A fresh AppSettings instance reading the same underlying UserDefaults

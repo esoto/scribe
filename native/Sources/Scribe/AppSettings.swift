@@ -25,6 +25,7 @@ final class AppSettings {
         static let idleUnloadMinutes = "idleUnloadMinutes"
         static let cleanupModelPath = "cleanupModelPath"
         static let microphoneUID = "microphoneUID"
+        static let dictionaryLearningEnabled = "dictionaryLearningEnabled"
         static let didImportToml = "didImportToml"
     }
 
@@ -57,6 +58,13 @@ final class AppSettings {
     var cleanupEnabled: Bool {
         get { defaults.object(forKey: Key.cleanupEnabled) as? Bool ?? true }
         set { defaults.set(newValue, forKey: Key.cleanupEnabled) }
+    }
+
+    /// Whether the user dictionary auto-learns glossary terms from cleaned
+    /// dictations (`UserDictionaryStore.learningEnabled`).
+    var dictionaryLearningEnabled: Bool {
+        get { defaults.object(forKey: Key.dictionaryLearningEnabled) as? Bool ?? true }
+        set { defaults.set(newValue, forKey: Key.dictionaryLearningEnabled) }
     }
 
     var minWords: Int {
