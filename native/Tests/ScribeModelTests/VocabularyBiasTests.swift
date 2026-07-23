@@ -28,25 +28,25 @@ final class VocabularyBiasTests: XCTestCase {
     }
 
     func testCuratedPackDoesNotCorruptNormalSpeech() async throws {
-        // A realistic bias set (curated engineering pack) must not change a
-        // sentence that contains none of its terms. Exercises the full CTC
-        // path end to end.
-        let engine = ParakeetEngine()
-        engine.setBiasVocabulary(
+        // The curated pack must not change ANY word of a sentence that
+        // contains none of its terms — asserted on the WHOLE string, not a
+        // couple of words. An earlier version checked only "marcos"/"wednesday"
+        // and so missed "bueno"→"Deno" / "mañana"→"Grafana" corruption in
+        // Spanish. This is the regression guard for the threshold clamp.
+        let plain = ParakeetEngine()
+        let biased = ParakeetEngine()
+        biased.setBiasVocabulary(
             BiasVocabularyBuilder.build(pairs: [], glossary: [], includeCuratedPack: true))
 
-        let en = try await engine.transcribe(loadPcm("en.wav")).lowercased()
-        XCTAssertTrue(en.contains("wednesday"), "actual: \(en)")
-        XCTAssertTrue(en.contains("marcos"), "actual: \(en)")
-        // The rescorer must have run cleanly — .applied or .unmodified, never
-        // .failed. (.noCtcModel is tolerated: offline CI can't download.)
-        XCTAssertNotEqual(
-            engine.lastBiasOutcomeForTesting, .failed,
-            "the CTC rescorer path threw — likely a FluidAudio API mismatch")
-
-        let es = try await engine.transcribe(loadPcm("es.wav")).lowercased()
-        XCTAssertTrue(es.contains("deberíamos"), "actual: \(es)")
-        XCTAssertTrue(es.contains("mediodía"), "actual: \(es)")
+        for name in ["en.wav", "es.wav", "mixed.wav"] {
+            let pcm = try loadPcm(name)
+            let p = try await plain.transcribe(pcm)
+            let b = try await biased.transcribe(pcm)
+            XCTAssertEqual(b, p, "curated-pack biasing changed \(name):\n  plain:  \(p)\n  biased: \(b)")
+            XCTAssertNotEqual(
+                biased.lastBiasOutcomeForTesting, .failed,
+                "the CTC rescorer path threw — likely a FluidAudio API mismatch")
+        }
     }
 
     func testSilenceStaysEmptyUnderBiasing() async throws {

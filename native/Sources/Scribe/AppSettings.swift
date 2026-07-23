@@ -62,10 +62,17 @@ final class AppSettings {
     }
 
     /// Whether Parakeet biases transcription toward the user's dictionary +
-    /// the curated engineering pack (`ParakeetEngine.setBiasVocabulary`). Adds
-    /// a second CoreML pass per dictation, so it's user-disablable; default on.
+    /// the curated engineering pack (`ParakeetEngine.setBiasVocabulary`).
+    ///
+    /// Default OFF: acoustic rescoring at a threshold loose enough to catch
+    /// real manglings also replaces ordinary words with vocab terms (measured:
+    /// "bueno" → "Deno", "mañana" → "Grafana"), which is worse for a bilingual
+    /// speaker than the mishearings it fixes. Now clamped to a safe threshold,
+    /// but opt-in via the "Correct Speech" toggle until it proves it helps
+    /// more than it hurts on real use. Also adds a second CoreML pass per
+    /// dictation.
     var vocabularyBiasingEnabled: Bool {
-        get { defaults.object(forKey: Key.vocabularyBiasingEnabled) as? Bool ?? true }
+        get { defaults.object(forKey: Key.vocabularyBiasingEnabled) as? Bool ?? false }
         set { defaults.set(newValue, forKey: Key.vocabularyBiasingEnabled) }
     }
 

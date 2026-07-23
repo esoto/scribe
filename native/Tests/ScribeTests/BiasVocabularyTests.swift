@@ -26,7 +26,7 @@ final class BiasVocabularyTests: XCTestCase {
         XCTAssertTrue(off.isEmpty)
         let on = BiasVocabularyBuilder.build(pairs: [], glossary: [], includeCuratedPack: true)
         XCTAssertTrue(on.contains { $0.text == "Kubernetes" })
-        XCTAssertTrue(on.contains { $0.text == "Claude" })
+        XCTAssertTrue(on.contains { $0.text == "Postgres" })
     }
 
     func testEmptyInputsAndPackOffYieldEmpty() {

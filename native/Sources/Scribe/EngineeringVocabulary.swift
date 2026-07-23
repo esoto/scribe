@@ -6,30 +6,31 @@ import Foundation
 /// in `UserDictionaryStore` (that would surface fake "learned" terms in the
 /// dictionary editor and feed them to the Gemma cleanup prompt).
 ///
-/// Conservative by design: every entry is a genuinely distinctive term whose
-/// canonical spelling a general recognizer gets wrong. Entries are ASCII and
-/// at least 3 characters (the CTC spotter drops shorter terms). Keep the list
-/// tight — an over-broad term biases a common word toward a rare spelling.
+/// Conservative by design. Short terms (≤5 chars, acronyms, common-word
+/// homophones) are DELIBERATELY EXCLUDED: measured against the fixtures, they
+/// were the false-positive engine — "Deno"/"Vue"/"Node"/"Helm"/"Kafka" got
+/// swapped in for "bueno"/"que"/"move"/"tell"/ordinary words, especially in
+/// Spanish. Only multi-syllable, distinctive terms unlikely to collide with
+/// everyday EN/ES vocabulary remain. Keep it tight: every entry is a term a
+/// general recognizer mis-decodes AND that no common word sounds like.
 enum EngineeringVocabulary {
     static let terms: [String] = [
-        // AI / Anthropic
-        "Claude", "Anthropic", "OpenAI", "LLM", "GPT",
+        // AI
+        "Anthropic",
         // Languages / runtimes
-        "Python", "TypeScript", "JavaScript", "Golang", "Rust", "Kotlin",
-        "Swift", "Ruby", "Node", "Deno", "WebAssembly",
+        "TypeScript", "JavaScript", "Kotlin", "WebAssembly",
         // Frameworks / libraries
-        "React", "Angular", "Svelte", "Vue", "Rails", "Django", "FastAPI",
-        "Next", "Tailwind", "GraphQL",
+        "Angular", "Svelte", "Django", "FastAPI", "Tailwind", "GraphQL",
         // Data stores
-        "Postgres", "PostgreSQL", "Redis", "MongoDB", "SQLite", "DynamoDB",
-        "Elasticsearch", "Kafka", "RabbitMQ",
+        "Postgres", "PostgreSQL", "MongoDB", "SQLite", "DynamoDB",
+        "Elasticsearch", "RabbitMQ",
         // Infra / DevOps
-        "Kubernetes", "Docker", "Terraform", "Ansible", "Nginx", "Helm",
-        "Prometheus", "Grafana", "Kamal", "Hetzner", "CloudFlare",
+        "Kubernetes", "Docker", "Terraform", "Ansible", "Prometheus",
+        "Grafana", "Kamal", "Hetzner", "CloudFlare",
         // Cloud
-        "AWS", "GCP", "Azure", "Lambda", "Vercel", "Netlify", "Supabase",
-        // Tooling / concepts
-        "GitHub", "GitLab", "Kubectl", "Webpack", "ESLint", "Prettier",
-        "Xcode", "SwiftUI", "CoreML", "async", "webhook", "OAuth", "JWT",
+        "Lambda", "Vercel", "Netlify", "Supabase",
+        // Tooling
+        "GitHub", "GitLab", "Kubectl", "Webpack", "Prettier",
+        "SwiftUI", "CoreML", "webhook",
     ]
 }

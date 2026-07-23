@@ -114,6 +114,16 @@ final class ParakeetEngine: UnloadableEngine {
     enum BiasOutcome: Equatable { case disabled, noCtcModel, noTimings, unmodified, applied, failed }
     private(set) var lastBiasOutcomeForTesting: BiasOutcome = .disabled
 
+    /// String-similarity floor for accepting a rescoring replacement. The
+    /// library's vocab-size-aware default (0.50–0.60) is far too loose — it
+    /// replaces ordinary words with acoustically-loose vocab matches ("bueno"
+    /// → "Deno", "mañana" → "Grafana", "move" → "Node"). 0.75 was the lowest
+    /// value that left every fixture untouched with the full curated pack,
+    /// with margin for bilingual speech. This raises precision at the cost of
+    /// recall (near-homophones like "cloud"/"Claude" no longer fire — but
+    /// catching those was exactly what corrupted common words).
+    static let biasMinSimilarity: Float = 0.75
+
     init() {
         lazyModel = LazyModel(label: "parakeet") {
             // Downloaded into the app-managed store, not FluidAudio's
@@ -187,7 +197,7 @@ final class ParakeetEngine: UnloadableEngine {
                 frameDuration: spot.frameDuration,
                 cbw: cfg.cbw,
                 marginSeconds: ContextBiasingConstants.defaultMarginSeconds,
-                minSimilarity: cfg.minSimilarity)
+                minSimilarity: Self.biasMinSimilarity)
             lastBiasOutcomeForTesting = out.wasModified ? .applied : .unmodified
             return out.wasModified ? out.text : result.text
         } catch {
