@@ -180,7 +180,12 @@ final class DictationPipeline {
             return
         }
 
-        let sttMs = Int((clock() - sttStart) * 1000)
+        // The measured STT wall time includes any Parakeet vocabulary biasing
+        // (the CTC pass runs inside transcribe). Split it out so stt=/bias= are
+        // disjoint; bias is 0 for engines/settings without biasing.
+        let sttTotalMs = Int((clock() - sttStart) * 1000)
+        let biasMs = (stt as? ParakeetEngine)?.lastBiasMs ?? 0
+        let sttMs = max(0, sttTotalMs - biasMs)
 
         guard !raw.isEmpty else {
             onNotice("Nothing transcribed")
@@ -209,7 +214,7 @@ final class DictationPipeline {
             }
             cleanupMs = Int((clock() - cleanStart) * 1000)
         }
-        onLog?("dictation: engine=\(engineName) stt=\(sttMs)ms cleanup=\(cleanupMs)ms cleaned=\(cleaned) chars=\(final.count)")
+        onLog?("dictation: engine=\(engineName) stt=\(sttMs)ms bias=\(biasMs)ms cleanup=\(cleanupMs)ms cleaned=\(cleaned) chars=\(final.count)")
 
         if cleaned {
             onCleaned?(final)

@@ -114,6 +114,12 @@ final class ParakeetEngine: UnloadableEngine {
     enum BiasOutcome: Equatable { case disabled, noCtcModel, noTimings, unmodified, applied, failed }
     private(set) var lastBiasOutcomeForTesting: BiasOutcome = .disabled
 
+    /// Milliseconds the last `transcribe` spent in vocabulary biasing (the
+    /// CTC pass + rescore). 0 when biasing is off/empty — a near-free guard.
+    /// Read by the pipeline to log biasing as its own timing field. Written
+    /// and read only on the pipeline's serial dictation path.
+    private(set) var lastBiasMs: Int = 0
+
     /// String-similarity floor for accepting a rescoring replacement. The
     /// library's vocab-size-aware default (0.50–0.60) is far too loose — it
     /// replaces ordinary words with acoustically-loose vocab matches ("bueno"
@@ -153,7 +159,9 @@ final class ParakeetEngine: UnloadableEngine {
             let manager = try await lazyModel.get()
             var state = try TdtDecoderState()
             let result = try await manager.transcribe(pcm, decoderState: &state)
+            let biasStart = Date()
             let biased = await applyBiasing(to: result, pcm: pcm)
+            lastBiasMs = Int(Date().timeIntervalSince(biasStart) * 1000)
             return biased.trimmingCharacters(in: .whitespacesAndNewlines)
         } catch let error as SttError {
             throw error
