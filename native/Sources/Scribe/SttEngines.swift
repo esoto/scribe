@@ -87,18 +87,22 @@ final class ParakeetEngine: UnloadableEngine {
 
     private let lazyModel: LazyModel<AsrManager>
     /// Auxiliary CTC keyword-spotter model for vocabulary biasing — a
-    /// separate download from the TDT model. `nil` payload means the model
-    /// couldn't be loaded (offline, etc.); transcription then proceeds
-    /// unbiased. Never a fatal error.
-    private let lazyCtc: LazyModel<CtcModels?>
+    /// separate download from the TDT model. Its factory throws on load
+    /// failure (offline, etc.) so `LazyModel` does NOT cache the failure and
+    /// the next dictation retries; `applyBiasing` catches the throw and
+    /// transcribes unbiased. Never a fatal error.
+    private let lazyCtc: LazyModel<CtcModels>
 
     /// Bias vocabulary + the rescorer built from it, guarded by `biasLock`.
-    /// The rescorer/context/spotter are rebuilt lazily inside `container`-free
-    /// transcribe when `biasDirty` is set, so a vocab change costs nothing
-    /// until the next dictation.
+    /// The cached trio is keyed on `cachedTerms` (the exact vocabulary it was
+    /// built from), NOT a dirty flag: a rebuild is triggered whenever the
+    /// requested terms differ from what's cached. Keying on identity rather
+    /// than a boolean is what makes a failed rebuild retry (the cache still
+    /// holds the OLD terms, so the next call still mismatches) and defeats the
+    /// lost-update race where a vocab change lands mid-dictation.
     private let biasLock = NSLock()
     private var biasVocabulary: [BiasTerm] = []
-    private var biasDirty = false
+    private var cachedTerms: [BiasTerm]?
     private var cachedRescorer: VocabularyRescorer?
     private var cachedContext: CustomVocabularyContext?
     private var cachedSpotter: CtcKeywordSpotter?
@@ -121,9 +125,9 @@ final class ParakeetEngine: UnloadableEngine {
             return manager
         }
         lazyCtc = LazyModel(label: "parakeet-ctc") {
-            // Best-effort: a failed CTC load leaves biasing disabled rather
-            // than breaking transcription.
-            try? await CtcModels.downloadAndLoad(
+            // Throws on failure (NOT try?) so LazyModel doesn't cache a failed
+            // load as a permanent success-of-nil — the next dictation retries.
+            try await CtcModels.downloadAndLoad(
                 to: ModelStore.ctcDirectory, variant: .ctc110m)
         }
     }
@@ -131,12 +135,7 @@ final class ParakeetEngine: UnloadableEngine {
     /// Publishes a new bias vocabulary. Takes effect on the next
     /// `transcribe`; load-free and callable before any model is resident.
     func setBiasVocabulary(_ terms: [BiasTerm]) {
-        biasLock.lock()
-        if terms != biasVocabulary {
-            biasVocabulary = terms
-            biasDirty = true
-        }
-        biasLock.unlock()
+        biasLock.withLock { biasVocabulary = terms }
     }
 
     func transcribe(_ pcm: [Float]) async throws -> String {
@@ -161,9 +160,9 @@ final class ParakeetEngine: UnloadableEngine {
         let terms = biasLock.withLock { biasVocabulary }
         guard !terms.isEmpty else { lastBiasOutcomeForTesting = .disabled; return result.text }
 
-        // Factory swallows load errors into a nil payload; the extra `?? nil`
-        // flattens the throwing get()'s double optional.
-        guard let ctc = (try? await lazyCtc.get()) ?? nil else {
+        // A load failure throws; catch it here so biasing degrades to plain
+        // text without the failure being cached (the next dictation retries).
+        guard let ctc = try? await lazyCtc.get() else {
             lastBiasOutcomeForTesting = .noCtcModel
             return result.text
         }
@@ -204,10 +203,10 @@ final class ParakeetEngine: UnloadableEngine {
     private func rescorer(for terms: [BiasTerm], ctc: CtcModels) async throws
         -> (CustomVocabularyContext, CtcKeywordSpotter, VocabularyRescorer)
     {
+        // Reuse only when the cache was built from exactly these terms.
         let cached = biasLock.withLock {
             () -> (CustomVocabularyContext, CtcKeywordSpotter, VocabularyRescorer)? in
-            defer { biasDirty = false }
-            guard !biasDirty, let ctx = cachedContext, let sp = cachedSpotter,
+            guard cachedTerms == terms, let ctx = cachedContext, let sp = cachedSpotter,
                 let rs = cachedRescorer
             else { return nil }
             return (ctx, sp, rs)
@@ -230,7 +229,10 @@ final class ParakeetEngine: UnloadableEngine {
         let rescorer = try await VocabularyRescorer.create(
             spotter: spotter, vocabulary: context, config: .default, ctcModelDirectory: modelDir)
 
+        // Record the terms only on success, so a thrown rebuild leaves the
+        // old (mismatching) cachedTerms in place and the next call retries.
         biasLock.withLock {
+            cachedTerms = terms
             cachedContext = context
             cachedSpotter = spotter
             cachedRescorer = rescorer
@@ -242,13 +244,24 @@ final class ParakeetEngine: UnloadableEngine {
         await lazyModel.unload()
         await lazyCtc.unload()
         biasLock.withLock {
+            cachedTerms = nil
             cachedRescorer = nil
             cachedContext = nil
             cachedSpotter = nil
-            biasDirty = true
         }
     }
-    func preload() async { await lazyModel.preload() }
+    func preload() async {
+        await lazyModel.preload()
+        // Warm the CTC model in the background too, but ONLY when there's a
+        // vocabulary to bias with — otherwise a biasing-off user would pay an
+        // unnecessary download/load. Fire-and-forget so a slow/absent CTC
+        // never delays TDT readiness; LazyModel coalesces this with the
+        // get() inside applyBiasing, so the first biased dictation no longer
+        // stalls on the load.
+        if !biasLock.withLock({ biasVocabulary.isEmpty }) {
+            Task { await lazyCtc.preload() }
+        }
+    }
     // CTC is auxiliary — the engine is "loaded" iff the TDT model is.
     var isLoaded: Bool { get async { await lazyModel.isLoaded } }
 }

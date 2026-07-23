@@ -55,4 +55,21 @@ final class VocabularyBiasTests: XCTestCase {
         let text = try await engine.transcribe(loadPcm("silence.wav"))
         XCTAssertEqual(text.trimmingCharacters(in: .whitespacesAndNewlines), "")
     }
+
+    func testVocabularyChangeTakesEffectAcrossDictations() async throws {
+        // Regression for the cache-key fix: the rescorer trio is keyed on the
+        // exact terms, so a mid-session vocab change is honored on the next
+        // dictation rather than pinning a stale rescorer.
+        let engine = ParakeetEngine()
+        engine.setBiasVocabulary([biasTerm("Kubernetes")])
+        _ = try await engine.transcribe(loadPcm("en.wav"))
+        XCTAssertNotEqual(engine.lastBiasOutcomeForTesting, .failed)
+
+        engine.setBiasVocabulary([biasTerm("Terraform"), biasTerm("Postgres")])
+        let text = try await engine.transcribe(loadPcm("en.wav")).lowercased()
+        // The new vocabulary was rebuilt cleanly (not stale, not thrown) and
+        // still doesn't corrupt the sentence.
+        XCTAssertNotEqual(engine.lastBiasOutcomeForTesting, .failed)
+        XCTAssertTrue(text.contains("marcos"), "actual: \(text)")
+    }
 }

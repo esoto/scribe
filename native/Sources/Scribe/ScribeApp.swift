@@ -54,6 +54,7 @@ final class AppModel: ObservableObject {
     // change).
     @Published private(set) var dictionarySnapshot: DictionarySnapshot = .empty
     @Published private(set) var dictionaryLearningEnabled: Bool
+    @Published private(set) var vocabularyBiasingEnabled: Bool
     @Published private(set) var glossaryEntries: [GlossaryEntry] = []
     @Published private(set) var replacementPairs: [ReplacementPair] = []
     @Published private(set) var unmatchedHeardWords: [GlossaryEntry] = []
@@ -93,6 +94,7 @@ final class AppModel: ObservableObject {
         dictionary.learningEnabled = settings.dictionaryLearningEnabled
         self.dictionary = dictionary
         self.dictionaryLearningEnabled = settings.dictionaryLearningEnabled
+        self.vocabularyBiasingEnabled = settings.vocabularyBiasingEnabled
         self.dictionarySnapshot = dictionary.snapshot
         self.glossaryEntries = dictionary.allGlossaryEntries
         self.replacementPairs = dictionary.allPairs
@@ -484,6 +486,15 @@ final class AppModel: ObservableObject {
         dictionaryLearningEnabled = on
         dictionary.learningEnabled = on
         settings.dictionaryLearningEnabled = on
+    }
+
+    /// Toggles Parakeet vocabulary biasing at runtime and re-pushes the bias
+    /// vocabulary immediately (empty when off, so the CTC pass is skipped).
+    func setVocabularyBiasing(_ on: Bool) {
+        vocabularyBiasingEnabled = on
+        settings.vocabularyBiasingEnabled = on
+        (engines["parakeet"] as? ParakeetEngine)?.setBiasVocabulary(
+            AppModel.biasVocabulary(from: dictionary, settings: settings))
     }
 
     func clearLearnedTerms() {

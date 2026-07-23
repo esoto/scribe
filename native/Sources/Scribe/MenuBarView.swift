@@ -120,6 +120,13 @@ struct MenuBarView: View {
 
         Menu("Dictionary") {
             Toggle(
+                "Correct Speech (bias recognizer)",
+                isOn: Binding(
+                    get: { model.vocabularyBiasingEnabled },
+                    set: { model.setVocabularyBiasing($0) }
+                )
+            )
+            Toggle(
                 "Learn New Terms",
                 isOn: Binding(
                     get: { model.dictionaryLearningEnabled },
