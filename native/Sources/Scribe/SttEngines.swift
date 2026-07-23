@@ -103,6 +103,13 @@ final class ParakeetEngine: UnloadableEngine {
     private var cachedContext: CustomVocabularyContext?
     private var cachedSpotter: CtcKeywordSpotter?
 
+    /// Records why the last dictation's biasing did or didn't fire. Exposed
+    /// for the model-backed tests: the graceful do/catch means a broken
+    /// rescorer would otherwise pass a no-regression test silently, so the
+    /// smoke test asserts this is NOT `.failed`.
+    enum BiasOutcome: Equatable { case disabled, noCtcModel, noTimings, unmodified, applied, failed }
+    private(set) var lastBiasOutcomeForTesting: BiasOutcome = .disabled
+
     init() {
         lazyModel = LazyModel(label: "parakeet") {
             // Downloaded into the app-managed store, not FluidAudio's
@@ -152,20 +159,26 @@ final class ParakeetEngine: UnloadableEngine {
     /// still runs downstream regardless.
     private func applyBiasing(to result: ASRResult, pcm: [Float]) async -> String {
         let terms = biasLock.withLock { biasVocabulary }
-        guard !terms.isEmpty else { return result.text }
+        guard !terms.isEmpty else { lastBiasOutcomeForTesting = .disabled; return result.text }
 
         // Factory swallows load errors into a nil payload; the extra `?? nil`
         // flattens the throwing get()'s double optional.
-        guard let ctc = (try? await lazyCtc.get()) ?? nil else { return result.text }
+        guard let ctc = (try? await lazyCtc.get()) ?? nil else {
+            lastBiasOutcomeForTesting = .noCtcModel
+            return result.text
+        }
 
         do {
             let (context, spotter, rescorer) = try await rescorer(for: terms, ctc: ctc)
-            guard !context.terms.isEmpty else { return result.text }
+            guard !context.terms.isEmpty else {
+                lastBiasOutcomeForTesting = .disabled
+                return result.text
+            }
 
             let spot = try await spotter.spotKeywordsWithLogProbs(
                 audioSamples: pcm, customVocabulary: context, minScore: nil)
             guard let timings = result.tokenTimings, !timings.isEmpty, !spot.logProbs.isEmpty
-            else { return result.text }
+            else { lastBiasOutcomeForTesting = .noTimings; return result.text }
 
             let cfg = ContextBiasingConstants.rescorerConfig(forVocabSize: context.terms.count)
             let out = rescorer.ctcTokenRescore(
@@ -176,9 +189,11 @@ final class ParakeetEngine: UnloadableEngine {
                 cbw: cfg.cbw,
                 marginSeconds: ContextBiasingConstants.defaultMarginSeconds,
                 minSimilarity: cfg.minSimilarity)
+            lastBiasOutcomeForTesting = out.wasModified ? .applied : .unmodified
             return out.wasModified ? out.text : result.text
         } catch {
             print("[ParakeetEngine] vocabulary biasing skipped: \(error)")
+            lastBiasOutcomeForTesting = .failed
             return result.text
         }
     }
@@ -199,7 +214,10 @@ final class ParakeetEngine: UnloadableEngine {
         }
         if let cached { return cached }
 
-        let modelDir = CtcModels.defaultCacheDirectory(for: .ctc110m)
+        // The bundle (incl. tokenizer.json) lives where we downloaded it —
+        // ModelStore.ctcDirectory — NOT FluidAudio's default cache that
+        // CtcModels.defaultCacheDirectory(for:) points at.
+        let modelDir = ModelStore.ctcDirectory
         let tokenizer = try await CtcTokenizer.load(from: modelDir)
         let vocabTerms = terms.compactMap { term -> CustomVocabularyTerm? in
             let ids = tokenizer.encode(term.text)
