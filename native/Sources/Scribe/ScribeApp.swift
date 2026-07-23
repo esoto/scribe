@@ -100,6 +100,11 @@ final class AppModel: ObservableObject {
         // Before any preload can run, so the first warm-up prefills the
         // dictionary-augmented prompt rather than a stale base one.
         self.cleaner.setDictionary(dictionary.snapshot)
+        // Seed Parakeet's acoustic bias vocabulary from the same dictionary
+        // (plus the curated pack). Uses the FULL views, not the capped
+        // snapshot, so biasing isn't limited to the 30 prompt terms.
+        (engines["parakeet"] as? ParakeetEngine)?.setBiasVocabulary(
+            AppModel.biasVocabulary(from: dictionary, settings: settings))
 
         let startingEngine = engines[settings.engine] != nil ? settings.engine : "parakeet"
         self.activeEngineName = startingEngine
@@ -422,6 +427,12 @@ final class AppModel: ObservableObject {
         replacementPairs = dictionary.allPairs
         unmatchedHeardWords = dictionary.unmatchedHeardWords
 
+        // Refresh Parakeet's bias vocab on ANY change — it reads the full
+        // views, so sub-cap additions matter, and the setter is cheap and
+        // load-free (unlike the Gemma warm-prefix rebuild below).
+        (engines["parakeet"] as? ParakeetEngine)?.setBiasVocabulary(
+            AppModel.biasVocabulary(from: dictionary, settings: settings))
+
         // Cache work only when the prompt itself actually changes.
         // Rebuilding the warm prefix costs ~1 s, so a list-only change must
         // not trigger it.
@@ -444,6 +455,19 @@ final class AppModel: ObservableObject {
         glossaryEntries = dictionary.allGlossaryEntries
         replacementPairs = dictionary.allPairs
         unmatchedHeardWords = dictionary.unmatchedHeardWords
+    }
+
+    /// The Parakeet bias vocabulary derived from the dictionary's full views
+    /// plus the curated pack (when enabled). Static + pure so it's testable
+    /// without an AppModel.
+    static func biasVocabulary(from dictionary: UserDictionaryStore, settings: AppSettings)
+        -> [BiasTerm]
+    {
+        guard settings.vocabularyBiasingEnabled else { return [] }
+        return BiasVocabularyBuilder.build(
+            pairs: dictionary.allPairs,
+            glossary: dictionary.allGlossaryEntries,
+            includeCuratedPack: true)
     }
 
     /// Binds a mangling scribe heard to a correction the user already has,

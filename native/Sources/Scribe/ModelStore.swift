@@ -29,4 +29,13 @@ enum ModelStore {
     static var whisperDirectory: URL {
         baseDirectory.appendingPathComponent("whisper", isDirectory: true)
     }
+
+    /// FluidAudio CTC keyword-spotter model, used only for Parakeet
+    /// vocabulary biasing — a separate download from the TDT model above.
+    /// The leaf keeps the repo folder name so FluidAudio's path-based
+    /// variant inference stays consistent.
+    static var ctcDirectory: URL {
+        baseDirectory.appendingPathComponent(
+            "ctc/parakeet-ctc-110m-coreml", isDirectory: true)
+    }
 }

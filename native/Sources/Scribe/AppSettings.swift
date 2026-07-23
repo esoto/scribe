@@ -26,6 +26,7 @@ final class AppSettings {
         static let cleanupModelPath = "cleanupModelPath"
         static let microphoneUID = "microphoneUID"
         static let dictionaryLearningEnabled = "dictionaryLearningEnabled"
+        static let vocabularyBiasingEnabled = "vocabularyBiasingEnabled"
         static let didImportToml = "didImportToml"
     }
 
@@ -58,6 +59,14 @@ final class AppSettings {
     var cleanupEnabled: Bool {
         get { defaults.object(forKey: Key.cleanupEnabled) as? Bool ?? true }
         set { defaults.set(newValue, forKey: Key.cleanupEnabled) }
+    }
+
+    /// Whether Parakeet biases transcription toward the user's dictionary +
+    /// the curated engineering pack (`ParakeetEngine.setBiasVocabulary`). Adds
+    /// a second CoreML pass per dictation, so it's user-disablable; default on.
+    var vocabularyBiasingEnabled: Bool {
+        get { defaults.object(forKey: Key.vocabularyBiasingEnabled) as? Bool ?? true }
+        set { defaults.set(newValue, forKey: Key.vocabularyBiasingEnabled) }
     }
 
     /// Whether the user dictionary auto-learns glossary terms from cleaned

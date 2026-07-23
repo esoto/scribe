@@ -39,6 +39,7 @@ final class AppSettingsTests: XCTestCase {
         // Off by default — the learned-vocabulary prompt section is known to
         // drop words (DictionaryFidelityTests).
         XCTAssertEqual(settings.dictionaryLearningEnabled, false)
+        XCTAssertEqual(settings.vocabularyBiasingEnabled, true)
     }
 
     // MARK: - Round-trip set/get
@@ -57,6 +58,7 @@ final class AppSettingsTests: XCTestCase {
         settings.historySize = 25
         settings.idleUnloadMinutes = 30
         settings.dictionaryLearningEnabled = true
+        settings.vocabularyBiasingEnabled = false
 
         XCTAssertEqual(settings.hotkey, .f13)
         XCTAssertEqual(settings.holdThreshold, 0.5)
@@ -72,6 +74,7 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(settings.historySize, 25)
         XCTAssertEqual(settings.idleUnloadMinutes, 30)
         XCTAssertEqual(settings.dictionaryLearningEnabled, true)
+        XCTAssertEqual(settings.vocabularyBiasingEnabled, false)
     }
 
     // A fresh AppSettings instance reading the same underlying UserDefaults
