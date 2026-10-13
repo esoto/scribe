@@ -1,11 +1,6 @@
 import Foundation
 
-/// Bounded, thread-safe sample accumulator for mic capture.
-///
-/// Ported from `scribe.recorder.RingBuffer` (src/scribe/recorder.py): whole
-/// appends past capacity are dropped (never partially truncated), and
-/// `drain()` hands back everything accumulated so far and empties the
-/// buffer in one atomic step.
+/// Thread-safe sample accumulator; appends that would exceed capacity are dropped whole.
 final class RingBuffer {
     private let cap: Int
     private var chunks: [[Float]] = []
@@ -16,8 +11,6 @@ final class RingBuffer {
         self.cap = Int(maxSeconds * sampleRate)
     }
 
-    /// Drops the whole chunk (not a partial write) if it would exceed
-    /// capacity — matches the Python reference's all-or-nothing append.
     func append(_ chunk: [Float]) {
         lock.lock()
         defer { lock.unlock() }
@@ -26,8 +19,6 @@ final class RingBuffer {
         size += chunk.count
     }
 
-    /// Returns the concatenation of everything accumulated since the last
-    /// drain/clear, then empties the buffer.
     func drain() -> [Float] {
         lock.lock()
         let drained = chunks

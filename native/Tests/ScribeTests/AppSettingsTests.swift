@@ -36,8 +36,7 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(settings.sounds, true)
         XCTAssertEqual(settings.historySize, 10)
         XCTAssertEqual(settings.idleUnloadMinutes, 15)
-        // Off by default — the learned-vocabulary prompt section is known to
-        // drop words (DictionaryFidelityTests).
+        // Off by default: the learned-vocabulary prompt section drops words.
         XCTAssertEqual(settings.dictionaryLearningEnabled, false)
         XCTAssertEqual(settings.vocabularyBiasingEnabled, false)
     }
@@ -77,8 +76,6 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(settings.vocabularyBiasingEnabled, true)
     }
 
-    // A fresh AppSettings instance reading the same underlying UserDefaults
-    // suite should observe values written by another instance.
     func testRoundTripPersistsAcrossInstances() {
         settings.engine = "whisper"
         settings.minWords = 99
@@ -195,8 +192,7 @@ final class AppSettingsTests: XCTestCase {
     func testImportFromPythonConfigOnceAppliesSettingsExceptHotkey() {
         settings.importFromPythonConfigOnce(tomlText: sampleToml)
 
-        // hotkey.key is present in the sample toml but must NOT be applied —
-        // stays at the dev default until the native app cutover.
+        // The hotkey is never imported and stays at the dev default.
         XCTAssertEqual(settings.hotkey, .rightOption)
         XCTAssertEqual(settings.energyGate, 0.001)
         XCTAssertEqual(settings.lengthBand.0, 0.4)
@@ -219,16 +215,11 @@ final class AppSettingsTests: XCTestCase {
         """
         settings.importFromPythonConfigOnce(tomlText: secondToml)
 
-        // Still the value from the first import; second call is a no-op.
         XCTAssertEqual(settings.energyGate, 0.001)
     }
 
     func testImportFromPythonConfigOnceWithMissingFileStillSetsFlag() {
-        // No file at this default path is guaranteed in CI/dev; passing nil
-        // exercises the real-file code path. Either the file doesn't exist
-        // (import is a no-op) or a real dev config exists (best effort);
-        // either way the flag must end up set so we never re-read on every
-        // launch.
+        // The flag must be set whether or not a real dev config exists.
         settings.importFromPythonConfigOnce()
         XCTAssertTrue(defaults.bool(forKey: "didImportToml"))
     }

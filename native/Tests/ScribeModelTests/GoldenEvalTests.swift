@@ -1,7 +1,5 @@
 import XCTest
 
-/// Codable mirror of `tests_models/golden.json` — the cleanup-prompt golden
-/// set. Field names match the JSON via `CodingKeys` (snake_case on disk).
 private struct GoldenCase: Codable {
     let id: String
     let input: String
@@ -23,15 +21,7 @@ private struct GoldenSet: Codable {
     let cases: [GoldenCase]
 }
 
-/// **THE PARITY GATE.** Runs every case in `tests_models/golden.json` through
-/// the real `GemmaBackend` — port of `tests_models/run_eval.py` /
-/// `test_cleanup_gemma.py`. All 10 cases must pass before the native app can
-/// replace the Python daily driver; a failure here means the native cleanup
-/// pipeline (prompt, few-shots, or model) is not yet at parity with the
-/// validated Python oracle.
-///
-/// `gemma` is a `static let` so the model loads once for the whole test
-/// class rather than once per case.
+/// Parity gate: every case in `tests_models/golden.json` must pass through the real `GemmaBackend`.
 final class GoldenEvalTests: XCTestCase {
     static let gemma = GemmaBackend()
 

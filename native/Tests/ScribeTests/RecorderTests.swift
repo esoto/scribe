@@ -1,14 +1,8 @@
 import XCTest
 
 
-/// Engine-lifecycle tests for `Recorder`: the microphone must be live only
-/// between arm() and disarm(), and prewarm() must preallocate without
-/// capturing — so the OS mic indicator is lit only while a dictation is
-/// actually recording. The armed ring-buffer capture core is covered in
-/// RingBufferTests.swift.
+/// The mic is live only between arm() and disarm(); prewarm() prepares without capturing.
 final class RecorderTests: XCTestCase {
-    /// Fake `EngineControl` tracking lifecycle calls — the seam exists for
-    /// exactly this (see the protocol's doc comment in Recorder.swift).
     private final class FakeEngineControl: EngineControl {
         var onSamples: (([Float]) -> Void)?
 

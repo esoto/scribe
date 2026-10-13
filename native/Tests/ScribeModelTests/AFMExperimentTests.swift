@@ -1,29 +1,8 @@
 import FoundationModels
 import XCTest
 
-
-/// **EXPERIMENT, NOT A GATE (2026-07-08).** Asks whether Apple's on-device
-/// FoundationModels (AFM) — with the NOW-evolved `CleanupPrompt` (few-shots +
-/// guided output), rather than the bare system prompt used in the 2026-07-06
-/// hand probe — can replace `GemmaBackend` as the cleanup backend. That
-/// earlier probe failed 3/3 (mis-resolved a self-correction, left Spanish
-/// untouched, executed instruction-looking text) WITHOUT few-shots and
-/// WITHOUT guided output; this test re-runs the full golden set through
-/// three progressively-closer-to-Gemma prompt variants to see whether either
-/// change moves the verdict. See
-/// `.superpowers/sdd/afm-experiment-report.md` for the full writeup and
-/// `native/SPIKE-RESULTS.md` ("## AFM cleanup experiment") for the summary.
-///
-/// Deliberately **excluded from the default `ScribeModelTests` run**: gated
-/// behind `AFM_EXPERIMENT=1` (set via `TEST_RUNNER_AFM_EXPERIMENT=1` passed
-/// to `xcodebuild test`, which forwards `TEST_RUNNER_`-prefixed vars into the
-/// test process's environment) so a plain
-/// `xcodebuild test -scheme ScribeModelTests` run — the one the golden-eval
-/// parity gate depends on — skips this class via `XCTSkip` rather than
-/// paying AFM's load/inference cost or letting an experimental,
-/// not-yet-adopted backend affect CI signal. This is scaffolding for a
-/// one-off measurement, not a backend under test — do NOT fold this into the
-/// default scheme unless AFM is actually adopted.
+/// Experiment, not a gate: runs the golden set through AFM prompt variants.
+/// Gated behind `AFM_EXPERIMENT=1` so the default `ScribeModelTests` run skips it.
 final class AFMExperimentTests: XCTestCase {
 
     // MARK: - Golden set (mirrors GoldenEvalTests' private Codable mirror)
@@ -66,17 +45,7 @@ final class AFMExperimentTests: XCTestCase {
         }
     }
 
-    /// Guided-output variant's target shape. `@Guide`'s description is the
-    /// only lever guided generation gives us over the raw instructions — it
-    /// mirrors the same constraints `CleanupPrompt.systemPrompt` states in
-    /// prose, applied as a schema-level guide instead.
-    // NOTE: intentionally NOT `private` — the `@Generable` macro expands
-    // into a conformance extension in a separate synthesized file, which
-    // can't see a `private` type from the original file (macro-expansion
-    // access-level requirement, confirmed via `error: 'CleanedTranscript'
-    // is inaccessible due to 'private' protection level` when this was
-    // `private`). Default (internal) access still keeps it scoped to this
-    // module, same as every other nested test-support type here.
+    // Not `private`: the @Generable macro expansion lives in a separate file and can't see private types.
     @available(macOS 26.0, *)
     @Generable
     struct CleanedTranscript {
@@ -164,12 +133,6 @@ final class AFMExperimentTests: XCTestCase {
         print("[AFM] rate-limit errors: \(rateLimited)")
         print("[AFM] total wall time: \(wallMs) ms")
         print("[AFM] ==== END SCORECARD ====\n")
-
-        // Data-gathering experiment, not a gate: this test intentionally
-        // does not XCTAssert on golden-set scores. Its job is to produce
-        // the printed scorecard above (captured by whoever runs it) — see
-        // the report files referenced in the class doc comment for the
-        // interpreted verdict.
     }
 
     // MARK: - Variant plumbing
@@ -183,13 +146,7 @@ final class AFMExperimentTests: XCTestCase {
         )
     }
 
-    /// Seeds a `Transcript` with the system prompt as an `.instructions`
-    /// entry followed by `CleanupPrompt.fewShots` as prompt/response entry
-    /// pairs — the FoundationModels equivalent of `GemmaBackend.buildChat`'s
-    /// message list. `Transcript` is a value type, so building this once and
-    /// handing the same value to a fresh `LanguageModelSession` per golden
-    /// case (via `LanguageModelSession(model:transcript:)`) never leaks
-    /// state between cases — each session gets its own independent copy.
+    /// Value type, so one transcript can seed a fresh session per case without shared state.
     @available(macOS 26.0, *)
     private static func buildFewShotTranscript() -> Transcript {
         var entries: [Transcript.Entry] = [
@@ -210,10 +167,6 @@ final class AFMExperimentTests: XCTestCase {
         return Transcript(entries: entries)
     }
 
-    /// Runs every golden case through `produce`, printing PASS/FAIL + ms per
-    /// case (and the actual output on FAIL, per the experiment's whole
-    /// point: capturing failure specifics for the writeup) and tallying
-    /// guardrail/refusal and rate-limit errors into the caller's counters.
     @available(macOS 26.0, *)
     private func runVariant(
         name: String,

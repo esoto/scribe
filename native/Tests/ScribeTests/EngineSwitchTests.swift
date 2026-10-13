@@ -1,13 +1,8 @@
 import XCTest
 
 
-/// The engine-switch decision rules, including the two bugs they exist to
-/// prevent: a switch-back mid-preload being silently ignored (the app would
-/// commit to the deselected engine), and a superseded switch leaving its
-/// speculatively loaded model resident with no owner.
+/// Engine-switch rules: a mid-preload switch-back must not be ignored, and a superseded model must not stay resident.
 final class EngineSwitchTests: XCTestCase {
-    // MARK: - action(selecting:active:pending:)
-
     func testSelectingActiveEngineWithNoSwitchInFlightIgnores() {
         XCTAssertEqual(
             EngineSwitch.action(selecting: "parakeet", active: "parakeet", pending: nil),
@@ -26,9 +21,7 @@ final class EngineSwitchTests: XCTestCase {
             .ignore)
     }
 
-    /// The mid-preload switch-back: user clicks Whisper, changes their mind,
-    /// clicks Parakeet before the preload commits. Comparing against the
-    /// stale `active` alone would ignore the click and commit Whisper.
+    // Switch-back mid-preload: comparing only against the stale `active` would ignore the click.
     func testSelectingActiveEngineDuringSwitchReverts() {
         XCTAssertEqual(
             EngineSwitch.action(selecting: "parakeet", active: "parakeet", pending: "whisper"),
@@ -41,10 +34,7 @@ final class EngineSwitchTests: XCTestCase {
             .begin)
     }
 
-    // MARK: - shouldUnloadSuperseded(_:active:pending:)
-
-    /// Rapid A→B→C: the cancelled A→B task must unload B, or it stays
-    /// resident with no owner until the idle unloader runs.
+    // Rapid A→B→C: the cancelled task must unload B, or it stays resident with no owner.
     func testSupersededEngineIsUnloadedWhenNoLongerWanted() {
         XCTAssertTrue(
             EngineSwitch.shouldUnloadSuperseded("whisper", active: "parakeet", pending: "third"))

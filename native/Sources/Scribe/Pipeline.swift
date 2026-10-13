@@ -1,8 +1,6 @@
 import Foundation
 
-/// Error thrown by `SttEngine.transcribe` on failure — the only error type
-/// that gets the "flash ERROR + save audio + notify" treatment in `_process`,
-/// mirroring `scribe.stt.base.SttError` in the Python app.
+/// Thrown by SttEngine.transcribe; the only error that gets flash ERROR + save audio + notify.
 struct SttError: Error {
     let message: String
 }
@@ -11,8 +9,6 @@ enum PipelineState {
     case idle, recording, processing, error
 }
 
-/// Mirrors the subset of `scribe.config.Config` the pipeline reads.
-/// Passed as a plain struct so the pipeline never touches UserDefaults.
 struct PipelineConfig {
     var holdThreshold: Double = 0.3
     var energyGate: Double = 0.0005
@@ -22,34 +18,22 @@ struct PipelineConfig {
     var sampleRate: Double = 16000.0
 }
 
-/// Testable seam over recorder arm/disarm (the real implementation wraps
-/// AVAudioEngine capture in a later task).
 protocol RecorderLike {
     func arm() throws
     func disarm() -> [Float]
 }
 
-/// Testable seam over `Paster.paste`. `Paster` (PasteCore.swift) is a
-/// concrete `final class` with no protocol of its own; rather than modify
-/// that file, this protocol structurally matches its `paste(_:)` method and
-/// `Paster` is given a zero-code retroactive conformance below so production
-/// code can pass a real `Paster` while tests pass a `FakePaster`.
+/// Test seam over Paster.paste; Paster conforms retroactively below.
 protocol Pasting {
     func paste(_ text: String) throws
 }
 
 extension Paster: Pasting {}
 
-/// Internal signal for the cleanup race — never surfaced to callers, always
-/// mapped to "use raw" by `tryClean`.
+/// Internal cleanup-race signal; always mapped to "use raw" by tryClean.
 private struct CleanupTimeoutError: Error {}
 
 /// Dictation orchestrator: state machine + degradation policy.
-///
-/// Ported 1:1 from `scribe.pipeline.Pipeline` (src/scribe/pipeline.py). Every
-/// collaborator is injected so the whole failure matrix in spec §5 is
-/// unit-testable without hardware or models. See PipelineTests.swift for the
-/// full port of tests/test_pipeline.py.
 final class DictationPipeline {
     private let recorder: RecorderLike
     private var stt: SttEngine
@@ -61,17 +45,10 @@ final class DictationPipeline {
     private let runner: (@escaping () async -> Void) -> Void
     private let onState: (PipelineState) -> Void
     private let onNotice: (String) -> Void
-    /// Optional diagnostic sink for per-dictation stage timings. Never carries
-    /// transcript text — only durations, engine name, and stage labels.
     private let onLog: ((String) -> Void)?
-    /// Fired with the final text of a successfully CLEANED dictation (never
-    /// when cleanup was skipped or fell back to raw) — the user-dictionary
-    /// learning hook. Harvesting relies on LLM-normalized casing, so raw
-    /// STT output is deliberately never offered to it.
+    /// Fired only for a successfully cleaned dictation; raw STT is never offered (harvesting relies on LLM casing).
     private let onCleaned: ((String) -> Void)?
-    /// The user's manual replacement pairs, read fresh each dictation.
-    /// Applied deterministically here rather than via the cleanup prompt —
-    /// see TermReplacer for why.
+    /// Read fresh each dictation; applied deterministically here, not via the cleanup prompt.
     private let replacementPairs: () -> [ReplacementPair]
     private let saveFailedAudio: ([Float]) -> Void
 
@@ -157,9 +134,7 @@ final class DictationPipeline {
         defer { onState(.idle) }
 
         guard Gates.passesEnergyGate(pcm, threshold: config.energyGate) else {
-            // All-zero/near-silent capture discarded — usually means the
-            // Microphone TCC grant is missing. No notice: this is expected
-            // noise from accidental taps, not a user-facing failure.
+            // Near-silent capture (likely missing Microphone TCC grant); no notice, expected from accidental taps.
             return
         }
 
@@ -174,15 +149,11 @@ final class DictationPipeline {
             onState(.error)
             return
         } catch {
-            // Non-SttError transcription failures have no defined contract
-            // (mirrors Python, where only `except SttError` is caught here
-            // and anything else propagates to the worker's catch-all log).
+            // Non-SttError failures have no defined contract here.
             return
         }
 
-        // The measured STT wall time includes any Parakeet vocabulary biasing
-        // (the CTC pass runs inside transcribe). Split it out so stt=/bias= are
-        // disjoint; bias is 0 for engines/settings without biasing.
+        // STT time includes Parakeet vocab biasing; split it out so stt=/bias= are disjoint.
         let sttTotalMs = Int((clock() - sttStart) * 1000)
         let biasMs = (stt as? ParakeetEngine)?.lastBiasMs ?? 0
         let sttMs = max(0, sttTotalMs - biasMs)
@@ -192,12 +163,8 @@ final class DictationPipeline {
             return
         }
 
-        // Applied BEFORE cleanup so the model reads the words the speaker
-        // actually said, and again after, so the pair's exact spelling
-        // survives whatever cleanup did with it (it likes to capitalize).
-        // Unconditional by design: this is the only path that also covers
-        // utterances too short to be cleaned, cleanup switched off, and
-        // cleanup failing its gates.
+        // Applied before cleanup (model reads what was said) and after (cleanup may recase it).
+        // Unconditional so it also covers too-short, disabled, and gated-out cleanup.
         let pairs = replacementPairs()
         let transcript = TermReplacer.apply(pairs, to: raw)
 
@@ -237,9 +204,7 @@ final class DictationPipeline {
         ))
     }
 
-    /// Returns the cleaned text on success, or nil if any gate/error means
-    /// "use raw" (cleanup error, timeout, empty output, length gate,
-    /// language-flip gate) — same fallback set as Python's `_try_clean`.
+    /// Returns nil for any gate/error that means "use raw".
     private func tryClean(_ raw: String, cleaner: CleanupBackend) async -> String? {
         let out: String
         do {
@@ -256,8 +221,6 @@ final class DictationPipeline {
         return out
     }
 
-    /// Races `cleaner.clean` against a timeout using structured concurrency —
-    /// the Swift-native equivalent of Python's `future.result(timeout=...)`.
     private func cleanWithTimeout(raw: String, cleaner: CleanupBackend, timeout: Double) async throws -> String {
         try await withThrowingTaskGroup(of: String.self) { group in
             group.addTask {
@@ -277,19 +240,14 @@ final class DictationPipeline {
 
     // MARK: - Default runner
 
-    /// One dedicated serial worker per pipeline instance: an `AsyncStream`
-    /// buffers enqueued work in FIFO order, drained by a single `Task` so two
-    /// dictations back-to-back never run concurrently (mirrors Python's
-    /// single-thread `_drain` loop over a `queue.Queue`).
+    /// One serial worker per pipeline: FIFO AsyncStream drained by a single Task, so dictations never overlap.
     private static func makeSerialRunner() -> (@escaping () async -> Void) -> Void {
         let worker = SerialWorker()
         return { work in worker.enqueue(work) }
     }
 }
 
-/// FIFO async work queue drained by exactly one `Task`. `@unchecked Sendable`
-/// because the only mutable state (`AsyncStream.Continuation`) is itself
-/// safe for concurrent use from multiple callers.
+/// @unchecked Sendable: the only mutable state (AsyncStream.Continuation) is safe for concurrent use.
 private final class SerialWorker: @unchecked Sendable {
     private let continuation: AsyncStream<() async -> Void>.Continuation
     private let drainTask: Task<Void, Never>

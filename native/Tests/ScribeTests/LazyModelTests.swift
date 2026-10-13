@@ -1,8 +1,6 @@
 import XCTest
 
-/// Counting fake factory — records how many times it was invoked and can be
-/// told to fail on demand, so tests can assert load-once/reload/error-vs-
-/// swallow behavior without touching any real model.
+/// Fake factory that counts invocations and can be told to fail or delay.
 private final class CountingFactory: @unchecked Sendable {
     private(set) var calls = 0
     var shouldFail = false
@@ -77,7 +75,6 @@ final class LazyModelTests: XCTestCase {
             _ = try await model.get()
             XCTFail("expected get() to throw")
         } catch {
-            // expected
         }
         let loaded = await model.isLoaded
         XCTAssertFalse(loaded)

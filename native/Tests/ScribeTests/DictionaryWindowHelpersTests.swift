@@ -17,8 +17,7 @@ final class DictionaryWindowHelpersTests: XCTestCase {
     }
 
     func testCanAddPairAllowsLongAndMarkupReplacements() {
-        // Pairs are pasted verbatim, never sent to the model, so neither the
-        // prompt length cap nor the markup stripping applies to them.
+        // Pairs are pasted verbatim, so the prompt length cap and markup stripping do not apply.
         let long = String(repeating: "a", count: 200)
         XCTAssertTrue(canAddPair(original: "acme", replacement: long))
         XCTAssertTrue(canAddPair(original: "div tag", replacement: "<div>"))
@@ -34,8 +33,7 @@ final class DictionaryWindowHelpersTests: XCTestCase {
         ]
         XCTAssertEqual(menuGlossaryTerms(entries), ["Common", "Middle", "Rare"])
         XCTAssertEqual(menuGlossaryTerms(entries, limit: 2), ["Common", "Middle"])
-        // Learned entries only — a pair's seeded vocabulary never appears
-        // here, because the menu's Remove could not honor it.
+        // Seeded pair vocabulary is excluded: the menu's Remove cannot delete it.
         XCTAssertEqual(menuGlossaryTerms([]), [])
     }
 
@@ -47,8 +45,7 @@ final class DictionaryWindowHelpersTests: XCTestCase {
             ReplacementPair(original: "headstar", replacement: "hetzner", addedAt: at),
             ReplacementPair(original: "hatsner", replacement: "Hetzner", addedAt: at),
         ]
-        // Several manglings share one target, so the bind menu offers each
-        // target once — case-insensitively deduped.
+        // Bind menu offers each target once, case-insensitively.
         XCTAssertEqual(distinctReplacementTargets(pairs), ["hetzner", "kamal"])
         XCTAssertEqual(distinctReplacementTargets([]), [])
     }

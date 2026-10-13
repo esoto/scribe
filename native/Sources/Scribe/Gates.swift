@@ -1,18 +1,11 @@
 import Accelerate
 import Foundation
 
-/// Pure decision helpers for the dictation pipeline.
-///
-/// The energy gate is the primary defense against Whisper's silence
-/// hallucination — verified 2026-07-07: mlx-whisper produced "Thank you." on
-/// near-silence with no_speech_prob=0.0, so probability filters alone are not
-/// enough.
+/// Pure dictation-pipeline gates. The energy gate guards against Whisper's silence hallucinations.
 enum Gates {
     static func rms(_ pcm: [Float]) -> Double {
         guard !pcm.isEmpty else { return 0.0 }
-        // Widen to Double before accumulating: a Float accumulator can flip
-        // a borderline energy-gate decision on long quiet buffers. Not
-        // vDSP.rootMeanSquare, which accumulates in Float too.
+        // Accumulate in Double: a Float sum can flip borderline energy-gate decisions on long buffers.
         var doubles = [Double](repeating: 0, count: pcm.count)
         vDSP_vspdp(pcm, 1, &doubles, 1, vDSP_Length(pcm.count))
         var sumOfSquares = 0.0
@@ -52,7 +45,6 @@ enum Gates {
         "ellos", "debería", "yo", "según",
     ]
 
-    /// Positive = English-leaning, negative = Spanish-leaning, 0 = neutral.
     private static func langScore(_ text: String) -> Int {
         let words = text.lowercased().split(whereSeparator: { $0.isWhitespace })
         let enHits = words.filter { enStopwords.contains(String($0)) }.count
@@ -60,9 +52,7 @@ enum Gates {
         return enHits - esHits
     }
 
-    /// Reject cleanups that flipped the language (small-model translation bug,
-    /// observed 2026-07-07 with Gemma 3 4B on Spanglish input). Neutral or
-    /// ambiguous scores pass — only a confident flip fails.
+    /// Rejects cleanups that flipped the language (small-model translation bug). Neutral scores pass.
     static func languageConsistent(raw: String, cleaned: String) -> Bool {
         let rawScore = langScore(raw)
         let cleanedScore = langScore(cleaned)

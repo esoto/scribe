@@ -6,37 +6,19 @@ struct RecorderError: Error {
     let message: String
 }
 
-/// Testable seam over the audio engine lifecycle. The real implementation
-/// (`AVEngineControl`) wraps `AVAudioEngine`; tests inject a fake so the
-/// armed ring-buffer logic in `Recorder` can be verified without audio
-/// hardware — mirrors the `stream_factory` injection in the Python
-/// reference (`scribe.recorder.Recorder`).
+/// Seam over the audio engine so `Recorder` can be tested without hardware.
 protocol EngineControl: AnyObject {
     var isRunning: Bool { get }
-    /// Called by the adapter for every converted sample chunk it produces.
-    /// `Recorder` wires this to `ingest(_:)` right after construction.
     var onSamples: (([Float]) -> Void)? { get set }
-    /// Preallocates engine resources without capturing — the OS microphone
-    /// indicator must NOT light up.
+    /// Must not light the OS microphone indicator.
     func prepare()
     func start() throws
-    /// Halts capture so the OS microphone indicator turns off. Prepared
-    /// resources may be retained for a fast next `start()`.
+    /// Turns off the mic indicator; prepared resources are kept for a fast restart.
     func stop()
-    /// Selects which input device feeds the tap (CoreAudio device UID);
-    /// nil = system default. Takes effect on the next `prepare()`/`start()`.
     func setPreferredInput(uid: String?)
 }
 
 /// Mic capture: an armed ring buffer fed by a pre-installed input tap.
-///
-/// Ported from `scribe.recorder.Recorder` (src/scribe/recorder.py). The
-/// Python version pre-opens a `sounddevice` stream and injects a
-/// `stream_factory` for testability; this port pre-opens an `AVAudioEngine`
-/// tap instead and injects an `EngineControl` seam for the same reason.
-/// `ingest(_:)` is the pure capture core the tests drive directly; the
-/// `AVEngineControl` tap/converter plumbing that feeds it in production is
-/// untestable without real hardware (see its doc comment).
 final class Recorder: RecorderLike {
     private let buffer: RingBuffer
     private let engineControl: EngineControl
@@ -49,11 +31,6 @@ final class Recorder: RecorderLike {
         engineControl.onSamples = { [weak self] chunk in self?.ingest(chunk) }
     }
 
-    // MARK: - Capture core (testable, no hardware)
-
-    /// Appends a chunk to the ring buffer only while armed. In production
-    /// this is fed by the AVAudioEngine tap via `engineControl.onSamples`;
-    /// tests call it directly to verify armed-capture semantics.
     func ingest(_ chunk: [Float]) {
         lock.lock()
         let isArmed = armed
@@ -79,43 +56,25 @@ final class Recorder: RecorderLike {
         armed = false
         lock.unlock()
         let pcm = buffer.drain()
-        // Every dictation ends here (including short-hold cancels), so this
-        // is the single point that releases the microphone — the OS mic
-        // indicator is lit only between arm() and disarm().
         if engineControl.isRunning {
             engineControl.stop()
         }
         return pcm
     }
 
-    /// Best-effort preallocates the audio engine's resources WITHOUT
-    /// starting capture — the OS mic indicator stays off. Used by `AppModel`
-    /// to absorb setup cost (tap install, resource allocation) ahead of the
-    /// first real key-down (at launch when the microphone grant is already
-    /// present, and again the moment onboarding observes a false→true grant
-    /// flip), so the first `arm()`'s engine start is fast. A no-op if the
-    /// engine is already running.
+    /// Preallocates engine resources without starting capture.
     func prewarm() throws {
         guard !engineControl.isRunning else { return }
         engineControl.prepare()
     }
 
-    /// Selects the capture device (CoreAudio UID, nil = system default).
-    /// Applied by the engine on its next start — mid-dictation calls can't
-    /// happen (the menu is unreachable while the hotkey is held).
     func setPreferredInput(uid: String?) {
         engineControl.setPreferredInput(uid: uid)
     }
 }
 
-/// Real AVAudioEngine adapter: installs an input tap at the node's native
-/// format, converts to 16 kHz mono Float32 via `AVAudioConverter` (the
-/// input node cannot be forced to 16 kHz directly), and forwards converted
-/// samples through `onSamples`.
-///
-/// Excluded from unit test coverage — exercising it needs a real
-/// microphone and TCC permission, neither available in `xcodebuild test`.
-/// Verify manually via the app.
+/// AVAudioEngine adapter. Converts the tap to 16 kHz mono via `AVAudioConverter`, since the input node can't be forced to 16 kHz.
+/// Needs a real mic and TCC permission, so it is untested and verified manually.
 final class AVEngineControl: EngineControl {
     var onSamples: (([Float]) -> Void)?
 
@@ -140,28 +99,20 @@ final class AVEngineControl: EngineControl {
     }
 
     func stop() {
-        // pause(), not stop(): the io unit halts (mic indicator goes off)
-        // but prepared resources are kept, so the next start() at key-down
-        // doesn't repay the full cold-start cost.
+        // pause(), not stop(): keeps prepared resources for a fast next start.
         engine.pause()
     }
 
     func setPreferredInput(uid: String?) {
         guard uid != preferredInputUID else { return }
         preferredInputUID = uid
-        // Rebuild the engine: the installed tap and converter were created
-        // for the previous device's native format, and AVAudioEngine can't
-        // swap the input device under a live tap. The next
-        // prepare()/start() reinstalls everything against the new device.
+        // Must rebuild: AVAudioEngine can't swap the input device under a live tap.
         engine.stop()
         engine = AVAudioEngine()
         tapInstalled = false
     }
 
-    /// Points the engine's input unit at the preferred device, if it is
-    /// currently connected — otherwise the system default input is used
-    /// (same behavior as no selection, so an unplugged headset can never
-    /// brick dictation).
+    /// Falls back to the system default if the preferred device is unplugged.
     private func applyPreferredInput() {
         guard let uid = preferredInputUID,
             let devID = AudioDevices.deviceID(forUID: uid),
@@ -176,8 +127,7 @@ final class AVEngineControl: EngineControl {
             &dev,
             UInt32(MemoryLayout<AudioDeviceID>.size))
         if status != noErr {
-            // Capture proceeds on the system default — audible, verifiable
-            // via the menu, and strictly better than a dead engine.
+            // Fall back to the system default rather than a dead engine.
             print("[AVEngineControl] could not select input device \(uid): OSStatus \(status)")
         }
     }
@@ -186,8 +136,7 @@ final class AVEngineControl: EngineControl {
         guard !tapInstalled else { return }
         tapInstalled = true
 
-        // Must happen BEFORE reading the input format below — the format
-        // is the selected device's native format.
+        // Must run before reading the input format, which is the device's native format.
         applyPreferredInput()
 
         let inputNode = engine.inputNode

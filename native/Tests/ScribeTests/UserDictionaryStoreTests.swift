@@ -1,7 +1,6 @@
 import XCTest
 
-/// A mutable date clock injected into `UserDictionaryStore` — whole seconds
-/// only, so dates survive the ISO-8601 persistence round-trip untouched.
+/// Mutable clock for UserDictionaryStore; whole seconds so dates survive the ISO-8601 round-trip.
 private final class DateClock {
     var date = Date(timeIntervalSince1970: 1_000_000)
     func advance(days: Double) { date = date.addingTimeInterval(days * 86_400) }
@@ -43,19 +42,16 @@ final class UserDictionaryStoreTests: XCTestCase {
         let fired = Box<DictionarySnapshot>()
         store.onChange = { fired.append($0) }
 
-        // First sighting introduces a word the editor now lists.
         store.observe(cleanedText: "check Kamal now")
         _ = store.snapshot
         XCTAssertEqual(fired.value.count, 1)
 
-        // Re-hearing it changes only a count — nobody is told, which is what
-        // keeps an open menu from redrawing on every dictation.
+        // Re-hearing changes only a count, so an open menu doesn't redraw on every dictation.
         store.observe(cleanedText: "check Kamal now")
         _ = store.snapshot
         XCTAssertEqual(store.snapshot.glossary, [])
         XCTAssertEqual(fired.value.count, 1)
 
-        // Promotion moves it into the prompt, which is a snapshot change.
         store.observe(cleanedText: "check Kamal now")
         XCTAssertEqual(store.snapshot.glossary, ["Kamal"])
         XCTAssertEqual(fired.value.count, 2)
@@ -77,7 +73,6 @@ final class UserDictionaryStoreTests: XCTestCase {
         XCTAssertEqual(reopened.allPairs.map(\.original), ["camel"])
         XCTAssertEqual(reopened.allGlossaryEntries.map(\.term), ["KVCache"])
         XCTAssertEqual(reopened.allGlossaryEntries.first?.count, 3)
-        // Candidate counts persist too: two more sightings promote.
         reopened.observe(cleanedText: "call Sofía back")
         reopened.observe(cleanedText: "tell Sofía thanks")
         XCTAssertEqual(Set(reopened.snapshot.glossary), ["KVCache", "Sofía"])
@@ -142,9 +137,7 @@ final class UserDictionaryStoreTests: XCTestCase {
     }
 
     func testPairReplacementIsNotAddedToTheGlossary() {
-        // Seeding a pair's replacement into the vocabulary was tried and
-        // reverted: naming a term in both prompt sections made the model
-        // drop words. A pair applies on its own.
+        // Seeding a pair's replacement into the vocabulary made the model drop words; a pair applies alone.
         let store = makeStore()
         store.addPair(original: "camel", replacement: "kamal")
         XCTAssertEqual(store.snapshot.glossary, [])
@@ -152,10 +145,7 @@ final class UserDictionaryStoreTests: XCTestCase {
     }
 
     func testLearnedTermMatchingAPairTargetIsExcludedFromTheGlossary() {
-        // Same invariant from the other direction: a term can be learned AND
-        // be a pair's replacement by coincidence. The pair already fixes the
-        // spelling, so the vocabulary entry is redundant — and the vocabulary
-        // section is the one known to cost words, so don't grow it needlessly.
+        // A term may also be a pair's replacement; the pair already fixes spelling, so don't grow the costly vocabulary section.
         let store = makeStore()
         for _ in 0..<3 { store.observe(cleanedText: "ship it with Kamal today") }
         XCTAssertEqual(store.snapshot.glossary, ["Kamal"])
@@ -164,8 +154,7 @@ final class UserDictionaryStoreTests: XCTestCase {
         XCTAssertEqual(store.allGlossaryEntries.map(\.term), ["Kamal"], "still stored, just not injected")
     }
 
-    /// Fills the glossary past the 30-term snapshot cap, highest-count first,
-    /// so terms[30...] are stored but never reach the prompt.
+    /// Fills the glossary past the 30-term cap; terms[30...] are stored but never reach the prompt.
     private func makeOverCappedStore() -> (UserDictionaryStore, [String]) {
         let store = makeStore()
         let terms = (0..<40).map { String(format: "Term%02dx", $0) }
@@ -177,10 +166,7 @@ final class UserDictionaryStoreTests: XCTestCase {
     }
 
     func testRemovingTermBelowPromptCapStillNotifies() {
-        // The editor window lists every stored term, not just the 30 that
-        // reach the prompt. Removing one of the others changes that list
-        // without changing the snapshot — if it doesn't notify, the row
-        // stays on screen after the user deletes it.
+        // The editor lists every stored term, so removing a non-prompt term must still notify or the row stays on screen.
         let (store, terms) = makeOverCappedStore()
         let belowCap = terms[39]
         XCTAssertFalse(store.snapshot.glossary.contains(belowCap), "precondition: outside prompt")
@@ -205,8 +191,7 @@ final class UserDictionaryStoreTests: XCTestCase {
     }
 
     func testCountBumpsStillDoNotNotify() {
-        // The other half of the contract: re-seeing a known term happens
-        // every dictation and must stay silent.
+        // Re-seeing a known term happens every dictation and must stay silent.
         let store = makeStore()
         for _ in 0..<3 { store.observe(cleanedText: "ship with Kamal now") }
         _ = store.snapshot
@@ -216,8 +201,6 @@ final class UserDictionaryStoreTests: XCTestCase {
         _ = store.snapshot
         XCTAssertEqual(fired.value.count, 0)
     }
-
-    // MARK: - Heard-but-unmatched suggestions
 
     func testUnmatchedHeardWordsExcludesEverythingKnown() {
         let store = makeStore()
@@ -246,7 +229,6 @@ final class UserDictionaryStoreTests: XCTestCase {
         store.observe(cleanedText: "deploy to Headstar tonight")
         XCTAssertEqual(store.unmatchedHeardWords.map(\.term), ["Headstar"])
 
-        // Binding is just another exact pair sharing the same target.
         store.addPair(original: "Headstar", replacement: "hetzner")
         XCTAssertEqual(store.unmatchedHeardWords, [])
         XCTAssertEqual(

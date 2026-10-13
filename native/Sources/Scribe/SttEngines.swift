@@ -2,14 +2,7 @@ import FluidAudio
 import Foundation
 import WhisperKit
 
-/// Idle-unloadable lazy holder for a model of type `M` — the Swift-native
-/// equivalent of Python's `ThreadBound*` model wrappers. An `actor`, but
-/// actor isolation on its own does NOT prevent double-loading: `get()`
-/// suspends at `try await factory()`, and the actor can interleave a second
-/// `get()` call in that gap, so two concurrent callers can both observe
-/// `model == nil` and both start a load. To keep "load-once" true, the first
-/// caller publishes an in-flight `Task` that later callers await instead of
-/// starting their own factory call — see `get()`.
+/// Lazy, idle-unloadable model holder. Actor isolation alone doesn't prevent double-loading across the factory await, so the first caller publishes an in-flight Task that later callers await.
 actor LazyModel<M> {
     private let label: String
     private let factory: () async throws -> M
@@ -21,11 +14,6 @@ actor LazyModel<M> {
         self.factory = factory
     }
 
-    /// Loads the model via `factory` on first call (logging load seconds)
-    /// and returns the cached instance on subsequent calls. Concurrent
-    /// callers that arrive while a load is already underway await the same
-    /// in-flight `Task` instead of triggering their own `factory()` call, so
-    /// the model is constructed at most once even under a slow first load.
     func get() async throws -> M {
         if let model {
             return model
@@ -47,12 +35,7 @@ actor LazyModel<M> {
         return loaded
     }
 
-    /// Drops the cached reference so the next `get()` reloads from scratch.
-    /// Deliberately leaves any in-flight load alone: if a load started
-    /// before `unload()` is still running, it will finish and repopulate
-    /// `model` afterward rather than being cancelled. That's an acceptable
-    /// (and simplest-to-reason-about) outcome — `unload()` is a hint to
-    /// drop idle memory, not a hard guarantee that no load is in progress.
+    /// Does not cancel an in-flight load; it may repopulate the model afterward.
     func unload() {
         model = nil
     }
@@ -61,16 +44,12 @@ actor LazyModel<M> {
         model != nil
     }
 
-    /// Best-effort warm-up: loads the model and swallows any failure (a
-    /// failed preload just means the next real `get()` will retry and
-    /// surface the error to its caller instead).
+    /// Best-effort warm-up; swallows failure so the next real get() retries.
     func preload() async {
         _ = try? await get()
     }
 }
 
-/// Adds the idle-unload lifecycle hooks the app's memory manager (Task 13)
-/// needs on top of `SttEngine.transcribe`.
 protocol UnloadableEngine: SttEngine {
     func unload() async
     func preload() async
@@ -78,28 +57,14 @@ protocol UnloadableEngine: SttEngine {
 }
 
 /// FluidAudio Parakeet v3 STT engine.
-///
-/// NOTE: this is compile-only for Task 10 — it is exercised against real
-/// audio fixtures by `ScribeModelTests` in Task 15, since that's the only
-/// test target linked against the FluidAudio/WhisperKit packages.
 final class ParakeetEngine: UnloadableEngine {
     let name = "parakeet"
 
     private let lazyModel: LazyModel<AsrManager>
-    /// Auxiliary CTC keyword-spotter model for vocabulary biasing — a
-    /// separate download from the TDT model. Its factory throws on load
-    /// failure (offline, etc.) so `LazyModel` does NOT cache the failure and
-    /// the next dictation retries; `applyBiasing` catches the throw and
-    /// transcribes unbiased. Never a fatal error.
+    /// Auxiliary CTC keyword-spotter (separate download). Its factory throws on failure so LazyModel doesn't cache it; applyBiasing catches and transcribes unbiased.
     private let lazyCtc: LazyModel<CtcModels>
 
-    /// Bias vocabulary + the rescorer built from it, guarded by `biasLock`.
-    /// The cached trio is keyed on `cachedTerms` (the exact vocabulary it was
-    /// built from), NOT a dirty flag: a rebuild is triggered whenever the
-    /// requested terms differ from what's cached. Keying on identity rather
-    /// than a boolean is what makes a failed rebuild retry (the cache still
-    /// holds the OLD terms, so the next call still mismatches) and defeats the
-    /// lost-update race where a vocab change lands mid-dictation.
+    /// Bias vocab + rescorer, guarded by `biasLock`. Keyed on `cachedTerms` (not a dirty flag) so a failed rebuild retries and a mid-dictation vocab change isn't lost.
     private let biasLock = NSLock()
     private var biasVocabulary: [BiasTerm] = []
     private var cachedTerms: [BiasTerm]?
@@ -107,33 +72,19 @@ final class ParakeetEngine: UnloadableEngine {
     private var cachedContext: CustomVocabularyContext?
     private var cachedSpotter: CtcKeywordSpotter?
 
-    /// Records why the last dictation's biasing did or didn't fire. Exposed
-    /// for the model-backed tests: the graceful do/catch means a broken
-    /// rescorer would otherwise pass a no-regression test silently, so the
-    /// smoke test asserts this is NOT `.failed`.
+    /// Why the last dictation's biasing did or didn't fire; tests assert it is not `.failed`.
     enum BiasOutcome: Equatable { case disabled, noCtcModel, noTimings, unmodified, applied, failed }
     private(set) var lastBiasOutcomeForTesting: BiasOutcome = .disabled
 
-    /// Milliseconds the last `transcribe` spent in vocabulary biasing (the
-    /// CTC pass + rescore). 0 when biasing is off/empty — a near-free guard.
-    /// Read by the pipeline to log biasing as its own timing field. Written
-    /// and read only on the pipeline's serial dictation path.
+    /// Milliseconds the last transcribe spent biasing; written and read only on the serial dictation path.
     private(set) var lastBiasMs: Int = 0
 
-    /// String-similarity floor for accepting a rescoring replacement. The
-    /// library's vocab-size-aware default (0.50–0.60) is far too loose — it
-    /// replaces ordinary words with acoustically-loose vocab matches ("bueno"
-    /// → "Deno", "mañana" → "Grafana", "move" → "Node"). 0.75 was the lowest
-    /// value that left every fixture untouched with the full curated pack,
-    /// with margin for bilingual speech. This raises precision at the cost of
-    /// recall (near-homophones like "cloud"/"Claude" no longer fire — but
-    /// catching those was exactly what corrupted common words).
+    /// Similarity floor for accepting a rescoring replacement. The library default (0.50-0.60) replaces ordinary words with loose vocab matches; 0.75 trades recall for precision.
     static let biasMinSimilarity: Float = 0.75
 
     init() {
         lazyModel = LazyModel(label: "parakeet") {
-            // Downloaded into the app-managed store, not FluidAudio's
-            // default Application Support/FluidAudio cache.
+            // Downloaded into the app-managed store, not FluidAudio's default cache.
             let models = try await AsrModels.downloadAndLoad(
                 to: ModelStore.parakeetDirectory, version: .v3)
             let manager = AsrManager(config: .default)
@@ -141,15 +92,12 @@ final class ParakeetEngine: UnloadableEngine {
             return manager
         }
         lazyCtc = LazyModel(label: "parakeet-ctc") {
-            // Throws on failure (NOT try?) so LazyModel doesn't cache a failed
-            // load as a permanent success-of-nil — the next dictation retries.
+            // Throws (not try?) so LazyModel doesn't cache a failed load; the next dictation retries.
             try await CtcModels.downloadAndLoad(
                 to: ModelStore.ctcDirectory, variant: .ctc110m)
         }
     }
 
-    /// Publishes a new bias vocabulary. Takes effect on the next
-    /// `transcribe`; load-free and callable before any model is resident.
     func setBiasVocabulary(_ terms: [BiasTerm]) {
         biasLock.withLock { biasVocabulary = terms }
     }
@@ -170,16 +118,12 @@ final class ParakeetEngine: UnloadableEngine {
         }
     }
 
-    /// Rescores `result.text` toward the bias vocabulary using the auxiliary
-    /// CTC model. Every failure path returns the plain transcription — biasing
-    /// can only ever improve output, never break a dictation. `TermReplacer`
-    /// still runs downstream regardless.
+    /// Every failure path returns the plain transcription; biasing never breaks a dictation.
     private func applyBiasing(to result: ASRResult, pcm: [Float]) async -> String {
         let terms = biasLock.withLock { biasVocabulary }
         guard !terms.isEmpty else { lastBiasOutcomeForTesting = .disabled; return result.text }
 
-        // A load failure throws; catch it here so biasing degrades to plain
-        // text without the failure being cached (the next dictation retries).
+        // A load failure throws; degrade to plain text without caching it.
         guard let ctc = try? await lazyCtc.get() else {
             lastBiasOutcomeForTesting = .noCtcModel
             return result.text
@@ -215,9 +159,6 @@ final class ParakeetEngine: UnloadableEngine {
         }
     }
 
-    /// Returns the cached rescorer trio, rebuilding it when the vocabulary
-    /// changed. Tokenization + rescorer construction happen once per vocab
-    /// change, not per dictation.
     private func rescorer(for terms: [BiasTerm], ctc: CtcModels) async throws
         -> (CustomVocabularyContext, CtcKeywordSpotter, VocabularyRescorer)
     {
@@ -231,9 +172,7 @@ final class ParakeetEngine: UnloadableEngine {
         }
         if let cached { return cached }
 
-        // The bundle (incl. tokenizer.json) lives where we downloaded it —
-        // ModelStore.ctcDirectory — NOT FluidAudio's default cache that
-        // CtcModels.defaultCacheDirectory(for:) points at.
+        // The bundle lives in ModelStore.ctcDirectory, not FluidAudio's default cache.
         let modelDir = ModelStore.ctcDirectory
         let tokenizer = try await CtcTokenizer.load(from: modelDir)
         let vocabTerms = terms.compactMap { term -> CustomVocabularyTerm? in
@@ -247,8 +186,7 @@ final class ParakeetEngine: UnloadableEngine {
         let rescorer = try await VocabularyRescorer.create(
             spotter: spotter, vocabulary: context, config: .default, ctcModelDirectory: modelDir)
 
-        // Record the terms only on success, so a thrown rebuild leaves the
-        // old (mismatching) cachedTerms in place and the next call retries.
+        // Record terms only on success so a thrown rebuild retries next call.
         biasLock.withLock {
             cachedTerms = terms
             cachedContext = context
@@ -270,12 +208,7 @@ final class ParakeetEngine: UnloadableEngine {
     }
     func preload() async {
         await lazyModel.preload()
-        // Warm the CTC model in the background too, but ONLY when there's a
-        // vocabulary to bias with — otherwise a biasing-off user would pay an
-        // unnecessary download/load. Fire-and-forget so a slow/absent CTC
-        // never delays TDT readiness; LazyModel coalesces this with the
-        // get() inside applyBiasing, so the first biased dictation no longer
-        // stalls on the load.
+        // Warm CTC in the background only when there is a vocabulary; fire-and-forget so it never delays TDT readiness.
         if !biasLock.withLock({ biasVocabulary.isEmpty }) {
             Task { await lazyCtc.preload() }
         }
@@ -292,10 +225,6 @@ extension NSLock {
 }
 
 /// WhisperKit (large-v3-turbo) STT engine.
-///
-/// NOTE: this is compile-only for Task 10 — it is exercised against real
-/// audio fixtures by `ScribeModelTests` in Task 15, since that's the only
-/// test target linked against the FluidAudio/WhisperKit packages.
 final class WhisperEngine: UnloadableEngine {
     let name = "whisper"
 
@@ -303,8 +232,7 @@ final class WhisperEngine: UnloadableEngine {
 
     init() {
         lazyModel = LazyModel(label: "whisper") {
-            // downloadBase roots WhisperKit's models/argmaxinc/… tree in
-            // the app-managed store instead of ~/Documents/huggingface.
+            // downloadBase roots models in the app-managed store, not ~/Documents/huggingface.
             try await WhisperKit(
                 WhisperKitConfig(
                     model: "openai_whisper-large-v3-v20240930_turbo",

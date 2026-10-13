@@ -1,11 +1,7 @@
 import XCTest
 
-// `Sources/Scribe` compiles directly into the `ScribeTests` module (see
-// project.yml), so `IdleTracker` is already visible here without an import.
-// built `Scribe` app module's copy of the same symbols — harmless for type
-// references, but see MenuBarHelpersTests.swift for why it's avoided here.
+// Sources/Scribe compiles into this test module, so no import is needed.
 
-// Ported 1:1 from tests/test_idle.py.
 final class IdleTrackerTests: XCTestCase {
     func testDisabledWhenZero() {
         let t = IdleTracker(unloadAfterMinutes: 0)

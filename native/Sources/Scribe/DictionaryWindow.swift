@@ -1,37 +1,25 @@
 import AppKit
 import SwiftUI
 
-/// Scene id for the dictionary editor window, shared between the menu's
-/// "Edit Dictionary…" item and the scene declaration in `ScribeApp`.
 let dictionaryWindowID = "dictionary"
 
-/// Brings scribe to the foreground and opens the dictionary editor —
-/// same LSUIElement activation dance as `openOnboarding`.
+/// LSUIElement apps must activate explicitly to bring the window forward.
 func openDictionaryWindow(_ openWindow: OpenWindowAction) {
     NSApp.activate(ignoringOtherApps: true)
     openWindow(id: dictionaryWindowID)
 }
 
-/// Row label for a replacement pair. Free function, unit-tested.
 func pairRowLabel(_ original: String, _ replacement: String) -> String {
     "\(truncateLabel(original, n: 24)) → \(truncateLabel(replacement, n: 24))"
 }
 
-/// Add-button enablement. Pairs are applied as literal text substitutions
-/// (see TermReplacer), never as prompt instructions, so they are NOT
-/// sanitized or length-capped the way vocabulary terms are — a replacement
-/// of `<div>` or a lone quote character is legitimate and must survive
-/// verbatim. Only genuinely empty input is refused. Free function,
-/// unit-tested.
+/// Pairs are literal substitutions, so unlike vocabulary terms they are never sanitized or capped.
 func canAddPair(original: String, replacement: String) -> Bool {
     [original, replacement].allSatisfy {
         !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 }
 
-/// The distinct right-hand sides of the user's pairs, in stable order —
-/// several manglings of one word share a single target, so duplicates are
-/// collapsed. Free function, unit-tested.
 func distinctReplacementTargets(_ pairs: [ReplacementPair]) -> [String] {
     var seen = Set<String>()
     var targets: [String] = []
@@ -41,24 +29,18 @@ func distinctReplacementTargets(_ pairs: [ReplacementPair]) -> [String] {
     return targets.sorted { $0.lowercased() < $1.lowercased() }
 }
 
-/// Detail line for a learned term row. Free function, unit-tested.
 func glossaryRowDetail(count: Int, lastSeen: Date, now: Date = Date()) -> String {
     let days = Int(now.timeIntervalSince(lastSeen) / 86_400)
     let when = days <= 0 ? "today" : days == 1 ? "yesterday" : "\(days) days ago"
     return "seen \(count)× · \(when)"
 }
 
-/// Editor window for the user dictionary: manual replacement pairs on top,
-/// the auto-learned glossary below. All mutations go through `AppModel`,
-/// which forwards to `UserDictionaryStore` and refreshes the mirrored
-/// `@Published` state via the store's onChange.
+/// Mutations go through `AppModel`, which forwards to `UserDictionaryStore`.
 struct DictionaryWindow: View {
     @ObservedObject var model: AppModel
     @State private var newOriginal = ""
     @State private var newReplacement = ""
 
-    /// Distinct correction targets already configured — what a heard
-    /// mangling can be bound to.
     private var replacementTargets: [String] {
         distinctReplacementTargets(model.replacementPairs)
     }
