@@ -2,7 +2,6 @@ import XCTest
 
 /// Checks that cleanup never drops a word that appears in the input and dictionary.
 final class DictionaryFidelityTests: XCTestCase {
-    static let gemma = GemmaBackend()
 
     private static func pair(_ o: String, _ r: String) -> ReplacementPair {
         ReplacementPair(original: o, replacement: r, addedAt: Date(timeIntervalSince1970: 0))
@@ -59,13 +58,14 @@ final class DictionaryFidelityTests: XCTestCase {
     ]
 
     private func run(condition: String) async throws -> [String] {
+        let backend = try cleanupBackendUnderTest()
         var failures: [String] = []
         for testCase in Self.cases where testCase.condition == condition {
-            Self.gemma.setDictionary(testCase.snapshot)
+            backend.setDictionary(testCase.snapshot)
             // Mirrors DictationPipeline.process: pairs are applied around the model.
             let pairs = testCase.snapshot.pairs
             let transcript = TermReplacer.apply(pairs, to: testCase.input)
-            let out = TermReplacer.apply(pairs, to: try await Self.gemma.clean(transcript))
+            let out = TermReplacer.apply(pairs, to: try await backend.clean(transcript))
             let low = out.lowercased()
             let missing = testCase.mustContain.filter { !low.contains($0.lowercased()) }
             print("[fidelity][\(condition)] \(missing.isEmpty ? "PASS" : "FAIL lost=\(missing)")")
@@ -84,16 +84,18 @@ final class DictionaryFidelityTests: XCTestCase {
         XCTAssertTrue(failures.isEmpty, "pairs dropped content:\n" + failures.joined(separator: "\n"))
     }
 
-    /// Pins a known defect: the learned-vocabulary prompt section makes Gemma drop words.
-    /// If this starts failing, the defect is fixed; re-check `dictionaryLearningEnabled` and delete this test.
-    func testLearnedVocabularyStillDropsWords_knownDefect() async throws {
+    /// The per-model learning gate's evidence. A model marked `fidelitySafe`
+    /// in CleanupModelCatalog receives learned vocabulary, so it must keep
+    /// every word with it. An unmarked model is pinned as still dropping words
+    /// (Gemma 3's known defect) — if this starts failing for one, the model
+    /// has become safe: flip its `fidelitySafe` and this flips with it.
+    func testLearnedVocabularyFidelityMatchesTheCatalog() async throws {
+        let spec = cleanupSpecUnderTest()
         let failures = try await run(condition: "learned") + (try await run(condition: "both"))
-        XCTAssertFalse(
-            failures.isEmpty,
-            """
-            The learned-vocabulary section no longer drops words — the known \
-            defect appears to be fixed. Re-check the default for \
-            dictionaryLearningEnabled and remove this test.
-            """)
+        if spec.fidelitySafe {
+            XCTAssertTrue(failures.isEmpty, "\(spec.id) is marked fidelitySafe but dropped words:\n" + failures.joined(separator: "\n"))
+        } else {
+            XCTAssertFalse(failures.isEmpty, "\(spec.id) kept every word — mark it fidelitySafe in CleanupModelCatalog after review.")
+        }
     }
 }

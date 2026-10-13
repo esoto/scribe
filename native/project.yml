@@ -61,7 +61,7 @@ targets:
   ScribeTests:
     type: bundle.unit-test
     platform: macOS
-    sources: [Tests/ScribeTests, Sources/Scribe]
+    sources: [Tests/ScribeTests, Tests/Shared, Sources/Scribe]
     dependencies: *mlDeps
     settings:
       base:
@@ -69,7 +69,7 @@ targets:
   ScribeModelTests:
     type: bundle.unit-test
     platform: macOS
-    sources: [Tests/ScribeModelTests, Sources/Scribe]
+    sources: [Tests/ScribeModelTests, Tests/Shared, Sources/Scribe]
     dependencies: *mlDeps
     settings:
       base:
