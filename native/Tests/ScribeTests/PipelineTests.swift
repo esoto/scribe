@@ -8,6 +8,7 @@ final class PipelineTests: XCTestCase {
         let notices: Box<String>
         let saved: Box<[Float]>
         let cleanedTexts: Box<String>
+        let logs: Box<String>
     }
 
     /// Blocks the calling thread until the async work completes; a semaphore bridges the Task, no sleep polling.
@@ -36,6 +37,7 @@ final class PipelineTests: XCTestCase {
         let notices = Box<String>()
         let saved = Box<[Float]>()
         let cleanedTexts = Box<String>()
+        let logs = Box<String>()
         let pipeline = DictationPipeline(
             recorder: recorder,
             stt: stt,
@@ -48,12 +50,13 @@ final class PipelineTests: XCTestCase {
             onState: { states.append($0) },
             onNotice: { notices.append($0) },
             saveFailedAudio: { saved.append($0) },
+            onLog: { logs.append($0) },
             onCleaned: { cleanedTexts.append($0) },
             replacementPairs: { pairs }
         )
         return Harness(
             pipeline: pipeline, clock: clock, states: states, notices: notices, saved: saved,
-            cleanedTexts: cleanedTexts)
+            cleanedTexts: cleanedTexts, logs: logs)
     }
 
     private func dictate(_ h: Harness, hold: Double = 1.0) {
@@ -211,6 +214,15 @@ final class PipelineTests: XCTestCase {
 
         // Engine is unaffected by cleaner swaps.
         XCTAssertEqual(pipeline.engineName, "parakeet")
+    }
+
+    func testDictationLogNamesTheCleanupModel() {
+        let h = make()
+        h.pipeline.setCleaner(FakeCleaner(out: "hello there world"), name: "gemma4")
+        dictate(h)
+        let line = h.logs.value.last ?? ""
+        XCTAssertTrue(line.hasPrefix("dictation: engine=parakeet cleanupModel=gemma4 stt="), line)
+        XCTAssertTrue(line.contains("cleaned=true"), line)
     }
 
     func testTwoDictationsFifo() {
