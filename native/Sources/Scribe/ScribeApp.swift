@@ -529,7 +529,10 @@ final class AppModel: ObservableObject {
     func refreshDownloadedModels() {
         Task.detached { [weak self] in
             let statuses = AppModel.computeModelStatuses(CleanupModelStore())
-            await MainActor.run { self?.modelStatuses = statuses }
+            // Bind to a local `let` before the nested closure: referencing the
+            // captured weak `var` inside a @Sendable closure is a Swift 6 error.
+            guard let self else { return }
+            await MainActor.run { self.modelStatuses = statuses }
         }
     }
 
