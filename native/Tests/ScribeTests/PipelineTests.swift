@@ -188,6 +188,31 @@ final class PipelineTests: XCTestCase {
         XCTAssertEqual(paster.pasted.count, 1)
     }
 
+    func testCleanerSwap() {
+        let paster = FakePaster()
+        let h = make(paster: paster)
+        let pipeline = h.pipeline
+
+        // Baseline: the default cleaner's output is what gets pasted.
+        dictate(h)
+        XCTAssertEqual(paster.pasted.last, "hello there world")
+
+        // Swap in a new cleaner with its own model name.
+        pipeline.setCleaner(FakeCleaner(out: "new model text"), name: "new-model")
+        dictate(h)
+        XCTAssertEqual(paster.pasted.last, "new model text")   // new cleaner's output
+        XCTAssertEqual(pipeline.cleanupModelName, "new-model")
+
+        // Swap to nil: cleanup disabled, raw text pasted.
+        pipeline.setCleaner(nil, name: "")
+        dictate(h)
+        XCTAssertEqual(paster.pasted.last, "so um hello there world")   // raw
+        XCTAssertEqual(pipeline.cleanupModelName, "")
+
+        // Engine is unaffected by cleaner swaps.
+        XCTAssertEqual(pipeline.engineName, "parakeet")
+    }
+
     func testTwoDictationsFifo() {
         let paster = FakePaster()
         let h = make(paster: paster)
