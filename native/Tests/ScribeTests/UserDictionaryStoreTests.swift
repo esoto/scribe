@@ -302,6 +302,23 @@ final class UserDictionaryStoreTests: XCTestCase {
             "but it is still offered as a bindable word")
     }
 
+    func testTogglingLearningRecomputesTheSnapshotAndNotifies() {
+        let store = makeStore()
+        // Start with a promoted word so we have something to verify.
+        store.observe(cleanedText: "check Kamal now")
+        store.observe(cleanedText: "check Kamal now")
+        store.observe(cleanedText: "check Kamal now")
+        XCTAssertEqual(store.snapshot.glossary, ["Kamal"], "learning on — promoted")
+
+        // Turn learning off — snapshot should clear immediately.
+        store.learningEnabled = false
+        XCTAssertEqual(store.snapshot.glossary, [], "learning off — cleared immediately")
+
+        // Turn learning back on — snapshot must reflect again without another observe.
+        store.learningEnabled = true
+        XCTAssertEqual(store.snapshot.glossary, ["Kamal"], "learning on — recomputed immediately")
+    }
+
     func testCorruptFileStartsEmpty() throws {
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         try Data("not json {{{".utf8).write(to: fileURL)

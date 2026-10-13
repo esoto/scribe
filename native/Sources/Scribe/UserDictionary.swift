@@ -85,7 +85,12 @@ final class UserDictionaryStore: @unchecked Sendable {
     /// Runtime learning switch; when off, `observe` is a no-op.
     var learningEnabled: Bool {
         get { queue.sync { enabled } }
-        set { queue.sync { enabled = newValue } }
+        set {
+            queue.sync {
+                enabled = newValue
+                notifyIfChangedLocked()
+            }
+        }
     }
 
     var snapshot: DictionarySnapshot { queue.sync { lastSnapshot } }
@@ -199,6 +204,10 @@ final class UserDictionaryStore: @unchecked Sendable {
         if let data = try? encoder.encode(file) {
             try? data.write(to: fileURL, options: .atomic)
         }
+        notifyIfChangedLocked()
+    }
+
+    private func notifyIfChangedLocked() {
         // Notify when the snapshot moved (prompt prefix must rebuild) or the editor-visible structure moved; plain count bumps notify neither (republishing can close an open menu).
         let snap = computeSnapshotLocked()
         let structure = computeStructureLocked()
