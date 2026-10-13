@@ -112,4 +112,24 @@ final class CleanupModelCatalogTests: XCTestCase {
         XCTAssertEqual(CleanupModelCatalog.statusText(label: "Gemma 4 E4B", fraction: 0.427), "Downloading Gemma 4 E4B… 42%")
         XCTAssertEqual(CleanupModelCatalog.statusText(label: "Gemma 4 E4B", fraction: 1.0), "Loading Gemma 4 E4B…")
     }
+
+    func testProgressRelayForwardsOnlyOnceAHandlerIsSet() {
+        let relay = ProgressRelay()
+        relay.report(model: "x", fraction: 0.5)  // no handler yet: dropped, no crash
+        let got = Box<String>()
+        relay.set { label, fraction in got.append("\(label):\(fraction)") }
+        relay.report(model: "Gemma 4 E4B", fraction: 0.25)
+        XCTAssertEqual(got.value, ["Gemma 4 E4B:0.25"])
+    }
+
+    func testMakeBackendBuildsTheRightKind() {
+        let relay = ProgressRelay()
+        XCTAssertTrue(CleanupModelCatalog.makeBackend(.model(.gemma4), relay: relay, onAppleIntelligenceLost: {}) is GemmaBackend)
+        XCTAssertTrue(CleanupModelCatalog.makeBackend(.custom(path: "/m"), relay: relay, onAppleIntelligenceLost: {}) is GemmaBackend)
+        if #available(macOS 26.0, *) {
+            XCTAssertTrue(
+                CleanupModelCatalog.makeBackend(.model(.appleIntelligence), relay: relay, onAppleIntelligenceLost: {})
+                    is AppleIntelligenceBackend)
+        }
+    }
 }

@@ -1,5 +1,21 @@
 import Foundation
 
+/// Bridges GemmaBackend download progress (any thread) to AppModel, which
+/// can't be captured while its stored properties are still initializing.
+final class ProgressRelay: @unchecked Sendable {
+    private let lock = NSLock()
+    private var handler: ((String, Double) -> Void)?
+
+    func set(_ handler: @escaping (String, Double) -> Void) {
+        lock.withLock { self.handler = handler }
+    }
+
+    func report(model label: String, fraction: Double) {
+        let handler = lock.withLock { self.handler }
+        handler?(label, fraction)
+    }
+}
+
 /// The cleanup models scribe offers, and the pure rules that pick one at
 /// launch, choose a fallback, and gate what each may see in its prompt.
 /// Pure (no I/O) so the rules are unit-testable without an AppModel — same
@@ -125,4 +141,32 @@ enum CleanupModelCatalog {
             ? "Downloading \(label)… \(Int((fraction * 100).rounded(.down)))%"
             : "Loading \(label)…"
     }
+}
+
+extension CleanupModelCatalog {
+    /// Constructs (never loads) the backend for a selection.
+    static func makeBackend(
+        _ selection: Selection, relay: ProgressRelay,
+        onAppleIntelligenceLost: @escaping @Sendable () -> Void
+    ) -> any CleanupModelBackend {
+        switch selection {
+        case .custom(let path):
+            return GemmaBackend(spec: gemma3, customModelPath: path)
+        case .model(let id):
+            let spec = spec(id)
+            if case .appleIntelligence = spec.kind, #available(macOS 26.0, *) {
+                return AppleIntelligenceBackend(onUnavailable: onAppleIntelligenceLost)
+            }
+            // Pre-26 never reaches here with AFM: resolve() and the picker only
+            // offer it while AppleIntelligence.isAvailable.
+            let mlxSpec = spec.repoID == nil ? gemma3 : spec
+            return GemmaBackend(spec: mlxSpec, onProgress: { relay.report(model: mlxSpec.label, fraction: $0) })
+        }
+    }
+}
+
+/// The model in use (or being switched to) can't be deleted, and Apple
+/// Intelligence has nothing on disk to delete.
+func canDeleteModel(_ id: CleanupModelID, active: String, pending: String?) -> Bool {
+    CleanupModelCatalog.spec(id).repoID != nil && id.rawValue != active && id.rawValue != pending
 }
