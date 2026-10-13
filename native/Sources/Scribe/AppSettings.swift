@@ -22,6 +22,7 @@ final class AppSettings {
         static let sounds = "sounds"
         static let historySize = "historySize"
         static let idleUnloadMinutes = "idleUnloadMinutes"
+        static let cleanupModel = "cleanupModel"
         static let cleanupModelPath = "cleanupModelPath"
         static let microphoneUID = "microphoneUID"
         static let dictionaryLearningEnabled = "dictionaryLearningEnabled"
@@ -126,6 +127,14 @@ final class AppSettings {
             return raw
         }
         set { defaults.set(newValue, forKey: Key.cleanupModelPath) }
+    }
+
+    /// The picked cleanup model (`CleanupModelID.rawValue`); nil = never
+    /// chosen, and AppModel resolves one via `CleanupModelCatalog.resolve`.
+    /// `cleanupModelPath`, when set, overrides this.
+    var cleanupModel: String? {
+        get { defaults.string(forKey: Key.cleanupModel) }
+        set { defaults.set(newValue, forKey: Key.cleanupModel) }
     }
 
     /// CoreAudio UID of the capture device; nil = system default.
