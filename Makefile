@@ -13,6 +13,11 @@ test:
 test-models:
 	$(XCODEBUILD) -scheme ScribeModelTests test
 
+# Compile-check the real-model test target without running it (no GPU).
+# `make test` builds only ScribeTests, so ScribeModelTests breakage is otherwise invisible.
+build-models:
+	$(XCODEBUILD) -scheme ScribeModelTests build-for-testing
+
 # Package the native app: Release build -> dist/scribe-<version>.zip.
 # `make install-app` additionally replaces /Applications/Scribe.app.
 app:

@@ -16,6 +16,21 @@ protocol UnloadableCleaner: CleanupBackend {
     var isLoaded: Bool { get async }
 }
 
+/// A cleanup backend the app can swap at runtime: lifecycle hooks plus the
+/// dictionary push every model needs (AppModel gates what's in it — see
+/// `CleanupModelCatalog.promptSnapshot`).
+protocol CleanupModelBackend: UnloadableCleaner, AnyObject {
+    func setDictionary(_ snapshot: DictionarySnapshot)
+    /// False for a backend with nothing resident in our process (Apple
+    /// Intelligence): idle-unload skips it. A requirement so the default is
+    /// dispatched dynamically through `any CleanupModelBackend`.
+    var holdsMemory: Bool { get }
+}
+
+extension CleanupModelBackend {
+    var holdsMemory: Bool { true }
+}
+
 /// Warm KV cache for the fixed prompt prefix. Always `.copy()` it, never mutate: generation mutates a cache.
 private struct WarmPrefix {
     var cache: [KVCache]
@@ -27,7 +42,7 @@ private struct WarmPrefix {
     var fastPathWrapOverlap: Int?
 }
 
-/// MLX Gemma 3 4B QAT cleanup backend.
+/// Spec-driven MLX cleanup backend (Gemma 3 4B QAT by default; any `.mlx` CleanupModelSpec).
 ///
 /// Caches the KV state of the fixed system+few-shot prefix and reuses a copy per call. The SAFE tier
 /// renders the full chat and feeds only the suffix; the FAST tier renders only the incremental turn
@@ -35,7 +50,7 @@ private struct WarmPrefix {
 ///
 /// `@unchecked Sendable`: warmPrefix/warmupAttemptedFor are only touched inside container.perform,
 /// which serializes calls with a real async mutex; dictionarySnapshot has its own NSLock.
-final class GemmaBackend: UnloadableCleaner, @unchecked Sendable {
+final class GemmaBackend: CleanupModelBackend, @unchecked Sendable {
     private let lazyModel: LazyModel<ModelContainer>
 
     /// nil until warm-up succeeds.
@@ -66,31 +81,40 @@ final class GemmaBackend: UnloadableCleaner, @unchecked Sendable {
     private static let warmupSampleES =
         "este esto es solo una frase de calentamiento para el cache sin problema"
 
-    /// `customModelPath` loads a local MLX folder instead of stock Gemma.
-    init(customModelPath: String? = nil) {
-        let configuration = GemmaBackend.modelConfiguration(customPath: customModelPath)
-        lazyModel = LazyModel(label: "gemma-cleanup") {
+    /// `spec` picks the stock model; `customModelPath` overrides it with a local MLX folder.
+    /// `onProgress` gets download progress (0…1; a cached snapshot reports 1) on any thread.
+    init(
+        spec: CleanupModelSpec = CleanupModelCatalog.gemma3,
+        customModelPath: String? = nil,
+        onProgress: (@Sendable (Double) -> Void)? = nil
+    ) {
+        let configuration = GemmaBackend.modelConfiguration(spec: spec, customPath: customModelPath)
+        lazyModel = LazyModel(label: "cleanup-\(spec.id.rawValue)") {
             // Expanded macro so the hub client uses the app-managed model store.
             try await loadModelContainer(
                 from: #hubDownloader(
                     HubClient(
                         cache: HubCache(location: .fixed(directory: ModelStore.gemmaDirectory)))),
                 using: #huggingFaceTokenizerLoader(),
-                configuration: configuration)
+                configuration: configuration,
+                progressHandler: { progress in onProgress?(progress.fractionCompleted) })
         }
     }
 
     /// Built directly because #huggingFaceLoadModelContainer never consults the model registries,
     /// so a bare ModelConfiguration would miss extraEOSTokens. Without <end_of_turn> as a stop token,
     /// Gemma runs to maxTokens. A custom path omits it: it is Gemma's turn token and would corrupt other families.
-    static func modelConfiguration(customPath: String? = nil) -> ModelConfiguration {
+    /// Gemma 4 uses <turn|> instead (registry gemma4_e4b_it_4bit).
+    static func modelConfiguration(
+        spec: CleanupModelSpec = CleanupModelCatalog.gemma3, customPath: String? = nil
+    ) -> ModelConfiguration {
         if let customPath {
             return ModelConfiguration(directory: URL(fileURLWithPath: customPath))
         }
-        return ModelConfiguration(
-            id: "mlx-community/gemma-3-4b-it-qat-4bit",
-            extraEOSTokens: ["<end_of_turn>"]
-        )
+        guard case .mlx(let repoID, let extraEOSTokens) = spec.kind else {
+            preconditionFailure("GemmaBackend loads MLX models only, got \(spec.id)")
+        }
+        return ModelConfiguration(id: repoID, extraEOSTokens: extraEOSTokens)
     }
 
     /// Message list sent to Gemma. Few-shot user turns must go through wrap() like the real query,
