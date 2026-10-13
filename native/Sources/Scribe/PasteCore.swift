@@ -5,11 +5,7 @@ struct PasteError: Error {
     let message: String
 }
 
-/// Clipboard paste with safe restore.
-///
-/// The universal dictation-app mechanism (clipboard + synthetic ⌘V) with mitigations:
-/// - Configurable restore delay (user has time to paste into the target app)
-/// - Change-count check (skip restore if user copied something else meanwhile)
+/// Restores the prior clipboard only if its changeCount is unchanged since the paste.
 final class Paster {
     private let pasteboard: PasteboardLike
     private let postCmdV: () throws -> Void
@@ -28,17 +24,6 @@ final class Paster {
         self.restoreDelay = restoreDelay
     }
 
-    /// Paste text to clipboard and post synthetic ⌘V.
-    ///
-    /// - Saves current clipboard state
-    /// - Sets new text to clipboard
-    /// - Posts synthetic ⌘V (postCmdV)
-    /// - If post fails, throws PasteError (text stays on clipboard, no restore scheduled)
-    /// - If post succeeds and saved clipboard was not nil, schedules restore with delay
-    /// - Restore only happens if changeCount hasn't changed (user didn't copy meanwhile)
-    ///
-    /// - Parameter text: The text to paste
-    /// - Throws: PasteError if postCmdV throws
     func paste(_ text: String) throws {
         let saved = pasteboard.get()
         pasteboard.set(text)

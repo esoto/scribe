@@ -1,15 +1,8 @@
 import AppKit
 import SwiftUI
 
-/// Menu bar UI (SwiftUI/MenuBarExtra). Pure helpers up top; the view below
-/// delegates every decision to `AppModel`.
-///
-/// Ported from `scribe.menubar` (src/scribe/menubar.py) — `ScribeMenuBar`'s
-/// rumps-driven NSMenu construction becomes a declarative SwiftUI menu body;
-/// `glyph_for`/`truncate_label` port 1:1 (see MenuBarHelpersTests.swift for
-/// the port of tests/test_menubar_helpers.py).
+/// Menu bar UI. The view delegates every decision to `AppModel`.
 
-/// Maps a `PipelineState` to its one-glyph menu bar title.
 func glyphFor(_ state: PipelineState) -> String {
     switch state {
     case .idle: return "◦"
@@ -19,23 +12,13 @@ func glyphFor(_ state: PipelineState) -> String {
     }
 }
 
-/// Truncates `text` to at most `n` characters, replacing the tail with `…`
-/// when it doesn't fit.
 func truncateLabel(_ text: String, n: Int = 40) -> String {
     guard text.count > n else { return text }
     let cutIndex = text.index(text.startIndex, offsetBy: n - 1)
     return String(text[..<cutIndex]) + "…"
 }
 
-/// Learned terms to offer in the Dictionary submenu, most-used first and
-/// capped so the menu stays navigable.
-///
-/// Built from the store's learned entries, NOT from the prompt snapshot:
-/// the snapshot also carries vocabulary seeded by replacement pairs, and
-/// such a term has no independent existence to delete — `removeGlossaryTerm`
-/// would find nothing, leaving a Remove button that silently does nothing
-/// forever. Pairs are retired in the editor window, where removing one is
-/// unambiguous.
+/// Learned entries only: pair-seeded terms can't be removed here, so offering them would leave a dead Remove button.
 func menuGlossaryTerms(_ entries: [GlossaryEntry], limit: Int = 20) -> [String] {
     entries
         .sorted { $0.count != $1.count ? $0.count > $1.count : $0.lastSeen > $1.lastSeen }
@@ -86,8 +69,7 @@ struct MenuBarView: View {
             ForEach(model.microphones) { device in
                 Text(device.name).tag(device.id)
             }
-            // Keep a stale selection visible (and revertable) after its
-            // device unplugs — capture falls back to the default meanwhile.
+            // Keeps a stale selection visible after its device unplugs.
             if let uid = model.microphoneUID, !model.microphones.contains(where: { $0.id == uid }) {
                 Text("(disconnected)").tag(uid)
             }

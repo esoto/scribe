@@ -1,16 +1,9 @@
 import MLX
 import XCTest
 
-
-/// Proves that `GemmaBackend.unload()` actually returns the ~2.5 GB of
-/// unified memory the 4-bit model occupies — not just drops the Swift
-/// reference. The model's Metal allocations don't show up in RSS, only in
-/// phys_footprint, and MLX parks freed buffers in its own cache pool, so
-/// "unloaded" and "memory reclaimed" are separate claims. This test pins
-/// the second one.
+/// Checks that `GemmaBackend.unload()` returns the model's memory to the OS, not just drops the reference.
 final class MemoryReclaimTests: XCTestCase {
-    /// phys_footprint — the number Activity Monitor's Memory column shows,
-    /// and the one that includes Metal/MLX allocations.
+    /// Includes Metal/MLX allocations, unlike RSS.
     private func physFootprint() -> Int64 {
         var info = task_vm_info_data_t()
         var count = mach_msg_type_number_t(
@@ -28,8 +21,7 @@ final class MemoryReclaimTests: XCTestCase {
         String(format: "%.0f MB", Double(bytes) / 1_048_576)
     }
 
-    /// Diagnostic: which bucket holds the pages (dirty heap vs IOKit/Metal
-    /// vs compressed) — tells us WHO still pins memory after an unload.
+    /// Diagnostic breakdown of which VM bucket still holds memory after unload.
     private func printVmBreakdown(label: String) {
         var info = task_vm_info_data_t()
         var count = mach_msg_type_number_t(
@@ -57,7 +49,6 @@ final class MemoryReclaimTests: XCTestCase {
         let backend = GemmaBackend()
         let before = physFootprint()
 
-        // Load + warm-up + one real generation, same as production use.
         _ = try await backend.clean(
             "so um hello there world this is just a memory test utterance okay")
         let loaded = physFootprint()
@@ -68,10 +59,7 @@ final class MemoryReclaimTests: XCTestCase {
         await backend.unload()
         printVmBreakdown(label: "after-unload")
 
-        // MLX releases its buffers synchronously (active/cache hit 0 inside
-        // unload()), but the kernel scavenges the freed graphics pages
-        // asynchronously — footprint drops from ~3.3 GB to ~200 MB within a
-        // few seconds, not instantly. Poll rather than fixed-sleep.
+        // The kernel reclaims freed graphics pages asynchronously, so poll instead of sleeping once.
         var after = physFootprint()
         for _ in 0..<30 where loaded - after < 1_500_000_000 {
             try await Task.sleep(nanoseconds: 500_000_000)
@@ -79,7 +67,6 @@ final class MemoryReclaimTests: XCTestCase {
         }
         printVmBreakdown(label: "settled")
 
-        // The 4-bit weights are ~2.5 GB; require most of the load cost back.
         XCTAssertGreaterThan(
             loaded - after, 1_500_000_000,
             "unload() must return the model's memory to the OS "
@@ -87,9 +74,7 @@ final class MemoryReclaimTests: XCTestCase {
                 + "mlxActive=\(mb(Int64(GPU.activeMemory))), "
                 + "mlxCache=\(mb(Int64(GPU.cacheMemory))))")
 
-        // Production flow after an idle unload: the next dictation reloads.
-        // Pins that unload() left the backend reusable — including a fresh
-        // warm-up, since unload() also drops the warm prefix state.
+        // Backend must stay reusable after unload.
         let reloaded = try await backend.clean(
             "so um this checks that cleanup still works after an unload")
         XCTAssertFalse(reloaded.isEmpty)

@@ -1,23 +1,15 @@
 import CoreAudio
 import Foundation
 
-/// An audio input device, identified by its CoreAudio UID — stable across
-/// reboots and re-plugs, unlike the numeric `AudioDeviceID`.
+/// Keyed by CoreAudio UID, which survives reboots; `AudioDeviceID` does not.
 struct AudioInputDevice: Equatable, Identifiable {
     let id: String
     let name: String
 }
 
-/// CoreAudio adapter: enumerates input-capable devices and resolves UIDs
-/// back to live device IDs. Thin OS wrapper — excluded from unit coverage
-/// beyond smoke tests; the selection behavior built on top is what's
-/// tested (see MicSelectionTests).
+/// Thin CoreAudio wrapper; the selection logic built on top is what gets unit-tested.
 enum AudioDevices {
-    /// All devices with at least one input channel, in system order.
-    /// Excludes CoreAudio's transient private aggregates
-    /// (`CADefaultDeviceAggregate-…`): they appear/disappear while apps use
-    /// the default device — they're not something a user can meaningfully
-    /// pick, and their churn is exactly what a picker must not display.
+    /// Excludes transient `CADefaultDeviceAggregate` devices, which churn while apps use the default device.
     static func inputDevices() -> [AudioInputDevice] {
         allDeviceIDs().compactMap { devID in
             guard inputChannelCount(devID) > 0,
@@ -29,15 +21,10 @@ enum AudioDevices {
         }
     }
 
-    /// Live device ID for a stored UID, or nil when that device is not
-    /// currently connected — callers fall back to the system default.
     static func deviceID(forUID uid: String) -> AudioDeviceID? {
         allDeviceIDs().first { stringProperty($0, kAudioDevicePropertyDeviceUID) == uid }
     }
 
-    /// Calls `handler` on the main queue whenever the system's device list
-    /// changes (plug/unplug, Bluetooth connect). Installed once for the
-    /// app's lifetime — no removal path needed.
     static func onDevicesChanged(_ handler: @escaping () -> Void) {
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioHardwarePropertyDevices,
@@ -47,8 +34,6 @@ enum AudioDevices {
             AudioObjectID(kAudioObjectSystemObject), &address, .main
         ) { _, _ in handler() }
     }
-
-    // MARK: - CoreAudio plumbing
 
     private static func allDeviceIDs() -> [AudioDeviceID] {
         var address = AudioObjectPropertyAddress(

@@ -1,7 +1,6 @@
 import Foundation
 
-/// UserDefaults-backed application settings, with typed accessors and a
-/// one-time best-effort import of the legacy Python `config.toml`.
+/// UserDefaults-backed application settings, with a legacy config.toml importer.
 final class AppSettings {
     private let defaults: UserDefaults
 
@@ -30,12 +29,7 @@ final class AppSettings {
         static let didImportToml = "didImportToml"
     }
 
-    // MARK: - Typed accessors
-
-    /// Dev binding until cutover — the Python app's default is right ⌘
-    /// (`right_command`); the native app defaults to right ⌥ so it never
-    /// fights the Python app's hotkey while both run side by side during
-    /// development.
+    /// Dev binding: right ⌥, so it doesn't clash with the Python app's right ⌘ while both run.
     var hotkey: HotKey {
         get {
             guard let raw = defaults.string(forKey: Key.hotkey), let key = HotKey(rawValue: raw) else {
@@ -61,29 +55,15 @@ final class AppSettings {
         set { defaults.set(newValue, forKey: Key.cleanupEnabled) }
     }
 
-    /// Whether Parakeet biases transcription toward the user's dictionary +
-    /// the curated engineering pack (`ParakeetEngine.setBiasVocabulary`).
-    ///
-    /// Default OFF: acoustic rescoring at a threshold loose enough to catch
-    /// real manglings also replaces ordinary words with vocab terms (measured:
-    /// "bueno" → "Deno", "mañana" → "Grafana"), which is worse for a bilingual
-    /// speaker than the mishearings it fixes. Now clamped to a safe threshold,
-    /// but opt-in via the "Correct Speech" toggle until it proves it helps
-    /// more than it hurts on real use. Also adds a second CoreML pass per
-    /// dictation.
+    /// Parakeet vocabulary biasing. Default off: rescoring loose enough to catch manglings also
+    /// replaces ordinary words ("bueno" -> "Deno").
     var vocabularyBiasingEnabled: Bool {
         get { defaults.object(forKey: Key.vocabularyBiasingEnabled) as? Bool ?? false }
         set { defaults.set(newValue, forKey: Key.vocabularyBiasingEnabled) }
     }
 
-    /// Whether the user dictionary auto-learns glossary terms from cleaned
-    /// dictations (`UserDictionaryStore.learningEnabled`).
-    ///
-    /// Defaults to FALSE: measured against the real model, injecting a
-    /// learned-vocabulary list makes cleanup drop words from the sentence —
-    /// including words the list never mentions (see
-    /// DictionaryFidelityTests). Manual replacement pairs are unaffected and
-    /// stay on. Flip this back once the vocabulary wording is fixed.
+    /// Auto-learn glossary terms from cleaned dictations. Default off: injecting a learned list
+    /// makes cleanup drop words (see DictionaryFidelityTests).
     var dictionaryLearningEnabled: Bool {
         get { defaults.object(forKey: Key.dictionaryLearningEnabled) as? Bool ?? false }
         set { defaults.set(newValue, forKey: Key.dictionaryLearningEnabled) }
@@ -136,12 +116,8 @@ final class AppSettings {
         set { defaults.set(newValue, forKey: Key.idleUnloadMinutes) }
     }
 
-    /// Filesystem path to a local MLX model folder to use for cleanup
-    /// instead of the stock Gemma 3 4B; nil/empty = stock. Set via
-    /// `defaults write dev.esoto.scribe cleanupModelPath <path>` and
-    /// relaunch — no menu UI by design (see the 2026-07-09 model-store
-    /// spec). A blank string counts as unset so a stray
-    /// `defaults write … ""` can't select an empty directory.
+    /// Local MLX model folder for cleanup instead of stock Gemma; nil/blank = stock.
+    /// Set via `defaults write`; no menu UI by design.
     var cleanupModelPath: String? {
         get {
             guard let raw = defaults.string(forKey: Key.cleanupModelPath),
@@ -152,10 +128,8 @@ final class AppSettings {
         set { defaults.set(newValue, forKey: Key.cleanupModelPath) }
     }
 
-    /// CoreAudio UID of the capture device; nil = system default. Set from
-    /// the menu's Microphone picker. Selecting the built-in mic avoids the
-    /// Bluetooth HFP renegotiation delay that the system default incurs
-    /// when headphones are connected.
+    /// CoreAudio UID of the capture device; nil = system default.
+    /// The built-in mic avoids the Bluetooth HFP renegotiation delay.
     var microphoneUID: String? {
         get {
             guard let raw = defaults.string(forKey: Key.microphoneUID), !raw.isEmpty
@@ -165,11 +139,7 @@ final class AppSettings {
         set { defaults.set(newValue, forKey: Key.microphoneUID) }
     }
 
-    // MARK: - Legacy TOML import
-
-    /// Maps legacy Python `config.toml` dotted keys (`section.key`) to the
-    /// settings keys used by `importToml`'s result dictionary and by
-    /// `apply(key:value:)` below.
+    /// Maps legacy config.toml dotted keys (`section.key`) to settings keys.
     private static let tomlKeyMap: [String: String] = [
         "hotkey.key": "hotkey",
         "hotkey.hold_threshold_s": "holdThreshold",
@@ -185,13 +155,7 @@ final class AppSettings {
         "memory.idle_unload_minutes": "idleUnloadMinutes",
     ]
 
-    /// Minimal parser for the legacy Python `config.toml`. Tracks the
-    /// current `[section]` header and parses `key = value` lines where
-    /// `value` is a quoted string, `true`/`false`, a number, or a 2-number
-    /// array `[a, b]`. Strips `#` comments and surrounding whitespace.
-    /// Anything unparseable (bad syntax, unknown key, invalid hotkey value)
-    /// is silently ignored. Returns only the known python keys, mapped to
-    /// settings keys.
+    /// Minimal legacy config.toml parser; anything unparseable is silently ignored.
     static func importToml(_ text: String) -> [String: Any] {
         var result: [String: Any] = [:]
         var section = ""
@@ -225,11 +189,7 @@ final class AppSettings {
         return result
     }
 
-    /// Coerces a generically-parsed TOML scalar to the type expected by the
-    /// given settings key (e.g. a bare integer literal like `25` becomes a
-    /// `Double` for a Double-typed setting), and rejects values whose shape
-    /// doesn't fit the target setting (e.g. a string for a numeric key, or a
-    /// hotkey value that isn't a known `HotKey` rawValue).
+    /// Coerces a parsed TOML scalar to the setting's type; rejects values of the wrong shape.
     private static func coerce(_ value: Any, forSettingsKey key: String) -> Any? {
         switch key {
         case "hotkey":
@@ -251,9 +211,7 @@ final class AppSettings {
         }
     }
 
-    /// Parses a single TOML scalar/array value: a quoted string,
-    /// `true`/`false`, a number, or a `[a, b]` 2-number array (returned as
-    /// `[Double]`). Returns nil for anything else.
+    /// Parses a quoted string, bool, number, or 2-number array; nil for anything else.
     private static func parseValue(_ raw: String) -> Any? {
         if raw.count >= 2, raw.hasPrefix("\""), raw.hasSuffix("\"") {
             return String(raw.dropFirst().dropLast())
@@ -285,16 +243,8 @@ final class AppSettings {
         return nil
     }
 
-    /// One-time, best-effort import of `~/.config/scribe/config.toml` into
-    /// these settings. Guarded by a `didImportToml` flag so it only ever
-    /// runs once per defaults domain. `tomlText`, when non-nil, is used
-    /// instead of reading the real file (test seam).
-    ///
-    /// The hotkey is deliberately excluded: it stays at the dev default
-    /// (`.rightOption`) regardless of what the legacy config says, because
-    /// the Python app keeps running with its own hotkey (`right_command`)
-    /// during the migration window. Importing it here would silently change
-    /// which key drives the native app mid-cutover.
+    /// One-time best-effort import of config.toml (`tomlText` is a test seam). The hotkey is
+    /// deliberately excluded: importing it would change which key drives the app mid-migration.
     func importFromPythonConfigOnce(tomlText: String? = nil) {
         guard !defaults.bool(forKey: Key.didImportToml) else { return }
         defer { defaults.set(true, forKey: Key.didImportToml) }
@@ -314,8 +264,7 @@ final class AppSettings {
         }
     }
 
-    /// Applies an already-typed value (as produced by `importToml`'s
-    /// `coerce`) to the matching property.
+    /// Applies an already-typed value to the matching property.
     private func apply(key: String, value: Any) {
         switch key {
         case "holdThreshold":

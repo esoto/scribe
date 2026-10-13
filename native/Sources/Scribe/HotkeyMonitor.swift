@@ -1,30 +1,17 @@
 import CoreGraphics
 import Foundation
 
-/// Error thrown when the CGEventTap cannot be installed or enabled.
 struct HotkeyError: Error {
     let message: String
 }
 
-/// Hold-to-talk key listener: wires the pure `KeyStateMachine` to a
-/// session-level, listen-only `CGEventTap`.
-///
-/// Excluded from unit test coverage — a real event tap needs the Input
-/// Monitoring TCC grant and a running `CFRunLoop`, neither available under
-/// `xcodebuild test`. `KeyStateMachine`, the pure logic this drives, is
-/// fully unit-tested in KeyStateMachineTests.swift. Verify manually via the
-/// app (and the onboarding live-activation path exercised through
-/// `reinstall()`).
-///
-/// Ported from `scribe.hotkey.HotkeyListener` (src/scribe/hotkey.py).
+/// Session-level, listen-only `CGEventTap` feeding `KeyStateMachine`. Untested: needs Input Monitoring.
 final class HotkeyMonitor {
     private let machine: KeyStateMachine
     private let onDown: () -> Void
     private let onUp: () -> Void
 
-    /// Diagnostic hook, fired ONLY for flagsChanged (modifier) events — never
-    /// for regular keystrokes, so wiring it to a log file cannot capture
-    /// typed text. Called on the tap's run-loop thread.
+    /// Fires only for modifier events, so logging it can never capture typed text.
     var onModifierEvent: ((String) -> Void)?
 
     private var tap: CFMachPort?
@@ -37,25 +24,11 @@ final class HotkeyMonitor {
     }
 
     deinit {
-        // The C callback holds an unretained pointer to self. Without this
-        // teardown, deallocation while the tap is live leaves a dangling refcon
-        // that crashes on the next keystroke.
+        // The C callback holds an unretained self; skipping teardown crashes on the next keystroke.
         teardown()
     }
 
-    /// Installs the session-level, listen-only event tap over
-    /// flagsChanged/keyDown/keyUp and adds its run-loop source to the
-    /// current run loop's common modes.
-    ///
-    /// Throws `HotkeyError` if tap creation is denied outright, or — the
-    /// hard-won macOS 26 lesson carried over from the Python reference —
-    /// if creation silently succeeds but the tap is left disabled because
-    /// the Input Monitoring grant isn't reaching this process. We check
-    /// `CGEvent.tapIsEnabled` after `tapEnable` rather than trusting a
-    /// non-nil tap; see `scribe.hotkey.HotkeyListener.install`.
-    ///
-    /// Must be called on the thread whose run loop pumps the tap — call
-    /// install() and reinstall() from the same thread (main).
+    /// Throws if tap creation fails or the tap comes back disabled. Call from main, like `reinstall()`.
     func install() throws {
         let mask: CGEventMask =
             (1 << CGEventType.flagsChanged.rawValue)
@@ -83,9 +56,7 @@ final class HotkeyMonitor {
         CFRunLoopAddSource(CFRunLoopGetCurrent(), source, .commonModes)
         CGEvent.tapEnable(tap: newTap, enable: true)
 
-        // On macOS 26, tap creation can SUCCEED without the Input Monitoring
-        // grant and the tap is just silently left disabled — check, don't
-        // trust the non-nil result above.
+        // macOS 26 can create the tap without the grant and leave it disabled; check tapIsEnabled.
         guard CGEvent.tapIsEnabled(tap: newTap) else {
             CFRunLoopRemoveSource(CFRunLoopGetCurrent(), source, .commonModes)
             CFMachPortInvalidate(newTap)
@@ -100,12 +71,7 @@ final class HotkeyMonitor {
         runLoopSource = source
     }
 
-    /// Tears down the current tap (if any) and installs a fresh one.
-    /// Used by the onboarding flow to live-activate the hotkey immediately
-    /// after the user grants Input Monitoring, without an app relaunch.
-    ///
-    /// Must be called on the thread whose run loop pumps the tap — call
-    /// install() and reinstall() from the same thread (main).
+    /// Replaces the tap; onboarding uses this to activate the hotkey right after the grant.
     func reinstall() throws {
         teardown()
         try install()
@@ -123,10 +89,7 @@ final class HotkeyMonitor {
         runLoopSource = nil
     }
 
-    /// C-callback trampoline. `CGEventTapCreate`'s callback is a
-    /// non-capturing C function pointer, so it cannot close over `self`
-    /// directly — `install()` passes `self` as an unretained opaque pointer
-    /// via `userInfo`, and this unwraps it back to a `HotkeyMonitor`.
+    /// C callback trampoline; recovers `self` from the unretained `userInfo` pointer.
     private static func handleEvent(
         proxy: CGEventTapProxy,
         type: CGEventType,
@@ -136,9 +99,7 @@ final class HotkeyMonitor {
         guard let refcon else { return Unmanaged.passUnretained(event) }
         let monitor = Unmanaged<HotkeyMonitor>.fromOpaque(refcon).takeUnretainedValue()
 
-        // The system can disable a tap under load (timeout) or when the
-        // user is interacting with a secure input field; re-enable it
-        // rather than leaving the hotkey dead for the rest of the session.
+        // Re-enable after timeouts or secure input, or the hotkey dies for the session.
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
             if let tap = monitor.tap {
                 CGEvent.tapEnable(tap: tap, enable: true)

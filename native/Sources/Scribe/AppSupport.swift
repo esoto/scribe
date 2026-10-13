@@ -1,17 +1,6 @@
 import Foundation
 
-/// Minimal timestamped append-only file logger for the app-layer events
-/// `AppModel` observes but that have no dedicated hook in `DictationPipeline`
-/// (model load, engine switch, idle unload, install failures, notification
-/// fallback). Internally serialized on a private queue so it's safe to call
-/// from any thread/actor — `AppModel` stores it as `nonisolated let` so its
-/// pipeline-callback closures (which run off `@MainActor`) can log without
-/// hopping back to the main actor first.
-///
-/// Ported from the file-handler half of `scribe.app._setup_logging`
-/// (src/scribe/app.py); this app logs to `~/Library/Logs/scribe/scribe.log`
-/// rather than the Python app's `~/.local/state/scribe/scribe.log` per the
-/// Task 13 wiring contract.
+/// Append-only file logger. Serialized on a private queue, so it is safe to call from any thread.
 final class FileLogger: @unchecked Sendable {
     static let logsDirectory: URL = {
         FileManager.default.homeDirectoryForCurrentUser
@@ -46,11 +35,7 @@ final class FileLogger: @unchecked Sendable {
     }
 }
 
-/// Writes a 16-bit PCM mono WAV file from `Float` samples in `[-1, 1]`.
-///
-/// Ported from `scribe.app.save_failed_audio` (src/scribe/app.py), which
-/// uses Python's `wave` module; this writes the same header by hand since
-/// Foundation has no built-in WAV encoder.
+/// Hand-written WAV header: Foundation has no WAV encoder.
 enum WavWriter {
     static func write(pcm: [Float], sampleRate: UInt32, to url: URL) throws {
         let samples: [Int16] = pcm.map { sample in
@@ -69,8 +54,8 @@ enum WavWriter {
         data.appendLE(UInt32(36) &+ dataSize)
         data.append(contentsOf: Array("WAVE".utf8))
         data.append(contentsOf: Array("fmt ".utf8))
-        data.appendLE(UInt32(16)) // fmt chunk size (PCM)
-        data.appendLE(UInt16(1)) // audio format: PCM
+        data.appendLE(UInt32(16))
+        data.appendLE(UInt16(1))
         data.appendLE(numChannels)
         data.appendLE(sampleRate)
         data.appendLE(byteRate)

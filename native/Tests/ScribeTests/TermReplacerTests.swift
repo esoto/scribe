@@ -35,21 +35,18 @@ final class TermReplacerTests: XCTestCase {
     }
 
     func testMultipleTermsInOneSentence() {
-        // The case that made the prompt-based version delete a word.
         XCTAssertEqual(
             TermReplacer.apply(pairs, to: "deploy with camel to headsner tonight"),
             "deploy with kamal to hetzner tonight")
     }
 
     func testReplacementIsUsedVerbatimIncludingCase() {
-        // The pair's right-hand side is literal output — "kamal" stays
-        // lowercase even at the start of a sentence.
+        // Replacement is literal output, so "kamal" stays lowercase at sentence start.
         XCTAssertEqual(TermReplacer.apply(pairs, to: "Camel deploys nightly"), "kamal deploys nightly")
     }
 
     func testPunctuationAndMarkupSurviveInReplacements() {
-        // Pairs are pasted text, not prompt text, so characters that were
-        // stripped when they went into the system prompt must survive here.
+        // Pairs are pasted text, so markup stripped from prompt glossary must survive.
         let markup = [pair("div tag", "<div>"), pair("quote", "\"")]
         XCTAssertEqual(TermReplacer.apply(markup, to: "add a quote here"), "add a \" here")
     }

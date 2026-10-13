@@ -1,8 +1,6 @@
 import XCTest
 
 final class OnboardingStateTests: XCTestCase {
-    // MARK: - missing(_:)
-
     func testMissingAllFalse() {
         let status = GrantStatus(microphone: false, accessibility: false, inputMonitoring: false)
         let result = OnboardingState.missing(status)
@@ -39,8 +37,6 @@ final class OnboardingStateTests: XCTestCase {
         XCTAssertEqual(result, [])
     }
 
-    // MARK: - nextStep(_:)
-
     func testNextStepAllFalse() {
         let status = GrantStatus(microphone: false, accessibility: false, inputMonitoring: false)
         let result = OnboardingState.nextStep(status)
@@ -65,8 +61,6 @@ final class OnboardingStateTests: XCTestCase {
         XCTAssertEqual(result, .done)
     }
 
-    // MARK: - summary(_:)
-
     func testSummaryZeroGranted() {
         let status = GrantStatus(microphone: false, accessibility: false, inputMonitoring: false)
         let result = OnboardingState.summary(status)
@@ -90,8 +84,6 @@ final class OnboardingStateTests: XCTestCase {
         let result = OnboardingState.summary(status)
         XCTAssertEqual(result, "3 of 3 permissions granted")
     }
-
-    // MARK: - settingsUrl(for:)
 
     func testSettingsUrlMicrophone() {
         let url = OnboardingState.settingsUrl(for: .microphone)

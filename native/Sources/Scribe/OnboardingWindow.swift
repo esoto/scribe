@@ -4,60 +4,42 @@ import AppKit
 import CoreGraphics
 import SwiftUI
 
-/// OS adapter for the three TCC (Transparency, Consent, and Control)
-/// permissions scribe needs. Thin wrappers over macOS system APIs that
-/// require live user-consent dialogs and a real TCC database — excluded
-/// from unit test coverage for that reason. The pure decision logic that
-/// consumes their results (`OnboardingState`) is fully unit-tested in
-/// OnboardingStateTests.swift; verify this adapter manually via the app.
+/// Thin TCC wrappers; excluded from unit tests. Verify manually. The logic consuming them is in `OnboardingState`.
 enum TCC {
-    /// Reads the cached microphone authorization status. Does not prompt.
     static func microphoneGranted() -> Bool {
         AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
     }
 
-    /// Shows the system microphone-access prompt if the user hasn't
-    /// decided yet; returns immediately (no dialog) once already decided.
+    /// Returns without a dialog once the user has already decided.
     static func requestMicrophone() async -> Bool {
         await AVCaptureDevice.requestAccess(for: .audio)
     }
 
-    /// Reads whether this process is trusted for accessibility. Does not prompt.
     static func accessibilityGranted() -> Bool {
         AXIsProcessTrusted()
     }
 
-    /// Shows the system accessibility-trust prompt, which adds scribe
-    /// (unchecked) to System Settings > Privacy & Security > Accessibility.
+    /// Adds scribe to the Accessibility list, unchecked.
     static func requestAccessibility() {
         let opts = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
         AXIsProcessTrustedWithOptions(opts)
     }
 
-    /// Reads whether this process can listen to CGEvents. Does not prompt.
     static func inputMonitoringGranted() -> Bool {
         CGPreflightListenEventAccess()
     }
 
-    /// Shows the system Input Monitoring prompt, which adds scribe
-    /// (unchecked) to System Settings > Privacy & Security > Input Monitoring.
+    /// Adds scribe to the Input Monitoring list, unchecked.
     static func requestInputMonitoring() {
         CGRequestListenEventAccess()
     }
 }
 
-/// Native first-run/"Doctor" permission window — reachable from the menu
-/// bar item at any time, and auto-opened at launch while any permission is
-/// missing (see `ScribeApp`). Three rows (microphone, accessibility, input
-/// monitoring) show live ✓/✗ status polled from `TCC` every 2 s, each with
-/// a "Request" and an "Open Settings" button. Once all three are granted,
-/// the rows give way to a live "try it" test field.
+/// First-run and Doctor permission window. Polls `TCC` every 2 s while open.
 struct OnboardingWindow: View {
     @ObservedObject var model: AppModel
     @State private var testText: String = ""
 
-    /// The row to highlight — the next permission `OnboardingState` would
-    /// have the user address, or nil once everything is granted.
     private var highlighted: Grant? {
         if case .request(let grant) = OnboardingState.nextStep(model.grants) {
             return grant
@@ -111,11 +93,7 @@ struct OnboardingWindow: View {
         .task {
             await pollLoop()
         }
-        // scribe is a menu-bar app (LSUIElement) with no Dock icon or
-        // ⌘Tab entry — correct while idle, but it makes an open setup
-        // window unreachable once it's buried behind other apps. Promote
-        // to a regular app while this window is open so ⌘Tab can reach
-        // it, and drop back to menu-bar-only when it closes.
+        // LSUIElement has no ⌘Tab entry, so promote to a regular app while this window is open.
         .onAppear {
             NSApp.setActivationPolicy(.regular)
             NSApp.activate(ignoringOtherApps: true)
@@ -134,9 +112,6 @@ struct OnboardingWindow: View {
                 .imageScale(.large)
 
             VStack(alignment: .leading, spacing: 2) {
-                // Per the design system's PermissionRow: the permission's
-                // own symbol rides inline with the title, small and
-                // secondary — the leading ✓/✗ circle stays the status.
                 HStack(spacing: 4) {
                     Image(systemName: systemImage)
                         .font(.system(size: 12))
@@ -189,26 +164,16 @@ struct OnboardingWindow: View {
         NSWorkspace.shared.open(OnboardingState.settingsUrl(for: grant))
     }
 
-    /// Polls the TCC probes every 2 s for as long as this window is open.
-    /// SwiftUI cancels a `.task` automatically when its view disappears, so
-    /// this loop stops on its own when the window closes.
+    /// SwiftUI cancels the `.task` when the window closes, which stops this loop.
     private func pollLoop() async {
         while !Task.isCancelled {
             refreshGrants()
-            // Fixed 2 s even once all grants are green: this loop is also
-            // how a revocation (or the TCC-reset dance) is noticed, and
-            // AppModel documents the 2 s contract. The probes are cheap
-            // cached-TCC reads, so backing off buys nothing meaningful.
+            // Stays at 2 s even when all green, so revocations are still noticed.
             try? await Task.sleep(nanoseconds: 2_000_000_000)
         }
     }
 
-    /// Re-reads all three probes and updates `model.grants`. Microphone and
-    /// Input Monitoring are both special-cased: on a false→true flip we
-    /// hand off to `AppModel` so it can react immediately, without
-    /// requiring an app restart — `prewarmRecorderIfGranted()` starts the
-    /// audio engine ahead of the first key-down, and
-    /// `activateHotkeyIfNeeded()` live-activates the hotkey tap.
+    /// Re-reads all probes. A false→true flip on mic or Input Monitoring calls into `AppModel` to react without a restart.
     private func refreshGrants() {
         let fresh = GrantStatus(
             microphone: TCC.microphoneGranted(),
@@ -218,11 +183,7 @@ struct OnboardingWindow: View {
         let microphoneNewlyGranted = fresh.microphone && !model.grants.microphone
         let inputMonitoringNewlyGranted = fresh.inputMonitoring && !model.grants.inputMonitoring
 
-        // Publish at most once, and ONLY on a real change: every published
-        // write rebuilds the menu bar menu, and a rebuild closes any open
-        // submenu — the old per-field unconditional writes fired three
-        // times per 2 s poll tick and made the Microphone submenu
-        // unusable whenever this window was open.
+        // Publish only on change: each write rebuilds the menu bar and closes any open submenu.
         if fresh != model.grants {
             model.grants = fresh
         }

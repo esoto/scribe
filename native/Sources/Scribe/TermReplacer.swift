@@ -1,25 +1,8 @@
 import Foundation
 
-/// Applies the user's manual replacement pairs to a transcript.
-///
-/// These used to be handed to the cleanup model as prompt instructions,
-/// which was the wrong tool for a literal string substitution and cost real
-/// output quality: the `"X" -> "Y"` rendering read as "X to Y", so a
-/// transcript saying "deploy with camel to hetzner" looked like a
-/// replacement rule and the model applied it, deleting a word. Worse, the
-/// prompt only runs when cleanup runs — so a short utterance (under
-/// `PipelineConfig.minWords`), a disabled cleanup toggle, a timeout, or a
-/// tripped output gate all silently skipped the dictionary entirely, which
-/// is exactly when a bare name needs correcting most.
-///
-/// Doing it here instead makes replacements deterministic, unconditional,
-/// and incapable of dropping a word.
+/// Deterministic whole-token find/replace. Kept out of the LLM prompt: the model read `X -> Y` pairs as instructions and dropped words.
 enum TermReplacer {
-    /// Replaces whole words matching a pair's `original` (case-insensitively)
-    /// with its `replacement`, preserving any punctuation attached to the
-    /// token. Matching is per whitespace-delimited token, so a pair never
-    /// rewrites the inside of a longer word: `camel` leaves `camelCase`
-    /// alone. Multi-word originals are not matched.
+    /// Matches per whitespace-delimited token, case-insensitively; multi-word originals never match.
     static func apply(_ pairs: [ReplacementPair], to text: String) -> String {
         guard !pairs.isEmpty, !text.isEmpty else { return text }
 

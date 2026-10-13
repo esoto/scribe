@@ -10,13 +10,10 @@ final class ModelStoreTests: XCTestCase {
         }
     }
 
-    /// FluidAudio infers the model version from the directory name, so the
-    /// leaf must keep the repo folder name.
+    // FluidAudio infers the model version from the directory name; keep the repo folder name.
     func testParakeetDirectoryKeepsRepoFolderName() {
         XCTAssertEqual(ModelStore.parakeetDirectory.lastPathComponent, "parakeet-tdt-0.6b-v3")
     }
-
-    // MARK: - cleanupModelPath setting
 
     private func makeSettings() -> (AppSettings, UserDefaults) {
         let suite = "ModelStoreTests-\(UUID().uuidString)"
@@ -42,15 +39,12 @@ final class ModelStoreTests: XCTestCase {
         XCTAssertNil(settings.cleanupModelPath)
     }
 
-    // MARK: - modelConfiguration(customPath:)
-
     func testDefaultConfigurationKeepsGemmaStopToken() {
         let config = GemmaBackend.modelConfiguration()
         XCTAssertEqual(config.extraEOSTokens, ["<end_of_turn>"])
     }
 
-    /// A custom model must NOT inherit Gemma's turn token — forcing
-    /// `<end_of_turn>` onto another model family corrupts its output.
+    // Custom models must not inherit Gemma's <end_of_turn> stop token; it corrupts their output.
     func testCustomConfigurationCarriesNoGemmaStopToken() {
         let config = GemmaBackend.modelConfiguration(customPath: "/tmp/my-model")
         XCTAssertTrue(config.extraEOSTokens.isEmpty)

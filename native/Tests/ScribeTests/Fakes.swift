@@ -1,12 +1,8 @@
 import Foundation
 
-// Ported 1:1 from tests/fakes.py — used by PipelineTests.swift.
-
 let VOICED = [Float](repeating: 0.1, count: 16000)
 let SILENT = [Float](repeating: 0.0, count: 16000)
 
-/// Generic test error for cases where the Python test used a bare
-/// `RuntimeError(...)` rather than a specific domain error type.
 struct TestError: Error, CustomStringConvertible {
     let message: String
     var description: String { message }
@@ -56,8 +52,7 @@ final class FakeCleaner: CleanupBackend {
     let err: Error?
     let delay: Double
     private(set) var calls = 0
-    /// Text handed to `clean` — lets tests assert the model saw the
-    /// dictionary-corrected transcript, not the raw mishearing.
+    // Inputs seen by clean(), so tests can assert what the model received.
     private(set) var received: [String] = []
 
     init(out: String = "hello there world", err: Error? = nil, delay: Double = 0.0) {
@@ -96,9 +91,7 @@ final class FakeClock {
     func now() -> Double { t }
 }
 
-/// A mutable reference box so test closures (`onState`, `onNotice`,
-/// `saveFailedAudio`) can accumulate values the test function reads back —
-/// mirrors the plain `list.append` callbacks used in the Python test suite.
+/// Accumulates values from test closures (onState, onNotice, saveFailedAudio) for the test to read back.
 final class Box<T> {
     private(set) var value: [T] = []
     func append(_ v: T) { value.append(v) }

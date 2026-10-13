@@ -18,15 +18,7 @@ private struct GoldenSet: Codable {
     let cases: [GoldenCase]
 }
 
-/// The golden set again, but with a POPULATED dictionary in the system
-/// prompt. GoldenEvalTests only ever exercises the empty snapshot, where
-/// the prompt is byte-identical to the validated base one — so it proves
-/// nothing about the injected glossary/replacement wording. This is the
-/// guard that the extra instructions don't degrade cleanup: the terms here
-/// are deliberately irrelevant to the golden inputs, so a failure means the
-/// wording itself is interfering (e.g. pulling the model toward
-/// substitution or breaking the never-translate rule), not that a term was
-/// legitimately applied.
+/// Golden set with a populated dictionary. The terms are irrelevant to the inputs, so a failure means the injected wording interferes.
 final class DictionaryGoldenEvalTests: XCTestCase {
     static let gemma = GemmaBackend()
 

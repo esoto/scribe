@@ -30,19 +30,16 @@ final class BiasVocabularyTests: XCTestCase {
     }
 
     func testEmptyInputsAndPackOffYieldEmpty() {
-        // Underpins the no-regression guarantee: nothing to bias → identity.
         XCTAssertTrue(
             BiasVocabularyBuilder.build(pairs: [], glossary: [], includeCuratedPack: false).isEmpty)
     }
 
     func testCaseInsensitiveDedupUnionsAliases() {
-        // Same canonical from two pairs with different manglings → one term,
-        // both manglings as aliases.
         let out = BiasVocabularyBuilder.build(
             pairs: [pair("camel", "Kamal"), pair("camal", "kamal")],
             glossary: [], includeCuratedPack: false)
         XCTAssertEqual(out.count, 1)
-        XCTAssertEqual(out[0].text, "Kamal")  // first spelling wins
+        XCTAssertEqual(out[0].text, "Kamal")
         XCTAssertEqual(Set(out[0].aliases.map { $0.lowercased() }), ["camel", "camal"])
     }
 
@@ -51,14 +48,11 @@ final class BiasVocabularyTests: XCTestCase {
             pairs: [pair("camel", "kamal")], glossary: [gloss("Kamal")],
             includeCuratedPack: false)
         XCTAssertEqual(out.count, 1)
-        XCTAssertEqual(out[0].text, "kamal")           // pair seen first
-        XCTAssertEqual(out[0].aliases, ["camel"])      // keeps the pair's alias
+        XCTAssertEqual(out[0].text, "kamal")
+        XCTAssertEqual(out[0].aliases, ["camel"])
     }
 
     func testSubMinLengthAndEmptyCanonicalsDropped() {
-        // A short replacement ("PR", 2 chars) and a glossary term that
-        // sanitizes empty are both dropped; a valid canonical with an
-        // unusable original survives with no alias.
         let out = BiasVocabularyBuilder.build(
             pairs: [pair("heard", "PR"), pair("<>", "kamal")],
             glossary: [gloss("ok"), gloss("\"\"")],
@@ -82,7 +76,6 @@ final class EngineeringVocabularyTests: XCTestCase {
         XCTAssertEqual(lowered.count, Set(lowered).count, "duplicate curated terms")
         for term in terms {
             XCTAssertGreaterThanOrEqual(term.count, 3, "\(term) is below the spotter's min length")
-            // Every entry survives prompt sanitization unchanged (no control chars / markup).
             XCTAssertEqual(CleanupPrompt.sanitizeTerm(term), term, "\(term) is not sanitize-stable")
         }
     }

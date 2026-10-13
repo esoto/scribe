@@ -2,13 +2,7 @@ import AppKit
 import SwiftUI
 import UserNotifications
 
-/// Composition root: builds every collaborator wired in Tasks 2-12 and owns
-/// the app's mutable runtime state.
-///
-/// Ported from the composition-root half of `scribe.app.main`
-/// (src/scribe/app.py) — model preload, idle-unload loop, engine switching,
-/// failed-audio capture, and notification delivery all live here, adapted to
-/// SwiftUI/MenuBarExtra + Swift concurrency instead of rumps + threads.
+/// Composition root: builds every collaborator and owns the app's mutable runtime state.
 @MainActor
 final class AppModel: ObservableObject {
     let settings: AppSettings
@@ -23,35 +17,23 @@ final class AppModel: ObservableObject {
 
     private(set) var pipeline: DictationPipeline!
     private var hotkeyMonitor: HotkeyMonitor!
-    // Held concretely (not just as the pipeline's private RecorderLike) so
-    // start() and prewarmRecorderIfGranted() can prewarm its audio engine
-    // ahead of the first key-down — see Recorder.prewarm().
+    // Concrete so start() can prewarm its audio engine ahead of the first key-down.
     private var recorder: Recorder!
     private var engineSwitchTask: Task<Void, Never>?
-    // Target of the in-flight (not yet committed) engine switch, nil when
-    // none — see EngineSwitch for the selection rules it feeds.
+    // Target of the in-flight engine switch; nil when none.
     private var pendingEngineName: String?
 
     @Published private(set) var state: PipelineState = .idle
-    // Seeded from TCC probes in start(); the onboarding window's 2 s poll
-    // loop (OnboardingWindow.swift) keeps this current thereafter, and
-    // live-activates the hotkey via activateHotkeyIfNeeded() on an
-    // inputMonitoring false→true flip.
+    // Seeded from TCC probes in start(); the onboarding poll loop keeps it current.
     @Published var grants: GrantStatus = GrantStatus(microphone: false, accessibility: false, inputMonitoring: false)
     @Published private(set) var activeEngineName: String
     @Published private(set) var cleanupEnabled: Bool
     @Published private(set) var microphoneUID: String?
-    // Stable snapshot for the menu's Microphone picker. Enumerating inside
-    // the menu body re-ran CoreAudio queries (Bluetooth ones are slow) on
-    // every hover re-render, which flickered the submenu and broke click
-    // registration — so the list is published here and refreshed only on
-    // real device changes.
+    // Stable snapshot: enumerating in the menu body re-ran slow CoreAudio queries on every hover
+    // and broke click registration on the submenu.
     @Published private(set) var microphones: [AudioInputDevice] = []
     @Published private(set) var launchAtLoginEnabled: Bool = LoginItem.isEnabled
-    // Dictionary state mirrored for the menu + editor window. Refreshed by
-    // the store's onChange (snapshot moved) and by refreshDictionaryState()
-    // when the editor opens (counts/lastSeen can drift without a snapshot
-    // change).
+    // Mirrors dictionary state for the menu and editor; counts/lastSeen can drift without a snapshot change.
     @Published private(set) var dictionarySnapshot: DictionarySnapshot = .empty
     @Published private(set) var dictionaryLearningEnabled: Bool
     @Published private(set) var vocabularyBiasingEnabled: Bool
@@ -99,12 +81,9 @@ final class AppModel: ObservableObject {
         self.glossaryEntries = dictionary.allGlossaryEntries
         self.replacementPairs = dictionary.allPairs
         self.unmatchedHeardWords = dictionary.unmatchedHeardWords
-        // Before any preload can run, so the first warm-up prefills the
-        // dictionary-augmented prompt rather than a stale base one.
+        // Before any preload, so the first warm-up uses the dictionary-augmented prompt.
         self.cleaner.setDictionary(dictionary.snapshot)
-        // Seed Parakeet's acoustic bias vocabulary from the same dictionary
-        // (plus the curated pack). Uses the FULL views, not the capped
-        // snapshot, so biasing isn't limited to the 30 prompt terms.
+        // Bias vocab uses the full views, not the 30-term capped snapshot.
         (engines["parakeet"] as? ParakeetEngine)?.setBiasVocabulary(
             AppModel.biasVocabulary(from: dictionary, settings: settings))
 
@@ -122,10 +101,7 @@ final class AppModel: ObservableObject {
             sampleRate: 16000.0
         )
 
-        // Phase-1 initialization (all stored properties above) is complete —
-        // `self` may now be captured, so the pipeline's callbacks (which
-        // arrive off the main actor, from DictationPipeline's serial worker)
-        // can hop back to it.
+        // All stored properties are initialized, so self can be captured by callbacks arriving off the main actor.
         let engine = self.engines[startingEngine]!
         let recorder = Recorder(sampleRate: pipelineConfig.sampleRate)
         recorder.setPreferredInput(uid: settings.microphoneUID)
@@ -155,15 +131,13 @@ final class AppModel: ObservableObject {
             },
             cleanupEnabled: settings.cleanupEnabled,
             onLog: { [logger] line in logger.log(line) },
-            // The store is thread-safe and observe() is fire-and-forget, so
-            // no main-actor hop — capture the collaborator like onLog does.
+            // Store is thread-safe and observe() is fire-and-forget: no main-actor hop.
             onCleaned: { [dictionary] text in dictionary.observe(cleanedText: text) },
             replacementPairs: { [dictionary] in dictionary.snapshot.pairs }
         )
 
         dictionary.onChange = { [weak self] snapshot in
-            // Fires on the store's queue; hop to the main actor for the
-            // @Published mirrors and the rewarm decision.
+            // Fires on the store's queue; hop to the main actor.
             Task { @MainActor in
                 self?.applyDictionaryChange(snapshot)
             }
@@ -180,20 +154,12 @@ final class AppModel: ObservableObject {
 
     // MARK: - Startup
 
-    /// Installs the hotkey tap, requests notification authorization, and
-    /// kicks off the background preload + idle-unload loops. Called once
-    /// from `init()`, on the main thread (required for the CGEventTap).
+    /// Installs the hotkey tap and starts the preload + idle-unload loops. Must run on main (CGEventTap).
     private func start() {
-        // Microphone/accessibility probes are synchronous reads of the
-        // cached TCC status (no prompt) — seed them up front so the
-        // launch-time auto-open decision (OnboardingState.missing) is
-        // correct even before the onboarding window's poll loop starts.
+        // Cached TCC reads (no prompt), seeded early so the launch auto-open decision is correct.
         grants.microphone = TCC.microphoneGranted()
         grants.accessibility = TCC.accessibilityGranted()
-        // Never triggers the TCC prompt itself — only fires when the probe
-        // above already reports granted (e.g. a prior run completed
-        // onboarding). The prompt only ever comes from the onboarding
-        // window's own Request button (TCC.requestMicrophone()).
+        // Only prewarms if already granted; the prompt comes only from the onboarding Request button.
         prewarmRecorderIfGranted()
 
         hotkeyMonitor.onModifierEvent = { [logger] line in logger.log("tap: \(line)") }
@@ -217,11 +183,8 @@ final class AppModel: ObservableObject {
         microphones = AudioDevices.inputDevices()
         AudioDevices.onDevicesChanged { [weak self] in
             guard let self else { return }
-            // Republish only on a REAL change: the listener also fires for
-            // CoreAudio's transient private aggregates (created/destroyed
-            // whenever apps touch the default device — including our own
-            // engine), and a no-op republish rebuilds the open menu, which
-            // closes the Microphone submenu under the cursor.
+            // Republish only on a real change: CoreAudio's transient aggregates also fire the listener,
+            // and a no-op republish closes the open Microphone submenu.
             let fresh = AudioDevices.inputDevices()
             if fresh != self.microphones {
                 self.microphones = fresh
@@ -229,10 +192,7 @@ final class AppModel: ObservableObject {
         }
 
         preloadAtStartup()
-        // Seed the idle tracker: the startup preload above loads ~3 GB of
-        // models, so "launched but never dictated" must count as activity
-        // that can go idle — without this seed, due() never fires (it
-        // requires a touch) and an unused launch pins the memory forever.
+        // Seed the idle tracker: due() requires a touch, so without this an unused launch pins ~3 GB forever.
         idleTracker.touch(now: ProcessInfo.processInfo.systemUptime)
         startIdleUnloadLoop()
     }
@@ -245,10 +205,7 @@ final class AppModel: ObservableObject {
         Task {
             let t0 = Date()
             await engine?.preload()
-            // Mirrors the Python reference (src/scribe/app.py's load_models),
-            // which only constructs/preloads the cleaner when cleanup is
-            // enabled — the Swift cleaner is a non-optional stored property,
-            // so gate the preload on the live cleanup-enabled state instead.
+            // The Swift cleaner is non-optional, so gate the preload on live cleanup-enabled state.
             if cleanupEnabled {
                 await cleaner.preload()
             }
@@ -325,25 +282,19 @@ final class AppModel: ObservableObject {
 
     // MARK: - Hotkey wiring
 
-    /// Touches the idle tracker, pre-warms the active engine + cleaner if an
-    /// idle unload dropped them, and forwards to the pipeline. Runs on the
-    /// main thread — `HotkeyMonitor` invokes `onDown`/`onUp` synchronously
-    /// from the CGEventTap callback on the run loop `install()` was called
-    /// from (main, per Task 13's wiring contract).
+    /// Touches the idle tracker, pre-warms engine + cleaner if unloaded, and forwards to the pipeline.
+    /// Runs on main (CGEventTap callback).
     private func handleKeyDown() {
         idleTracker.touch(now: ProcessInfo.processInfo.systemUptime)
 
         if let engine = engines[activeEngineName] {
             let cleaner = self.cleaner
             let cleanupEnabled = self.cleanupEnabled
-            // Fire-and-forget: LazyModel coalesces concurrent loads, and a
-            // load in flight can't be cancelled anyway (SttEngines.swift).
+            // LazyModel coalesces concurrent loads; an in-flight load can't be cancelled.
             Task {
                 if await !engine.isLoaded {
                     await engine.preload()
                 }
-                // Gated on cleanup-enabled, same as preloadAtStartup() —
-                // see the comment there for the Python-reference rationale.
                 if cleanupEnabled, await !cleaner.isLoaded {
                     await cleaner.preload()
                 }
@@ -361,9 +312,7 @@ final class AppModel: ObservableObject {
         case .ignore:
             return
         case .revert:
-            // Re-selected the committed engine while a switch was still
-            // preloading: abandon it. The cancelled task unloads the
-            // superseded engine itself once its preload finishes.
+            // Re-selected the committed engine mid-preload: abandon the switch; the cancelled task unloads the superseded engine.
             engineSwitchTask?.cancel()
             engineSwitchTask = nil
             pendingEngineName = nil
@@ -376,8 +325,7 @@ final class AppModel: ObservableObject {
                 await newEngine.preload()
                 guard let self else { return }
                 if Task.isCancelled {
-                    // Superseded mid-preload: drop the speculative load
-                    // unless a newer selection landed back on this engine.
+                    // Superseded mid-preload: drop the load unless a newer selection landed back on this engine.
                     if EngineSwitch.shouldUnloadSuperseded(
                         name, active: self.activeEngineName, pending: self.pendingEngineName)
                     {
@@ -395,10 +343,7 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// Switches the capture device (nil = system default) and re-prepares
-    /// the engine so the next dictation starts on it. Selecting the
-    /// built-in mic avoids the per-dictation Bluetooth HFP renegotiation
-    /// delay when headphones are connected.
+    /// Switches the capture device (nil = system default). The built-in mic avoids Bluetooth HFP renegotiation delay.
     func setMicrophone(uid: String?) {
         guard uid != microphoneUID else { return }
         microphoneUID = uid
@@ -416,28 +361,19 @@ final class AppModel: ObservableObject {
 
     // MARK: - User dictionary
 
-    /// Applies a changed snapshot: mirrors state for the UI, hands the new
-    /// prompt to the cleaner, and eagerly rebuilds the warm prefix — but
-    /// only when the model is already resident. If it's idle-unloaded, the
-    /// next key-down preload rebuilds with the fresh prompt anyway, and a
-    /// bare preload() here would force-load ~2.5 GB just to warm a prompt.
+    /// Applies a changed snapshot. Rebuilds the warm prefix only if the model is resident;
+    /// a bare preload() would force-load ~2.5 GB.
     private func applyDictionaryChange(_ snapshot: DictionarySnapshot) {
-        // Always refresh what the editor window lists — the store also
-        // notifies for changes below the prompt's 30-term cap, which move
-        // these lists without moving the snapshot.
+        // Store also notifies for sub-cap changes that move these lists without moving the snapshot.
         glossaryEntries = dictionary.allGlossaryEntries
         replacementPairs = dictionary.allPairs
         unmatchedHeardWords = dictionary.unmatchedHeardWords
 
-        // Refresh Parakeet's bias vocab on ANY change — it reads the full
-        // views, so sub-cap additions matter, and the setter is cheap and
-        // load-free (unlike the Gemma warm-prefix rebuild below).
+        // Refresh bias vocab on any change: it reads the full views and the setter is cheap and load-free.
         (engines["parakeet"] as? ParakeetEngine)?.setBiasVocabulary(
             AppModel.biasVocabulary(from: dictionary, settings: settings))
 
-        // Cache work only when the prompt itself actually changes.
-        // Rebuilding the warm prefix costs ~1 s, so a list-only change must
-        // not trigger it.
+        // Warm-prefix rebuild is costly; only do it when the prompt itself changes.
         guard snapshot != dictionarySnapshot else { return }
         dictionarySnapshot = snapshot
         cleaner.setDictionary(snapshot)
@@ -451,17 +387,14 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// Re-reads store state whose drift doesn't fire onChange (counts,
-    /// lastSeen). Called when the dictionary editor window appears.
+    /// Re-reads state whose drift doesn't fire onChange (counts, lastSeen).
     func refreshDictionaryState() {
         glossaryEntries = dictionary.allGlossaryEntries
         replacementPairs = dictionary.allPairs
         unmatchedHeardWords = dictionary.unmatchedHeardWords
     }
 
-    /// The Parakeet bias vocabulary derived from the dictionary's full views
-    /// plus the curated pack (when enabled). Static + pure so it's testable
-    /// without an AppModel.
+    /// Parakeet bias vocabulary from the full dictionary views plus the curated pack (when enabled).
     static func biasVocabulary(from dictionary: UserDictionaryStore, settings: AppSettings)
         -> [BiasTerm]
     {
@@ -472,8 +405,7 @@ final class AppModel: ObservableObject {
             includeCuratedPack: true)
     }
 
-    /// Binds a mangling scribe heard to a correction the user already has,
-    /// as an ordinary exact-match pair.
+    /// Binds a heard mangling to an existing correction as an exact-match pair.
     func bindHeardWord(_ heard: String, toReplacement replacement: String) {
         dictionary.addPair(original: heard, replacement: replacement)
     }
@@ -488,8 +420,7 @@ final class AppModel: ObservableObject {
         settings.dictionaryLearningEnabled = on
     }
 
-    /// Toggles Parakeet vocabulary biasing at runtime and re-pushes the bias
-    /// vocabulary immediately (empty when off, so the CTC pass is skipped).
+    /// Toggles Parakeet vocabulary biasing and re-pushes the vocabulary (empty when off, so the CTC pass is skipped).
     func setVocabularyBiasing(_ on: Bool) {
         vocabularyBiasingEnabled = on
         settings.vocabularyBiasingEnabled = on
@@ -532,12 +463,7 @@ final class AppModel: ObservableObject {
 
     // MARK: - Onboarding
 
-    /// Live-activates the hotkey tap right after the user grants Input
-    /// Monitoring from the onboarding window — no app restart required.
-    /// Called from `OnboardingWindow`'s poll loop on an inputMonitoring
-    /// false→true flip. Must run on the main thread, same contract as
-    /// `HotkeyMonitor.install`/`reinstall`; `AppModel` being `@MainActor`
-    /// guarantees that for every call site.
+    /// Live-activates the hotkey tap after Input Monitoring is granted. Must run on main.
     func activateHotkeyIfNeeded() {
         do {
             try hotkeyMonitor.reinstall()
@@ -548,17 +474,8 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// Best-effort preallocates the recorder's audio engine resources
-    /// (without starting capture — the OS mic indicator stays off) — see
-    /// `Recorder.prewarm()`. Called from `start()` at launch when the
-    /// microphone TCC probe already reports granted, and from
-    /// `OnboardingWindow`'s poll loop right after it observes a
-    /// microphone false→true flip, so a dictation immediately following
-    /// either onboarding step doesn't pay the engine's full cold-start
-    /// latency on its first syllable. Guards on the current grant so it can
-    /// never itself trigger the OS microphone prompt — that only ever comes
-    /// from the onboarding window's Request button. Failure is logged, never
-    /// fatal: the engine still starts lazily on the next real `arm()`.
+    /// Best-effort prewarm of the recorder's audio engine without starting capture. Guarded on the
+    /// current grant so it never triggers the mic prompt; failure is non-fatal.
     func prewarmRecorderIfGranted() {
         guard grants.microphone else { return }
         do {
@@ -570,8 +487,7 @@ final class AppModel: ObservableObject {
     }
 }
 
-/// Scene id for the onboarding/Doctor window, shared between the
-/// launch-time auto-open hook and the menu's "Setup / Doctor…" item.
+/// Scene id for the onboarding/Doctor window.
 let onboardingWindowID = "onboarding"
 
 @main
@@ -582,12 +498,7 @@ struct ScribeApp: App {
         MenuBarExtra {
             MenuBarView(model: model)
         } label: {
-            // `MenuBarExtra`'s content closure (the menu itself) only
-            // builds lazily when the user opens it, so it can't host a
-            // launch-time hook. The label, in contrast, is resolved
-            // immediately — it's what's drawn in the menu bar — so its
-            // `onAppear` is where we auto-open onboarding when a
-            // permission is missing at launch.
+            // The content closure builds lazily, so the label's onAppear hosts the launch-time auto-open.
             MenuBarLabel(model: model)
         }
         .menuBarExtraStyle(.menu)
@@ -602,8 +513,7 @@ struct ScribeApp: App {
     }
 }
 
-/// Menu bar glyph label. Doubles as the launch-time auto-open trigger for
-/// the onboarding window (see the comment on `ScribeApp.body`).
+/// Menu bar glyph label; also the launch-time auto-open trigger for onboarding.
 private struct MenuBarLabel: View {
     @ObservedObject var model: AppModel
     @Environment(\.openWindow) private var openWindow
@@ -620,9 +530,8 @@ private struct MenuBarLabel: View {
     }
 }
 
-/// Brings scribe to the foreground and opens the onboarding window.
-/// `MenuBarExtra` apps are `LSUIElement` (no Dock icon, no automatic
-/// activation), so opened windows can otherwise appear behind other apps.
+/// Brings scribe to the foreground and opens onboarding. LSUIElement apps don't auto-activate,
+/// so windows can appear behind others.
 func openOnboarding(_ openWindow: OpenWindowAction) {
     NSApp.activate(ignoringOtherApps: true)
     openWindow(id: onboardingWindowID)

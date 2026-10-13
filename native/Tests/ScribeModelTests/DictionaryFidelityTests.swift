@@ -1,16 +1,6 @@
 import XCTest
 
-/// The test that should have existed before any dictionary wording shipped.
-///
-/// `DictionaryGoldenEvalTests` runs the golden set with a populated
-/// dictionary whose terms are deliberately IRRELEVANT to the inputs — it
-/// proves unrelated vocabulary doesn't disturb unrelated cleanup, and
-/// nothing more. It cannot catch the failure that matters: a sentence that
-/// actually CONTAINS dictionary terms coming back with one of them deleted.
-///
-/// That failure is the worst one this app has — scribe's contract is that
-/// you never lose words — so every case here asserts on content
-/// preservation first and correction second.
+/// Checks that cleanup never drops a word that appears in the input and dictionary.
 final class DictionaryFidelityTests: XCTestCase {
     static let gemma = GemmaBackend()
 
@@ -22,36 +12,26 @@ final class DictionaryFidelityTests: XCTestCase {
         let condition: String
         let snapshot: DictionarySnapshot
         let input: String
-        /// Substrings the output MUST retain, case-insensitively.
         let mustContain: [String]
     }
 
     private static let pairs = [pair("camel", "kamal"), pair("headsner", "hetzner")]
-    /// Auto-learned vocabulary. Deliberately does NOT contain a pair's
-    /// replacement: seeding those in here was tried and reverted because
-    /// naming a term in both lists made the model drop it (see
-    /// `UserDictionary.computeSnapshotLocked`).
+    // Must not include a pair's replacement; naming a term in both lists made the model drop it.
     private static let learned = ["Postgres", "hetzner"]
 
     private static let cases: [Case] = [
-        // Manual pairs: the mishearing is corrected, the rest survives.
         Case(
             condition: "pairs", snapshot: DictionarySnapshot(pairs: pairs, glossary: []),
             input: "so um deploy with camel to production tonight",
             mustContain: ["kamal", "production", "tonight"]),
-        // The critical one: the speaker got BOTH words right. Cleanup must
-        // not drop either just because they appear in the dictionary.
         Case(
             condition: "pairs", snapshot: DictionarySnapshot(pairs: pairs, glossary: []),
             input: "so um deploy with kamal to hetzner tonight",
             mustContain: ["kamal", "hetzner", "tonight"]),
-        // Same input as the "both" case below, minus the vocabulary list —
-        // isolates which section is responsible when it fails.
         Case(
             condition: "pairs", snapshot: DictionarySnapshot(pairs: pairs, glossary: []),
             input: "so um deploy with camel to hetzner tonight",
             mustContain: ["kamal", "hetzner", "tonight"]),
-        // Learned vocabulary only (what auto-learning produces).
         Case(
             condition: "learned", snapshot: DictionarySnapshot(pairs: [], glossary: learned),
             input: "so um deploy with kamal to hetzner tonight",
@@ -60,8 +40,6 @@ final class DictionaryFidelityTests: XCTestCase {
             condition: "learned", snapshot: DictionarySnapshot(pairs: [], glossary: learned),
             input: "um the kamal deploy finished at noon",
             mustContain: ["kamal", "deploy", "noon"]),
-        // Both coexist in real use: learned terms plus manual pairs, with
-        // one of each in the same sentence.
         Case(
             condition: "both", snapshot: DictionarySnapshot(pairs: pairs, glossary: learned),
             input: "so um deploy with kamal to hetzner tonight",
@@ -74,21 +52,17 @@ final class DictionaryFidelityTests: XCTestCase {
             condition: "both", snapshot: DictionarySnapshot(pairs: pairs, glossary: learned),
             input: "so um restore the camel backup from postgres tonight",
             mustContain: ["kamal", "postgres", "backup"]),
-        // A dictionary must never disturb a sentence that has nothing to
-        // do with it.
         Case(
             condition: "both", snapshot: DictionarySnapshot(pairs: pairs, glossary: learned),
             input: "so um send the report on monday no wait tuesday morning",
             mustContain: ["report", "tuesday", "morning"]),
     ]
 
-    /// Runs the cases for one condition and returns the ones that lost words.
     private func run(condition: String) async throws -> [String] {
         var failures: [String] = []
         for testCase in Self.cases where testCase.condition == condition {
             Self.gemma.setDictionary(testCase.snapshot)
-            // Mirrors DictationPipeline.process exactly: pairs are applied
-            // around the model, not by it.
+            // Mirrors DictationPipeline.process: pairs are applied around the model.
             let pairs = testCase.snapshot.pairs
             let transcript = TermReplacer.apply(pairs, to: testCase.input)
             let out = TermReplacer.apply(pairs, to: try await Self.gemma.clean(transcript))
@@ -104,24 +78,14 @@ final class DictionaryFidelityTests: XCTestCase {
         return failures
     }
 
-    /// Manual replacement pairs must never cost a word. This is the shipping
-    /// configuration (`dictionaryLearningEnabled` defaults to false), so a
-    /// failure here is a release blocker.
+    /// Release blocker: the shipping config (learning off) must never drop a word.
     func testReplacementPairsNeverDropWords() async throws {
         let failures = try await run(condition: "pairs")
         XCTAssertTrue(failures.isEmpty, "pairs dropped content:\n" + failures.joined(separator: "\n"))
     }
 
-    /// Pins a KNOWN DEFECT, deliberately, so it can't be forgotten: adding the
-    /// learned-vocabulary section to the prompt makes Gemma drop words from
-    /// the sentence — including words the list never mentions. Isolated with
-    /// a vocabulary of just "Postgres" against a sentence containing neither
-    /// that word nor anything like it; the same sentence is clean under
-    /// `pairs` alone.
-    ///
-    /// This is why auto-learning ships OFF by default. If this test starts
-    /// FAILING, the wording experiment succeeded — re-evaluate the default in
-    /// `AppSettings.dictionaryLearningEnabled` and delete this test.
+    /// Pins a known defect: the learned-vocabulary prompt section makes Gemma drop words.
+    /// If this starts failing, the defect is fixed; re-check `dictionaryLearningEnabled` and delete this test.
     func testLearnedVocabularyStillDropsWords_knownDefect() async throws {
         let failures = try await run(condition: "learned") + (try await run(condition: "both"))
         XCTAssertFalse(

@@ -1,9 +1,6 @@
 import Foundation
 
-/// Hold-to-talk key detection.
-///
-/// KeyStateMachine is pure (unit-tested); a future CGEventTap-backed listener
-/// wires it up and needs the Input Monitoring TCC grant.
+/// Hold-to-talk keys. The CGEventTap listener needs the Input Monitoring TCC grant.
 enum HotKey: String, CaseIterable {
     case rightCommand = "right_command"
     case rightOption = "right_option"
@@ -17,8 +14,6 @@ enum HotKey: String, CaseIterable {
         }
     }
 
-    /// Modifier flag mask for keys detected via flagsChanged; nil for keys
-    /// detected via keyDown/keyUp (e.g. f13).
     var modifierMask: UInt64? {
         switch self {
         case .rightCommand: return 0x100000
@@ -27,7 +22,6 @@ enum HotKey: String, CaseIterable {
         }
     }
 
-    /// Human-readable label for the onboarding "try it" prompt.
     var displayName: String {
         switch self {
         case .rightCommand: return "Right \u{2318}"

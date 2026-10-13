@@ -1,11 +1,6 @@
 import XCTest
 
-/// Ported 1:1 from tests/test_pipeline.py (17 cases) plus one Swift-specific
-/// addition for `RecorderLike.arm() throws`, a contract Python's recorder
-/// never had (see PipelineTests.testRecorderArmFailureSkipsRecording).
 final class PipelineTests: XCTestCase {
-    // MARK: - Harness (mirrors tests/test_pipeline.py::make/dictate)
-
     private struct Harness {
         let pipeline: DictationPipeline
         let clock: FakeClock
@@ -15,13 +10,7 @@ final class PipelineTests: XCTestCase {
         let cleanedTexts: Box<String>
     }
 
-    /// A runner that blocks the calling (test) thread until the async work
-    /// completes — the deterministic equivalent of Python's `runner=lambda f: f()`.
-    /// Swift's `_process` must be `async` (it awaits stt.transcribe/cleaner.clean
-    /// and races a real Task.sleep for the cleanup timeout), so a plain
-    /// synchronous call isn't possible; a semaphore bridges a `Task` back onto
-    /// the calling thread without any `sleep`-based polling. Safe here because
-    /// none of the pipeline's internals require the main actor.
+    /// Blocks the calling thread until the async work completes; a semaphore bridges the Task, no sleep polling.
     private func makeSyncRunner() -> (@escaping () async -> Void) -> Void {
         return { work in
             let sema = DispatchSemaphore(value: 0)
@@ -72,8 +61,6 @@ final class PipelineTests: XCTestCase {
         h.clock.t += hold
         h.pipeline.keyUp()
     }
-
-    // MARK: - Tests
 
     func testHappyPathCleansAndPastes() {
         let paster = FakePaster()
@@ -268,8 +255,6 @@ final class PipelineTests: XCTestCase {
         XCTAssertEqual(paster.pasted, ["hello there world"])
     }
 
-    // MARK: - Replacement pairs (applied outside the cleanup model)
-
     private var camelPair: [ReplacementPair] {
         [ReplacementPair(original: "camel", replacement: "kamal", addedAt: Date(timeIntervalSince1970: 0))]
     }
@@ -323,10 +308,7 @@ final class PipelineTests: XCTestCase {
         XCTAssertEqual(cleaner.received, ["so um deploy with kamal today"])
     }
 
-    /// Swift-specific: `RecorderLike.arm() throws` has no equivalent in the
-    /// Python contract (FakeRecorder.arm() never raises there). Locks in the
-    /// behavior chosen for this native-only failure mode: notify, stay idle,
-    /// never reach the STT engine.
+    /// Locks in: arm() failure notifies, stays idle, never reaches the STT engine.
     func testRecorderArmFailureSkipsRecording() {
         let stt = FakeStt()
         let recorder = FakeRecorder(armError: TestError(message: "mic grant missing"))

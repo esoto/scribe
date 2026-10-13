@@ -22,11 +22,8 @@ final class MicSelectionTests: XCTestCase {
         XCTAssertNil(settings.microphoneUID)
     }
 
-    // MARK: - CoreAudio adapter smoke tests (real hardware, soft asserts)
-
     func testInputDeviceEnumerationIsSane() {
         let devices = AudioDevices.inputDevices()
-        // Whatever the machine has: UIDs must be unique and names non-empty.
         XCTAssertEqual(Set(devices.map(\.id)).count, devices.count)
         XCTAssertTrue(devices.allSatisfy { !$0.name.isEmpty })
     }

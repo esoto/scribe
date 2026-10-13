@@ -1,8 +1,6 @@
 import XCTest
 
 final class PasteCoreTests: XCTestCase {
-    // MARK: - Test Doubles
-
     class FakePasteboard: PasteboardLike {
         private var value: String?
         private var count: Int = 1
@@ -38,8 +36,6 @@ final class PasteCoreTests: XCTestCase {
             }
         }
     }
-
-    // MARK: - Tests
 
     func test_paste_sets_posts_and_restores() throws {
         let pb = FakePasteboard()

@@ -1,11 +1,6 @@
 import XCTest
 
-
-/// Pins the key-down preload contract: `preload()` must leave the backend
-/// fully warm (weights loaded AND prefix cache built), because AppModel
-/// fires it on key-down specifically so the first post-idle dictation's
-/// cleanup pays only the generation — not load + warm-up + first-use
-/// kernel compilation.
+/// `preload()` must leave the backend fully warm (weights and prefix cache), since AppModel fires it on key-down.
 final class GemmaPreloadTests: XCTestCase {
     func testPreloadWarmsUpAndUnloadResets() async throws {
         let backend = GemmaBackend()
