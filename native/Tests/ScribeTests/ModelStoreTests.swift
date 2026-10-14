@@ -92,4 +92,9 @@ final class ModelStoreTests: XCTestCase {
         backend.setDictionary(.empty)
         XCTAssertTrue(backend.holdsMemory)
     }
+
+    func testParakeetV3DirectoryIsTheLegacyLeaf() {
+        let base = URL(fileURLWithPath: "/tmp/scribe-base")
+        XCTAssertEqual(ModelStore.parakeetV3Directory(in: base).path, "/tmp/scribe-base/parakeet/parakeet-tdt-0.6b-v3")
+    }
 }

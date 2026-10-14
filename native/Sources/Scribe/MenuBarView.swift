@@ -21,6 +21,17 @@ func menuBarGlyph(_ state: PipelineState, progress: Double?) -> String {
     return "\(Int((progress * 100).rounded(.down)))%"
 }
 
+/// Menu status line. An STT model download wins while idle or transcribing: a dictation made during the
+/// upgrade download waits on it, and "Transcribing…" alone would look like a hang.
+func menuStatusText(_ state: PipelineState, sttDownload: String?, cleanupStatus: String?) -> String? {
+    switch state {
+    case .idle: return sttDownload ?? cleanupStatus
+    case .recording: return "Recording…"
+    case .processing: return sttDownload ?? "Transcribing…"
+    case .error: return "Error — check log"
+    }
+}
+
 func truncateLabel(_ text: String, n: Int = 40) -> String {
     guard text.count > n else { return text }
     let cutIndex = text.index(text.startIndex, offsetBy: n - 1)
@@ -45,12 +56,7 @@ struct MenuBarView: View {
     @Environment(\.openWindow) private var openWindow
 
     private var statusText: String? {
-        switch model.state {
-        case .idle: return model.cleanupModelStatus
-        case .recording: return "Recording…"
-        case .processing: return "Transcribing…"
-        case .error: return "Error — check log"
-        }
+        menuStatusText(model.state, sttDownload: model.sttDownloadStatus, cleanupStatus: model.cleanupModelStatus)
     }
 
     var body: some View {

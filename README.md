@@ -3,7 +3,7 @@
 Personal hold-to-talk dictation for macOS — fully local, English + Spanish.
 
 Hold the hotkey (**Right ⌥** by default), speak, release:
-[Parakeet TDT v3](https://huggingface.co/mlx-community/parakeet-tdt-0.6b-v3)
+[Parakeet Ultra](https://huggingface.co/FluidInference/parakeet-ultra-coreml)
 transcribes (~0.2 s), [Gemma 3 4B](https://huggingface.co/mlx-community/gemma-3-4b-it-qat-4bit)
 strips fillers and resolves self-corrections — or pick Gemma 4 E4B, Gemma 4
 E2B or Apple Intelligence from the menu (see *Cleanup models*) — and the result
@@ -49,11 +49,13 @@ everything re-downloads on next use.
 | Gemma 4 E4B (cleanup) | ~4.9 GB | `gemma/` |
 | Gemma 4 E2B (cleanup) | ~3.6 GB | `gemma/` |
 | Apple Intelligence (cleanup) | none — built into macOS 26+ | — |
-| Parakeet v3 (STT) | ~0.5 GB | `parakeet/` |
+| Parakeet Ultra (STT) | ~0.6 GB | `parakeet/` |
 | Whisper (optional STT) | ~1.5 GB | `whisper/` |
 
 Downloaded cleanup models can be deleted from **Manage Models…** (not
 the one in use).
+
+Upgrading from a v3 install downloads Ultra on first launch (progress shows in the menu); the old v3 model is kept as a fallback until Ultra loads, then removed.
 
 ## Usage
 

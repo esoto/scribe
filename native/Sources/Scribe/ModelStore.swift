@@ -16,10 +16,14 @@ enum ModelStore {
             "parakeet/parakeet-ultra", isDirectory: true)
     }
 
+    /// The v3 directory older installs used; Ultra falls back to it when its own download fails.
+    static func parakeetV3Directory(in base: URL = baseDirectory) -> URL {
+        base.appendingPathComponent("parakeet/parakeet-tdt-0.6b-v3", isDirectory: true)
+    }
+
     /// Removes the v3 directory an Ultra upgrade supersedes. Best-effort: a missing dir or failed delete must never fail the load that calls it.
     static func deleteSupersededParakeetV3(in base: URL = baseDirectory) {
-        let v3 = base.appendingPathComponent("parakeet/parakeet-tdt-0.6b-v3", isDirectory: true)
-        try? FileManager.default.removeItem(at: v3)
+        try? FileManager.default.removeItem(at: parakeetV3Directory(in: base))
     }
 
     static var whisperDirectory: URL {
