@@ -5,8 +5,8 @@ Personal hold-to-talk dictation for macOS — fully local, English + Spanish.
 Hold the hotkey (**Right ⌥** by default), speak, release:
 [Parakeet TDT v3](https://huggingface.co/mlx-community/parakeet-tdt-0.6b-v3)
 transcribes (~0.2 s), [Gemma 3 4B](https://huggingface.co/mlx-community/gemma-3-4b-it-qat-4bit)
-strips fillers and resolves self-corrections — or pick Gemma 4 E4B or
-Apple Intelligence from the menu (see *Cleanup models*) — and the result
+strips fillers and resolves self-corrections — or pick Gemma 4 E4B, Gemma 4
+E2B or Apple Intelligence from the menu (see *Cleanup models*) — and the result
 is pasted into whatever app has focus. No cloud, no accounts. Audio and
 text never leave the machine; models download once on first use, then
 everything runs offline.
@@ -62,8 +62,8 @@ the one in use).
   status line while recording/transcribing.
 - **Engine** picker: Parakeet (fast, default) ↔ Whisper (better for
   Spanish-heavy dictation; loads on first switch).
-- **Cleanup Model** picker: Gemma 3 4B · Gemma 4 E4B · Apple Intelligence
-  (shown when available; fastest, less accurate). Selecting one downloads
+- **Cleanup Model** picker: Gemma 3 4B · Gemma 4 E4B · Gemma 4 E2B
+  (smallest, fastest) · Apple Intelligence (shown when available). Selecting one downloads
   it with progress in the status line; the previous model is unloaded
   once the new one is ready. **Manage Models…** lists what's on disk and
   deletes what you no longer want.
@@ -102,14 +102,15 @@ not recorded as `known_failures`:
 - **Gemma 3 fails `en-guard-translate`** — it returns an empty string (a
   refusal); scribe's gates then fall back to pasting the raw transcript.
 - **Gemma 4 fails `en-guard-ignore-instructions`** — it answers the
-  injected instruction instead of cleaning the sentence.
+  injected instruction instead of cleaning the sentence (both E4B and
+  E2B).
 
 Learned vocabulary (Dictionary → **Learn New Terms**) reaches only models
 proven by `DictionaryFidelityTests` to keep every word — currently
 **Gemma 4 E4B** and **Gemma 4 E2B**; Gemma 3 and Apple Intelligence do
-not receive learned terms. Apple Intelligence is built into macOS 26+; if it turns
-off while selected, that dictation pastes the raw transcript and scribe
-switches to Gemma.
+not receive learned terms. Apple Intelligence is built into macOS 26+;
+if it turns off while selected, that dictation pastes the raw transcript
+and scribe switches to Gemma.
 
 ## Dictionary
 
