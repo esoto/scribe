@@ -60,8 +60,12 @@ struct CleanupModelStore {
         }
     }
 
-    /// Complete = refs/main names a snapshot holding config.json and every
-    /// weight file (all shards when an index exists). `fileExists` follows
+    /// Complete = refs/main names a snapshot holding config.json plus a
+    /// loadable weight set: every shard the index names, or the single-file
+    /// `model.safetensors` the loader falls back to. Some repos publish a
+    /// stale index beside a single-file model (gemma-3-4b-it-qat-4bit names
+    /// two shards that were never uploaded), and an index alone must not
+    /// report a working model as half-downloaded. `fileExists` follows
     /// symlinks, so a link whose blob never finished counts as missing.
     private func isComplete(_ dir: URL) -> Bool {
         let fm = FileManager.default
@@ -77,8 +81,9 @@ struct CleanupModelStore {
             let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
             let weightMap = json["weight_map"] as? [String: String]
         {
-            return Set(weightMap.values).allSatisfy {
-                fm.fileExists(atPath: snapshot.appendingPathComponent($0).path)
+            let shards = Set(weightMap.values)
+            if shards.allSatisfy({ fm.fileExists(atPath: snapshot.appendingPathComponent($0).path) }) {
+                return true
             }
         }
         return fm.fileExists(atPath: snapshot.appendingPathComponent("model.safetensors").path)

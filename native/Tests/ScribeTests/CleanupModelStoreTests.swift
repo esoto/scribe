@@ -76,6 +76,17 @@ final class CleanupModelStoreTests: XCTestCase {
         XCTAssertEqual(store.status(repo), .downloaded(bytes: 210))
     }
 
+    /// The real gemma-3-4b-it-qat-4bit cache: the index names two shards that
+    /// were never published, while model.safetensors holds the whole model.
+    /// Reporting that as "incomplete" hides a working model and offers no way
+    /// to fix it from the UI (the active model can't be deleted or re-used).
+    func testStaleIndexWithCompleteSingleFileIsDownloaded() throws {
+        try makeRepo(
+            ["config.json": 10, "model.safetensors": 1000],
+            shards: ["model-00001-of-00002.safetensors", "model-00002-of-00002.safetensors"])
+        XCTAssertEqual(store.status(repo), .downloaded(bytes: 1010))
+    }
+
     func testMissingRefMeansPartial() throws {
         try makeRepo(["config.json": 10, "model.safetensors": 1000], writeRef: false)
         XCTAssertEqual(store.status(repo), .partial(bytes: 1010))
