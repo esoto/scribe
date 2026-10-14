@@ -12,7 +12,32 @@ final class ModelStoreTests: XCTestCase {
 
     // FluidAudio infers the model version from the directory name; keep the repo folder name.
     func testParakeetDirectoryKeepsRepoFolderName() {
-        XCTAssertEqual(ModelStore.parakeetDirectory.lastPathComponent, "parakeet-tdt-0.6b-v3")
+        XCTAssertEqual(ModelStore.parakeetDirectory.lastPathComponent, "parakeet-ultra")
+    }
+
+    func testDeleteSupersededParakeetV3RemovesOnlyTheV3Directory() throws {
+        let base = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ModelStoreTests-\(UUID().uuidString)")
+        let v3 = base.appendingPathComponent("parakeet/parakeet-tdt-0.6b-v3", isDirectory: true)
+        let ultra = base.appendingPathComponent("parakeet/parakeet-ultra", isDirectory: true)
+        try FileManager.default.createDirectory(at: v3, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: ultra, withIntermediateDirectories: true)
+
+        ModelStore.deleteSupersededParakeetV3(in: base)
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: v3.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: ultra.path), "only the v3 leaf may go, not its parent")
+        try? FileManager.default.removeItem(at: base)
+    }
+
+    // A fresh install has no v3 directory; the cleanup must tolerate that.
+    func testDeleteSupersededParakeetV3ToleratesMissingDirectory() {
+        let base = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ModelStoreTests-\(UUID().uuidString)")
+
+        ModelStore.deleteSupersededParakeetV3(in: base)
+
+        try? FileManager.default.removeItem(at: base)
     }
 
     private func makeSettings() -> (AppSettings, UserDefaults) {

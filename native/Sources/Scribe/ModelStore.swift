@@ -10,10 +10,16 @@ enum ModelStore {
         baseDirectory.appendingPathComponent("gemma", isDirectory: true)
     }
 
-    /// FluidAudio infers the model version from this path, so keep the repo folder name.
+    /// FluidAudio infers the model version from this path, so keep the repo folder name (parakeet-ultra).
     static var parakeetDirectory: URL {
         baseDirectory.appendingPathComponent(
-            "parakeet/parakeet-tdt-0.6b-v3", isDirectory: true)
+            "parakeet/parakeet-ultra", isDirectory: true)
+    }
+
+    /// Removes the v3 directory an Ultra upgrade supersedes. Best-effort: a missing dir or failed delete must never fail the load that calls it.
+    static func deleteSupersededParakeetV3(in base: URL = baseDirectory) {
+        let v3 = base.appendingPathComponent("parakeet/parakeet-tdt-0.6b-v3", isDirectory: true)
+        try? FileManager.default.removeItem(at: v3)
     }
 
     static var whisperDirectory: URL {

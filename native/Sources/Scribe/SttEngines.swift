@@ -56,7 +56,7 @@ protocol UnloadableEngine: SttEngine {
     var isLoaded: Bool { get async }
 }
 
-/// FluidAudio Parakeet v3 STT engine.
+/// FluidAudio Parakeet Ultra STT engine.
 final class ParakeetEngine: UnloadableEngine {
     let name = "parakeet"
 
@@ -86,9 +86,11 @@ final class ParakeetEngine: UnloadableEngine {
         lazyModel = LazyModel(label: "parakeet") {
             // Downloaded into the app-managed store, not FluidAudio's default cache.
             let models = try await AsrModels.downloadAndLoad(
-                to: ModelStore.parakeetDirectory, version: .v3)
+                to: ModelStore.parakeetDirectory, version: .ultra)
             let manager = AsrManager(config: .default)
             try await manager.loadModels(models)
+            // Ultra is confirmed loaded; reclaim the v3 directory the upgrade superseded (best-effort).
+            ModelStore.deleteSupersededParakeetV3()
             return manager
         }
         lazyCtc = LazyModel(label: "parakeet-ctc") {
