@@ -47,6 +47,11 @@ define run-cleanup-model-tests
 	exit $$rc
 endef
 
+# The Gemma models are held to the full gate (golden 10/10 + guard + fidelity)
+# because one of them could become the default, so a red gate hard-fails here.
+# test-models-afm is report-only: Apple Intelligence is opt-in and not held to
+# 10/10 (it scores 8/10), so its xcodebuild exit code is ignored and the logged
+# table is the result.
 test-models-gemma4:
 	$(call run-cleanup-model-tests,gemma4,)
 

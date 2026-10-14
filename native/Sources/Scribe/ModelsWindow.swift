@@ -22,9 +22,11 @@ struct ModelRow: Identifiable, Equatable {
 
 /// Decimal GB/MB with a POSIX "." separator. Free function, unit-tested.
 func formatBytes(_ bytes: Int64) -> String {
-    let gb = Double(bytes) / 1_000_000_000
-    if gb >= 1 { return String(format: "%.1f GB", gb) }
-    return String(format: "%.0f MB", Double(bytes) / 1_000_000)
+    let mb = Double(bytes) / 1_000_000
+    // Round before choosing the unit: 999_999_999 bytes is 1000 MB after
+    // rounding, which must read "1.0 GB" rather than "1000 MB".
+    if mb.rounded() >= 1000 { return String(format: "%.1f GB", Double(bytes) / 1_000_000_000) }
+    return String(format: "%.0f MB", mb)
 }
 
 /// One row per catalog model. Free function, unit-tested.

@@ -5,6 +5,8 @@ final class ModelsWindowHelpersTests: XCTestCase {
         XCTAssertEqual(formatBytes(2_800_000_000), "2.8 GB")
         XCTAssertEqual(formatBytes(450_000_000), "450 MB")
         XCTAssertEqual(formatBytes(0), "0 MB")
+        XCTAssertEqual(formatBytes(999_999_999), "1.0 GB")
+        XCTAssertEqual(formatBytes(999_499_999), "999 MB")
     }
 
     func testCanDeleteModel() {
@@ -28,6 +30,17 @@ final class ModelsWindowHelpersTests: XCTestCase {
         XCTAssertEqual(rows[3].detail, "Built into macOS · no download")
         XCTAssertTrue(rows[3].canUse)
         XCTAssertFalse(rows[3].canDelete)
+    }
+
+    func testPendingRowCantBeUsedOrDeleted() {
+        let rows = modelRows(
+            statuses: [.gemma3: .downloaded(bytes: 2_800_000_000), .gemma4: .downloaded(bytes: 4_900_000_000)],
+            active: "gemma3", pending: "gemma4", appleIntelligenceReason: nil)
+        XCTAssertEqual(rows[0].id, .gemma3)
+        XCTAssertEqual(rows[1].id, .gemma4)
+        XCTAssertFalse(rows[0].canUse)
+        XCTAssertFalse(rows[1].canUse)
+        XCTAssertFalse(rows[1].canDelete)
     }
 
     func testNotDownloadedRowShowsApproxSize() {

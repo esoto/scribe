@@ -66,6 +66,9 @@ final class DictionaryFidelityTests: XCTestCase {
             let pairs = testCase.snapshot.pairs
             let transcript = TermReplacer.apply(pairs, to: testCase.input)
             let out = TermReplacer.apply(pairs, to: try await backend.clean(transcript))
+            XCTAssertFalse(
+                out.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                "[\(condition)] empty output for \"\(testCase.input)\"")
             let low = out.lowercased()
             let missing = testCase.mustContain.filter { !low.contains($0.lowercased()) }
             print("[fidelity][\(condition)] \(missing.isEmpty ? "PASS" : "FAIL lost=\(missing)")")

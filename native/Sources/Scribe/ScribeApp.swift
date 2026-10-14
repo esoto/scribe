@@ -471,8 +471,14 @@ final class AppModel: ObservableObject {
                 guard await newCleaner.isLoaded else {
                     self.pendingCleanupModel = nil
                     self.cleanupModelStatus = "Couldn't load \(spec.label) — still using \(previousLabel)"
+                    self.cleanupModelProgress = nil
                     logger.log("cleanup model switch to \(name) failed to load")
                     self.refreshDownloadedModels()
+                    return
+                }
+                // Second cancellation check: `await newCleaner.isLoaded` above is a suspension point a revert or newer switch can land in (switchEngine has none between its check and commit).
+                if Task.isCancelled {
+                    await newCleaner.unload()
                     return
                 }
                 self.cleaner = newCleaner
@@ -512,15 +518,17 @@ final class AppModel: ObservableObject {
         appleIntelligenceUnavailableReason = AppleIntelligence.unavailableReason
         // pending == nil: refresh runs on every key-down, so without this a
         // fallback switch already in flight would re-notify each dictation.
-        // didFallback…: a fallback whose load FAILED clears pending but leaves
-        // AFM active; without the flag every key-down would re-notify + retry.
+        // didFallback…: set once, even if the fallback load FAILS — a failed
+        // load leaves AFM active and pasting raw (accepted); the flag is what
+        // stops every key-down from re-notifying + retrying, so the user gets
+        // exactly one notification even when the fallback fails.
         guard activeCleanupModel == CleanupModelID.appleIntelligence.rawValue,
             pendingCleanupModel == nil, !didFallbackFromAppleIntelligence
         else { return }
         didFallbackFromAppleIntelligence = true
         let target = CleanupModelCatalog.fallbackID(isDownloaded: { self.modelStatuses[$0]?.isDownloaded ?? false })
         logger.log("apple intelligence unavailable — switching cleanup to \(target.rawValue)")
-        notify("Apple Intelligence is unavailable — switched cleanup to \(CleanupModelCatalog.spec(target).label).")
+        notify("Apple Intelligence is unavailable — switching cleanup to \(CleanupModelCatalog.spec(target).label)…")
         switchCleanupModel(to: target)
     }
 
