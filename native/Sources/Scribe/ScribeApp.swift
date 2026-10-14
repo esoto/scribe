@@ -13,6 +13,8 @@ final class AppModel: ObservableObject {
     private(set) var cleaner: any CleanupModelBackend
     private var activeSelection: CleanupModelCatalog.Selection
     private let progressRelay = ProgressRelay()
+    /// Parakeet Ultra download progress; same phase-1-init workaround as progressRelay.
+    private let sttProgressRelay = ProgressRelay()
     private var cleanupSwitchTask: Task<Void, Never>?
     /// True while a cleanup model is downloading/loading on purpose (startup
     /// preload or a picker switch) — gates the progress status line so a
@@ -60,6 +62,8 @@ final class AppModel: ObservableObject {
     @Published private(set) var cleanupModelStatus: String?
     /// Download fraction (0…1) while a cleanup model downloads; nil otherwise.
     @Published private(set) var cleanupModelProgress: Double?
+    /// "Downloading Parakeet Ultra… NN%" while the STT model downloads (first launch after upgrade); nil otherwise.
+    @Published private(set) var sttDownloadStatus: String?
     @Published private(set) var appleIntelligenceAvailable: Bool
     @Published private(set) var appleIntelligenceUnavailableReason: String?
     @Published private(set) var modelStatuses: [CleanupModelID: CleanupModelStore.Status] = [:]
@@ -89,8 +93,9 @@ final class AppModel: ObservableObject {
             restoreDelay: settings.restoreDelay
         )
 
+        let sttRelay = sttProgressRelay
         self.engines = [
-            "parakeet": ParakeetEngine(),
+            "parakeet": ParakeetEngine(onDownloadProgress: { sttRelay.report(model: "Parakeet Ultra", fraction: $0) }),
             "whisper": WhisperEngine(),
         ]
         let store = CleanupModelStore()
@@ -198,6 +203,11 @@ final class AppModel: ObservableObject {
                 self.cleanupModelStatus = CleanupModelCatalog.statusText(label: label, fraction: fraction)
                 self.cleanupModelProgress = fraction
                 if fraction < 1 { self.cleanupModelDidDownload = true }
+            }
+        }
+        sttProgressRelay.set { [weak self] label, fraction in
+            Task { @MainActor in
+                self?.sttDownloadStatus = fraction < 1 ? CleanupModelCatalog.statusText(label: label, fraction: fraction) : nil
             }
         }
         appleIntelligenceLost.set { [weak self] in

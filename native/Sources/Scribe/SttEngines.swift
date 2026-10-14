@@ -56,7 +56,7 @@ protocol UnloadableEngine: SttEngine {
     var isLoaded: Bool { get async }
 }
 
-/// FluidAudio Parakeet v3 STT engine.
+/// FluidAudio Parakeet Ultra STT engine.
 final class ParakeetEngine: UnloadableEngine {
     let name = "parakeet"
 
@@ -82,14 +82,33 @@ final class ParakeetEngine: UnloadableEngine {
     /// Similarity floor for accepting a rescoring replacement. The library default (0.50-0.60) replaces ordinary words with loose vocab matches; 0.75 trades recall for precision.
     static let biasMinSimilarity: Float = 0.75
 
-    init() {
+    /// `onDownloadProgress` reports the Ultra download (0…1) on any thread; 1 also means "done or gave up".
+    init(onDownloadProgress: (@Sendable (Double) -> Void)? = nil) {
         lazyModel = LazyModel(label: "parakeet") {
-            // Downloaded into the app-managed store, not FluidAudio's default cache.
-            let models = try await AsrModels.downloadAndLoad(
-                to: ModelStore.parakeetDirectory, version: .v3)
-            let manager = AsrManager(config: .default)
-            try await manager.loadModels(models)
-            return manager
+            do {
+                // Downloaded into the app-managed store, not FluidAudio's default cache.
+                let dir: URL
+                do {
+                    defer { onDownloadProgress?(1) }
+                    dir = try await AsrModels.download(
+                        to: ModelStore.parakeetDirectory, version: .ultra,
+                        progressHandler: { onDownloadProgress?($0.fractionCompleted) })
+                }
+                let manager = AsrManager(config: .default)
+                try await manager.loadModels(try await AsrModels.load(from: dir, version: .ultra))
+                // Ultra is confirmed loaded; reclaim the v3 directory the upgrade superseded (best-effort).
+                ModelStore.deleteSupersededParakeetV3()
+                return manager
+            } catch {
+                // Ultra unavailable (offline, failed download): keep dictating on the v3 model an
+                // older install left on disk. Not cached as Ultra, so the next load retries it.
+                let v3 = ModelStore.parakeetV3Directory()
+                guard AsrModels.modelsExist(at: v3, version: .v3) else { throw error }
+                print("[ParakeetEngine] Ultra unavailable (\(error)); falling back to v3 on disk")
+                let manager = AsrManager(config: .default)
+                try await manager.loadModels(try await AsrModels.load(from: v3, version: .v3))
+                return manager
+            }
         }
         lazyCtc = LazyModel(label: "parakeet-ctc") {
             // Throws (not try?) so LazyModel doesn't cache a failed load; the next dictation retries.

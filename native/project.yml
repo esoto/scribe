@@ -6,7 +6,7 @@ options:
 packages:
   FluidAudio:
     url: https://github.com/FluidInference/FluidAudio
-    from: 0.15.4
+    exactVersion: 0.17.7
   ArgmaxOSS:
     url: https://github.com/argmaxinc/argmax-oss-swift
     from: 1.0.0
@@ -38,7 +38,7 @@ targets:
       path: Info.plist
       properties:
         CFBundleDisplayName: scribe
-        CFBundleShortVersionString: "1.1.1"
+        CFBundleShortVersionString: "1.2.0"
         CFBundleIconFile: AppIcon
         LSUIElement: true
         NSMicrophoneUsageDescription: "scribe listens while you hold the dictation key."
