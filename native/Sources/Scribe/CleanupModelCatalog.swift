@@ -23,6 +23,7 @@ final class ProgressRelay: @unchecked Sendable {
 enum CleanupModelID: String, CaseIterable, Sendable {
     case gemma3
     case gemma4
+    case gemma4e2b
     case appleIntelligence
 }
 
@@ -61,16 +62,27 @@ enum CleanupModelCatalog {
         kind: .mlx(repoID: "mlx-community/gemma-4-e4b-it-4bit", extraEOSTokens: ["<turn|>"]),
         approxDownloadBytes: 4_900_000_000, fidelitySafe: true)
 
+    /// Smaller sibling of E4B (2.3B effective vs 4.5B; 3.6 GB vs 4.9 GB) and
+    /// the fastest local model measured (~330 ms vs E4B's ~460 ms). Keeps
+    /// every word with learned vocabulary (DictionaryFidelityTests), so it is
+    /// fidelity-safe — but golden is 8/10, so it stays opt-in, never the
+    /// default.
+    static let gemma4e2b = CleanupModelSpec(
+        id: .gemma4e2b, label: "Gemma 4 E2B",
+        kind: .mlx(repoID: "mlx-community/gemma-4-e2b-it-4bit", extraEOSTokens: ["<turn|>"]),
+        approxDownloadBytes: 3_600_000_000, fidelitySafe: true)
+
     static let appleIntelligence = CleanupModelSpec(
         id: .appleIntelligence, label: "Apple Intelligence",
         kind: .appleIntelligence, approxDownloadBytes: nil, fidelitySafe: false)
 
-    static let all: [CleanupModelSpec] = [gemma3, gemma4, appleIntelligence]
+    static let all: [CleanupModelSpec] = [gemma3, gemma4, gemma4e2b, appleIntelligence]
 
     static func spec(_ id: CleanupModelID) -> CleanupModelSpec {
         switch id {
         case .gemma3: return gemma3
         case .gemma4: return gemma4
+        case .gemma4e2b: return gemma4e2b
         case .appleIntelligence: return appleIntelligence
         }
     }

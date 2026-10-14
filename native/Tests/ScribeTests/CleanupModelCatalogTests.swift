@@ -12,6 +12,9 @@ final class CleanupModelCatalogTests: XCTestCase {
         XCTAssertEqual(
             CleanupModelCatalog.gemma4.kind,
             .mlx(repoID: "mlx-community/gemma-4-e4b-it-4bit", extraEOSTokens: ["<turn|>"]))
+        XCTAssertEqual(
+            CleanupModelCatalog.gemma4e2b.kind,
+            .mlx(repoID: "mlx-community/gemma-4-e2b-it-4bit", extraEOSTokens: ["<turn|>"]))
         XCTAssertEqual(CleanupModelCatalog.appleIntelligence.kind, .appleIntelligence)
         XCTAssertNil(CleanupModelCatalog.appleIntelligence.repoID)
         XCTAssertEqual(CleanupModelCatalog.all.map(\.id), CleanupModelID.allCases)

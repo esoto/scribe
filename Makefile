@@ -50,6 +50,9 @@ endef
 test-models-gemma4:
 	$(call run-cleanup-model-tests,gemma4,)
 
+test-models-e2b:
+	$(call run-cleanup-model-tests,gemma4e2b,)
+
 # Apple Intelligence: REPORT-ONLY — an opt-in model, not held to 10/10 (it has
 # no known_failures and scores 8/10), so the golden/fidelity asserts WILL fail
 # xcodebuild. The exit code is ignored; read the logged table. The tag check

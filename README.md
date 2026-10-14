@@ -47,6 +47,7 @@ everything re-downloads on next use.
 |---|---|---|
 | Gemma 3 4B (cleanup) | ~2.8 GB | `gemma/` |
 | Gemma 4 E4B (cleanup) | ~4.9 GB | `gemma/` |
+| Gemma 4 E2B (cleanup) | ~3.6 GB | `gemma/` |
 | Apple Intelligence (cleanup) | none — built into macOS 26+ | — |
 | Parakeet v3 (STT) | ~0.5 GB | `parakeet/` |
 | Whisper (optional STT) | ~1.5 GB | `whisper/` |
@@ -78,7 +79,7 @@ the one in use).
 
 ## Cleanup models
 
-The **Cleanup Model** picker offers three models; the default is
+The **Cleanup Model** picker offers four models; the default is
 **Gemma 3 4B**. The intent is that the default must pass golden + guard;
 today it has one known guard failure, documented below. Existing installs
 keep the model they already use.
@@ -87,7 +88,13 @@ keep the model they already use.
 |---|---|---|---|---|
 | Gemma 3 4B (default) | 10/10 | 7/8 | no | ~950 ms |
 | Gemma 4 E4B | 9/10 | 7/8 | yes | ~460 ms |
+| Gemma 4 E2B | 8/10 | 7/8 | yes | ~330 ms |
 | Apple Intelligence | 8/10 | 4/8 | no | ~430 ms |
+
+Gemma 4 E2B is the fastest local model and the smallest download of the
+two Gemma 4 sizes, at the cost of two golden cases (a Spanish
+self-correction and a filler leak) — pick it for speed, E4B for accuracy.
+It shares E4B's single guard failure.
 
 Two guard failures are currently known, human-approved, and deliberately
 not recorded as `known_failures`:
@@ -99,8 +106,8 @@ not recorded as `known_failures`:
 
 Learned vocabulary (Dictionary → **Learn New Terms**) reaches only models
 proven by `DictionaryFidelityTests` to keep every word — currently
-**Gemma 4 E4B** only; Gemma 3 and Apple Intelligence do not receive
-learned terms. Apple Intelligence is built into macOS 26+; if it turns
+**Gemma 4 E4B** and **Gemma 4 E2B**; Gemma 3 and Apple Intelligence do
+not receive learned terms. Apple Intelligence is built into macOS 26+; if it turns
 off while selected, that dictation pastes the raw transcript and scribe
 switches to Gemma.
 
@@ -138,7 +145,7 @@ separates them, so a human confirms instead.
 
 **Learned terms (automatic) — off by default.** The learned vocabulary
 only reaches models proven by `DictionaryFidelityTests` to keep every
-word — currently **Gemma 4 E4B** only. With other models the toggle still
+word — currently **Gemma 4 E4B** and **Gemma 4 E2B**. With other models the toggle still
 collects words, and the menu notes they aren't sent. The intent:
 distinctive vocabulary in cleaned dictations (proper nouns, acronyms,
 `camelCase`, words with digits) is counted, and anything appearing in
@@ -179,7 +186,7 @@ Change via `defaults write dev.esoto.scribe <key> <value>` and relaunch:
 | `historySize` | 10 | menu history length |
 | `idleUnloadMinutes` | 15 | unload models after idle (0 = keep resident) |
 | `dictionaryLearningEnabled` | false | auto-learn vocabulary (known to drop words — see Dictionary) |
-| `cleanupModel` | resolved at first launch | `gemma3` \| `gemma4` \| `appleIntelligence` |
+| `cleanupModel` | resolved at first launch | `gemma3` \| `gemma4` \| `gemma4e2b` \| `appleIntelligence` |
 | `cleanupModelPath` | _(unset)_ | local MLX model folder to use for cleanup instead of stock Gemma; when set, overrides `cleanupModel` and disables the picker |
 
 **Custom cleanup model:** point `cleanupModelPath` at any local MLX model
@@ -193,8 +200,9 @@ scores 10/10).
 ## Memory behavior
 
 Model weights dominate the footprint (~3.3 GB with Parakeet + Gemma 3 4B
-warm; Gemma 4 E4B peaks at ~4.7 GB — GPU/unified memory, invisible to
-RSS; check Activity Monitor's Memory column). Apple Intelligence runs
+warm; Gemma 4 E4B peaks at ~4.7 GB, and the smaller Gemma 4 E2B below
+that — GPU/unified memory, invisible to RSS; check Activity Monitor's
+Memory column). Apple Intelligence runs
 outside scribe's process. scribe manages them on demand:
 
 - Models preload at launch and on key-down, so loads overlap with speech.
@@ -227,6 +235,7 @@ make test                  # unit suite (fast, no models)
 make test-models           # real-model suite: golden cleanup eval, STT fixtures, memory reclaim
 make build-models          # compile-check the real-model test target (no GPU, no run)
 make test-models-gemma4    # golden + guard + fidelity for Gemma 4 E4B (CLEANUP_MODEL=gemma4)
+make test-models-e2b       # same for Gemma 4 E2B (CLEANUP_MODEL=gemma4e2b)
 make test-models-afm       # same for Apple Intelligence — report-only, exit code ignored
 ```
 

@@ -18,16 +18,16 @@ final class ModelsWindowHelpersTests: XCTestCase {
         let rows = modelRows(
             statuses: [.gemma3: .downloaded(bytes: 2_800_000_000), .gemma4: .partial(bytes: 1_200_000_000)],
             active: "gemma3", pending: nil, appleIntelligenceReason: nil)
-        XCTAssertEqual(rows.map(\.id), [.gemma3, .gemma4, .appleIntelligence])
+        XCTAssertEqual(rows.map(\.id), [.gemma3, .gemma4, .gemma4e2b, .appleIntelligence])
         XCTAssertEqual(rows[0].detail, "In use · 2.8 GB")
         XCTAssertFalse(rows[0].canDelete)
         XCTAssertFalse(rows[0].canUse)
         XCTAssertEqual(rows[1].detail, "Incomplete download · 1.2 GB")
         XCTAssertTrue(rows[1].canDelete)
         XCTAssertTrue(rows[1].canUse)
-        XCTAssertEqual(rows[2].detail, "Built into macOS · no download")
-        XCTAssertTrue(rows[2].canUse)
-        XCTAssertFalse(rows[2].canDelete)
+        XCTAssertEqual(rows[3].detail, "Built into macOS · no download")
+        XCTAssertTrue(rows[3].canUse)
+        XCTAssertFalse(rows[3].canDelete)
     }
 
     func testNotDownloadedRowShowsApproxSize() {
@@ -38,8 +38,8 @@ final class ModelsWindowHelpersTests: XCTestCase {
 
     func testUnavailableAppleIntelligenceShowsReasonAndCantBeUsed() {
         let rows = modelRows(statuses: [:], active: "gemma3", pending: nil, appleIntelligenceReason: "Turn on Apple Intelligence in System Settings")
-        XCTAssertEqual(rows[2].detail, "Turn on Apple Intelligence in System Settings")
-        XCTAssertFalse(rows[2].canUse)
+        XCTAssertEqual(rows[3].detail, "Turn on Apple Intelligence in System Settings")
+        XCTAssertFalse(rows[3].canUse)
     }
 
     func testPickerLabel() {
