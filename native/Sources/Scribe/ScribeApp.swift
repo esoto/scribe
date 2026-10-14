@@ -10,7 +10,22 @@ final class AppModel: ObservableObject {
     let pasteboard: MacPasteboard
     let paster: Paster
     let engines: [String: UnloadableEngine]
-    let cleaner: GemmaBackend
+    private(set) var cleaner: any CleanupModelBackend
+    private var activeSelection: CleanupModelCatalog.Selection
+    private let progressRelay = ProgressRelay()
+    private var cleanupSwitchTask: Task<Void, Never>?
+    /// True while a cleanup model is downloading/loading on purpose (startup
+    /// preload or a picker switch) — gates the progress status line so a
+    /// late progress tick can't resurrect "Loading…" after commit.
+    private var cleanupLoadInFlight = false
+    /// True once this switch reported progress below 1, so the completion
+    /// notification fires only when something really downloaded.
+    private var cleanupModelDidDownload = false
+    /// Set once the AFM-lost fallback has fired; stops every key-down's
+    /// availability refresh from re-notifying and retrying a fallback that
+    /// already ran (or failed to load). Reset when AFM is available again.
+    private var didFallbackFromAppleIntelligence = false
+    private let appleIntelligenceLost: AppleIntelligenceLostHandoff
     let idleTracker: IdleTracker
     let dictionary: UserDictionaryStore
     nonisolated let logger: FileLogger
@@ -40,10 +55,20 @@ final class AppModel: ObservableObject {
     @Published private(set) var glossaryEntries: [GlossaryEntry] = []
     @Published private(set) var replacementPairs: [ReplacementPair] = []
     @Published private(set) var unmatchedHeardWords: [GlossaryEntry] = []
+    @Published private(set) var activeCleanupModel: String
+    @Published private(set) var pendingCleanupModel: String?
+    @Published private(set) var cleanupModelStatus: String?
+    /// Download fraction (0…1) while a cleanup model downloads; nil otherwise.
+    @Published private(set) var cleanupModelProgress: Double?
+    @Published private(set) var appleIntelligenceAvailable: Bool
+    @Published private(set) var appleIntelligenceUnavailableReason: String?
+    @Published private(set) var modelStatuses: [CleanupModelID: CleanupModelStore.Status] = [:]
+
+    var activeCleanupFidelitySafe: Bool { activeSelection.fidelitySafe }
 
     private let pipelineConfig: PipelineConfig
 
-    var glyph: String { glyphFor(state) }
+    var glyph: String { menuBarGlyph(state, progress: cleanupModelProgress) }
     var grantsOk: Bool { grants.microphone && grants.accessibility && grants.inputMonitoring }
 
     init() {
@@ -68,7 +93,30 @@ final class AppModel: ObservableObject {
             "parakeet": ParakeetEngine(),
             "whisper": WhisperEngine(),
         ]
-        self.cleaner = GemmaBackend(customModelPath: settings.cleanupModelPath)
+        let store = CleanupModelStore()
+        let statuses = AppModel.computeModelStatuses(store)
+        let afmAvailable = AppleIntelligence.isAvailable
+        let selection = CleanupModelCatalog.resolve(
+            stored: settings.cleanupModel, customPath: settings.cleanupModelPath,
+            isDownloaded: { statuses[$0]?.isDownloaded ?? false },
+            appleIntelligenceAvailable: afmAvailable)
+        // D2: pin the resolved choice so a later default flip never moves
+        // this install (and never triggers a surprise download). Only when
+        // nothing is stored: a transient AFM `.modelNotReady` makes resolve()
+        // return a Gemma fallback, and pinning that would permanently
+        // overwrite the user's stored "appleIntelligence".
+        if settings.cleanupModel == nil, case .model(let id) = selection {
+            settings.cleanupModel = id.rawValue
+        }
+        self.activeSelection = selection
+        self.activeCleanupModel = selection.storageID
+        self.modelStatuses = statuses
+        self.appleIntelligenceAvailable = afmAvailable
+        self.appleIntelligenceUnavailableReason = AppleIntelligence.unavailableReason
+        let lostHandoff = AppleIntelligenceLostHandoff()
+        self.appleIntelligenceLost = lostHandoff
+        self.cleaner = CleanupModelCatalog.makeBackend(
+            selection, relay: progressRelay, onAppleIntelligenceLost: { lostHandoff.fire() })
         self.idleTracker = IdleTracker(unloadAfterMinutes: settings.idleUnloadMinutes)
         self.logger = FileLogger()
 
@@ -82,7 +130,7 @@ final class AppModel: ObservableObject {
         self.replacementPairs = dictionary.allPairs
         self.unmatchedHeardWords = dictionary.unmatchedHeardWords
         // Before any preload, so the first warm-up uses the dictionary-augmented prompt.
-        self.cleaner.setDictionary(dictionary.snapshot)
+        self.cleaner.setDictionary(CleanupModelCatalog.promptSnapshot(dictionary.snapshot, for: selection))
         // Bias vocab uses the full views, not the 30-term capped snapshot.
         (engines["parakeet"] as? ParakeetEngine)?.setBiasVocabulary(
             AppModel.biasVocabulary(from: dictionary, settings: settings))
@@ -135,12 +183,25 @@ final class AppModel: ObservableObject {
             onCleaned: { [dictionary] text in dictionary.observe(cleanedText: text) },
             replacementPairs: { [dictionary] in dictionary.snapshot.pairs }
         )
+        pipeline.setCleaner(self.cleaner, name: selection.storageID)
 
         dictionary.onChange = { [weak self] snapshot in
             // Fires on the store's queue; hop to the main actor.
             Task { @MainActor in
                 self?.applyDictionaryChange(snapshot)
             }
+        }
+
+        progressRelay.set { [weak self] label, fraction in
+            Task { @MainActor in
+                guard let self, self.cleanupLoadInFlight else { return }
+                self.cleanupModelStatus = CleanupModelCatalog.statusText(label: label, fraction: fraction)
+                self.cleanupModelProgress = fraction
+                if fraction < 1 { self.cleanupModelDidDownload = true }
+            }
+        }
+        appleIntelligenceLost.set { [weak self] in
+            Task { @MainActor in self?.handleAppleIntelligenceLost() }
         }
 
         self.hotkeyMonitor = HotkeyMonitor(
@@ -202,12 +263,25 @@ final class AppModel: ObservableObject {
         let cleaner = self.cleaner
         let cleanupEnabled = self.cleanupEnabled
         let logger = self.logger
-        Task {
+        Task { [weak self] in
             let t0 = Date()
             await engine?.preload()
-            // The Swift cleaner is non-optional, so gate the preload on live cleanup-enabled state.
-            if cleanupEnabled {
+            // Stale-cleaner guard: a model switch during the STT preload above
+            // may already have committed a new cleaner and unloaded this one.
+            // Preloading the captured `cleaner` now would resurrect an orphan
+            // that nothing (unloadIdleModels only unloads `self.cleaner`)
+            // ever unloads. Re-check on the main actor, with no suspension
+            // between the check and the call.
+            if cleanupEnabled, let self, self.cleaner === cleaner {
+                self.cleanupLoadInFlight = true
                 await cleaner.preload()
+                // A user-initiated switch may have started downloading while
+                // this preload ran; it owns the flag and the status line then.
+                if self.pendingCleanupModel == nil {
+                    self.cleanupLoadInFlight = false
+                    self.cleanupModelStatus = nil
+                    self.cleanupModelProgress = nil
+                }
             }
             let elapsed = Date().timeIntervalSince(t0)
             logger.log("models ready in \(String(format: "%.1f", elapsed))s")
@@ -236,7 +310,7 @@ final class AppModel: ObservableObject {
                 unloadedAny = true
             }
         }
-        if await cleaner.isLoaded {
+        if cleaner.holdsMemory, await cleaner.isLoaded {
             await cleaner.unload()
             unloadedAny = true
         }
@@ -286,16 +360,19 @@ final class AppModel: ObservableObject {
     /// Runs on main (CGEventTap callback).
     private func handleKeyDown() {
         idleTracker.touch(now: ProcessInfo.processInfo.systemUptime)
+        refreshAppleIntelligenceAvailability()
 
         if let engine = engines[activeEngineName] {
             let cleaner = self.cleaner
             let cleanupEnabled = self.cleanupEnabled
             // LazyModel coalesces concurrent loads; an in-flight load can't be cancelled.
-            Task {
+            Task { [weak self] in
                 if await !engine.isLoaded {
                     await engine.preload()
                 }
-                if cleanupEnabled, await !cleaner.isLoaded {
+                // `self?.cleaner === cleaner`: skip if a switch replaced the
+                // cleaner while we awaited (see preloadAtStartup).
+                if cleanupEnabled, await !cleaner.isLoaded, self?.cleaner === cleaner {
                     await cleaner.preload()
                 }
             }
@@ -343,6 +420,162 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Same load → commit → unload shape as switchEngine. Each selection
+    /// builds a FRESH backend instance (unlike the shared engines dict), so
+    /// nothing else owns it and a superseded load can always be unloaded.
+    /// Precondition: every later `preload()` of a captured cleaner (startup,
+    /// key-down, dictionary re-warm) re-checks `self.cleaner === captured`
+    /// after its await — otherwise a stale task re-loads an instance that
+    /// was already unloaded and is no longer reachable.
+    func switchCleanupModel(to id: CleanupModelID) {
+        guard case .model = activeSelection else { return }  // custom path overrides the picker
+        if id == .appleIntelligence && !AppleIntelligence.isAvailable {
+            refreshAppleIntelligenceAvailability()
+            return
+        }
+        let name = id.rawValue
+        switch EngineSwitch.action(selecting: name, active: activeCleanupModel, pending: pendingCleanupModel) {
+        case .ignore:
+            return
+        case .revert:
+            cleanupSwitchTask?.cancel()
+            cleanupSwitchTask = nil
+            pendingCleanupModel = nil
+            cleanupLoadInFlight = false
+            cleanupModelStatus = nil
+            cleanupModelProgress = nil
+        case .begin:
+            cleanupSwitchTask?.cancel()
+            pendingCleanupModel = name
+            let selection = CleanupModelCatalog.Selection.model(id)
+            let spec = CleanupModelCatalog.spec(id)
+            let handoff = appleIntelligenceLost
+            let newCleaner = CleanupModelCatalog.makeBackend(
+                selection, relay: progressRelay, onAppleIntelligenceLost: { handoff.fire() })
+            newCleaner.setDictionary(CleanupModelCatalog.promptSnapshot(dictionary.snapshot, for: selection))
+            let previous = cleaner
+            let previousLabel = activeSelectionLabel
+            let logger = self.logger
+            cleanupLoadInFlight = true
+            cleanupModelStatus = "Loading \(spec.label)…"
+            cleanupModelProgress = nil
+            cleanupModelDidDownload = false
+            cleanupSwitchTask = Task { [weak self] in
+                await newCleaner.preload()
+                guard let self else { return }
+                if Task.isCancelled {
+                    await newCleaner.unload()
+                    return
+                }
+                self.cleanupLoadInFlight = false
+                guard await newCleaner.isLoaded else {
+                    self.pendingCleanupModel = nil
+                    self.cleanupModelStatus = "Couldn't load \(spec.label) — still using \(previousLabel)"
+                    self.cleanupModelProgress = nil
+                    logger.log("cleanup model switch to \(name) failed to load")
+                    self.refreshDownloadedModels()
+                    return
+                }
+                // Second cancellation check: `await newCleaner.isLoaded` above is a suspension point a revert or newer switch can land in (switchEngine has none between its check and commit).
+                if Task.isCancelled {
+                    await newCleaner.unload()
+                    return
+                }
+                self.cleaner = newCleaner
+                self.activeSelection = selection
+                self.pipeline.setCleaner(newCleaner, name: name)
+                self.activeCleanupModel = name
+                self.pendingCleanupModel = nil
+                // Persists user picks AND the AFM→Gemma runtime fallback on
+                // purpose: after a fallback the stored choice follows what
+                // is actually running (unlike init, which never overwrites).
+                self.settings.cleanupModel = name
+                self.cleanupModelStatus = nil
+                self.cleanupModelProgress = nil
+                logger.log("switched cleanup model to \(name)")
+                if self.cleanupModelDidDownload {
+                    self.cleanupModelDidDownload = false
+                    self.notify("\(spec.label) is ready.")
+                }
+                // The switch counts as activity: without this a model that
+                // just finished loading can be idle-unloaded within 60 s.
+                self.idleTracker.touch(now: ProcessInfo.processInfo.systemUptime)
+                await previous.unload()
+                self.refreshDownloadedModels()
+            }
+        }
+    }
+
+    private var activeSelectionLabel: String {
+        if case .model(let id) = activeSelection { return CleanupModelCatalog.spec(id).label }
+        return "the custom model"
+    }
+
+    /// D1: the dictation that hit this already pasted raw (clean() threw);
+    /// move off Apple Intelligence so the next one is cleaned again.
+    private func handleAppleIntelligenceLost() {
+        appleIntelligenceAvailable = false
+        appleIntelligenceUnavailableReason = AppleIntelligence.unavailableReason
+        // pending == nil: refresh runs on every key-down, so without this a
+        // fallback switch already in flight would re-notify each dictation.
+        // didFallback…: set once, even if the fallback load FAILS — a failed
+        // load leaves AFM active and pasting raw (accepted); the flag is what
+        // stops every key-down from re-notifying + retrying, so the user gets
+        // exactly one notification even when the fallback fails.
+        guard activeCleanupModel == CleanupModelID.appleIntelligence.rawValue,
+            pendingCleanupModel == nil, !didFallbackFromAppleIntelligence
+        else { return }
+        didFallbackFromAppleIntelligence = true
+        let target = CleanupModelCatalog.fallbackID(isDownloaded: { self.modelStatuses[$0]?.isDownloaded ?? false })
+        logger.log("apple intelligence unavailable — switching cleanup to \(target.rawValue)")
+        notify("Apple Intelligence is unavailable — switching cleanup to \(CleanupModelCatalog.spec(target).label)…")
+        switchCleanupModel(to: target)
+    }
+
+    func refreshAppleIntelligenceAvailability() {
+        let available = AppleIntelligence.isAvailable
+        if available != appleIntelligenceAvailable { appleIntelligenceAvailable = available }
+        appleIntelligenceUnavailableReason = AppleIntelligence.unavailableReason
+        if available { didFallbackFromAppleIntelligence = false }
+        if !available { handleAppleIntelligenceLost() }
+    }
+
+    /// Disk status for every downloadable model. Pure filesystem reads.
+    nonisolated static func computeModelStatuses(_ store: CleanupModelStore) -> [CleanupModelID: CleanupModelStore.Status] {
+        var out: [CleanupModelID: CleanupModelStore.Status] = [:]
+        for spec in CleanupModelCatalog.all {
+            if let repo = spec.repoID { out[spec.id] = store.status(repo) }
+        }
+        return out
+    }
+
+    /// Re-reads disk state off the main actor (sizing walks blobs/).
+    func refreshDownloadedModels() {
+        Task.detached { [weak self] in
+            let statuses = AppModel.computeModelStatuses(CleanupModelStore())
+            // Bind to a local `let` before the nested closure: referencing the
+            // captured weak `var` inside a @Sendable closure is a Swift 6 error.
+            guard let self else { return }
+            await MainActor.run { self.modelStatuses = statuses }
+        }
+    }
+
+    func deleteCleanupModel(_ id: CleanupModelID) {
+        guard canDeleteModel(id, active: activeCleanupModel, pending: pendingCleanupModel),
+            let repo = CleanupModelCatalog.spec(id).repoID
+        else { return }
+        let logger = self.logger
+        Task.detached { [weak self] in
+            do {
+                try CleanupModelStore().delete(repo)
+                logger.log("deleted cleanup model \(id.rawValue)")
+            } catch {
+                logger.log("deleting cleanup model \(id.rawValue) failed: \(error)")
+            }
+            await self?.refreshDownloadedModels()
+        }
+    }
+
     /// Switches the capture device (nil = system default). The built-in mic avoids Bluetooth HFP renegotiation delay.
     func setMicrophone(uid: String?) {
         guard uid != microphoneUID else { return }
@@ -376,12 +609,12 @@ final class AppModel: ObservableObject {
         // Warm-prefix rebuild is costly; only do it when the prompt itself changes.
         guard snapshot != dictionarySnapshot else { return }
         dictionarySnapshot = snapshot
-        cleaner.setDictionary(snapshot)
+        cleaner.setDictionary(CleanupModelCatalog.promptSnapshot(snapshot, for: activeSelection))
         logger.log(
             "dictionary updated: \(snapshot.glossary.count) learned terms, \(snapshot.pairs.count) pairs"
         )
-        Task { [cleaner] in
-            if await cleaner.isLoaded {
+        Task { [weak self, cleaner] in
+            if await cleaner.isLoaded, self?.cleaner === cleaner {
                 await cleaner.preload()
             }
         }
@@ -487,6 +720,14 @@ final class AppModel: ObservableObject {
     }
 }
 
+/// Same phase-1-init workaround as ProgressRelay, for the AFM-lost signal.
+final class AppleIntelligenceLostHandoff: @unchecked Sendable {
+    private let lock = NSLock()
+    private var handler: (() -> Void)?
+    func set(_ handler: @escaping () -> Void) { lock.withLock { self.handler = handler } }
+    func fire() { let h = lock.withLock { handler }; h?() }
+}
+
 /// Scene id for the onboarding/Doctor window.
 let onboardingWindowID = "onboarding"
 
@@ -509,6 +750,10 @@ struct ScribeApp: App {
 
         Window("scribe dictionary", id: dictionaryWindowID) {
             DictionaryWindow(model: model)
+        }
+
+        Window("scribe models", id: modelsWindowID) {
+            ModelsWindow(model: model)
         }
     }
 }

@@ -8,6 +8,7 @@ final class PipelineTests: XCTestCase {
         let notices: Box<String>
         let saved: Box<[Float]>
         let cleanedTexts: Box<String>
+        let logs: Box<String>
     }
 
     /// Blocks the calling thread until the async work completes; a semaphore bridges the Task, no sleep polling.
@@ -36,6 +37,7 @@ final class PipelineTests: XCTestCase {
         let notices = Box<String>()
         let saved = Box<[Float]>()
         let cleanedTexts = Box<String>()
+        let logs = Box<String>()
         let pipeline = DictationPipeline(
             recorder: recorder,
             stt: stt,
@@ -48,12 +50,13 @@ final class PipelineTests: XCTestCase {
             onState: { states.append($0) },
             onNotice: { notices.append($0) },
             saveFailedAudio: { saved.append($0) },
+            onLog: { logs.append($0) },
             onCleaned: { cleanedTexts.append($0) },
             replacementPairs: { pairs }
         )
         return Harness(
             pipeline: pipeline, clock: clock, states: states, notices: notices, saved: saved,
-            cleanedTexts: cleanedTexts)
+            cleanedTexts: cleanedTexts, logs: logs)
     }
 
     private func dictate(_ h: Harness, hold: Double = 1.0) {
@@ -186,6 +189,40 @@ final class PipelineTests: XCTestCase {
         dictate(h)
         XCTAssertEqual(h.pipeline.engineName, "whisper")
         XCTAssertEqual(paster.pasted.count, 1)
+    }
+
+    func testCleanerSwap() {
+        let paster = FakePaster()
+        let h = make(paster: paster)
+        let pipeline = h.pipeline
+
+        // Baseline: the default cleaner's output is what gets pasted.
+        dictate(h)
+        XCTAssertEqual(paster.pasted.last, "hello there world")
+
+        // Swap in a new cleaner with its own model name.
+        pipeline.setCleaner(FakeCleaner(out: "new model text"), name: "new-model")
+        dictate(h)
+        XCTAssertEqual(paster.pasted.last, "new model text")   // new cleaner's output
+        XCTAssertEqual(pipeline.cleanupModelName, "new-model")
+
+        // Swap to nil: cleanup disabled, raw text pasted.
+        pipeline.setCleaner(nil, name: "")
+        dictate(h)
+        XCTAssertEqual(paster.pasted.last, "so um hello there world")   // raw
+        XCTAssertEqual(pipeline.cleanupModelName, "")
+
+        // Engine is unaffected by cleaner swaps.
+        XCTAssertEqual(pipeline.engineName, "parakeet")
+    }
+
+    func testDictationLogNamesTheCleanupModel() {
+        let h = make()
+        h.pipeline.setCleaner(FakeCleaner(out: "hello there world"), name: "gemma4")
+        dictate(h)
+        let line = h.logs.value.last ?? ""
+        XCTAssertTrue(line.hasPrefix("dictation: engine=parakeet cleanupModel=gemma4 stt="), line)
+        XCTAssertTrue(line.contains("cleaned=true"), line)
     }
 
     func testTwoDictationsFifo() {

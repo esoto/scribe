@@ -12,6 +12,15 @@ func glyphFor(_ state: PipelineState) -> String {
     }
 }
 
+/// The menu-bar glyph: a download percentage while a cleanup model is still
+/// downloading, otherwise the pipeline state symbol. The state wins while
+/// recording/processing/error, so a background download never hides the
+/// feedback that matters most.
+func menuBarGlyph(_ state: PipelineState, progress: Double?) -> String {
+    guard state == .idle, let progress, progress < 1 else { return glyphFor(state) }
+    return "\(Int((progress * 100).rounded(.down)))%"
+}
+
 func truncateLabel(_ text: String, n: Int = 40) -> String {
     guard text.count > n else { return text }
     let cutIndex = text.index(text.startIndex, offsetBy: n - 1)
@@ -37,7 +46,7 @@ struct MenuBarView: View {
 
     private var statusText: String? {
         switch model.state {
-        case .idle: return nil
+        case .idle: return model.cleanupModelStatus
         case .recording: return "Recording…"
         case .processing: return "Transcribing…"
         case .error: return "Error — check log"
@@ -60,6 +69,31 @@ struct MenuBarView: View {
             }
         }
         .pickerStyle(.inline)
+
+        Picker("Cleanup Model", selection: Binding(
+            get: { model.activeCleanupModel },
+            set: { if let id = CleanupModelID(rawValue: $0) { model.switchCleanupModel(to: id) } }
+        )) {
+            ForEach(
+                CleanupModelCatalog.all.filter {
+                    $0.id != .appleIntelligence || model.appleIntelligenceAvailable
+                        || model.activeCleanupModel == $0.id.rawValue
+                }, id: \.id
+            ) { spec in
+                Text(pickerLabel(spec, status: model.modelStatuses[spec.id] ?? .notDownloaded))
+                    .tag(spec.id.rawValue)
+            }
+            // A defaults-set custom path overrides the picker — keep it visible.
+            if model.activeCleanupModel == "custom" {
+                Text("Custom model (set via defaults)").tag("custom")
+            }
+        }
+        .pickerStyle(.menu)
+        .disabled(model.activeCleanupModel == "custom")
+
+        Button("Manage Models…") {
+            openModelsWindow(openWindow)
+        }
 
         Picker("Microphone", selection: Binding(
             get: { model.microphoneUID ?? "" },
@@ -115,6 +149,11 @@ struct MenuBarView: View {
                     set: { model.setDictionaryLearning($0) }
                 )
             )
+            if let note = learningNote(
+                fidelitySafe: model.activeCleanupFidelitySafe, learningOn: model.dictionaryLearningEnabled)
+            {
+                Text(note)
+            }
             Button("Edit Dictionary…") {
                 openDictionaryWindow(openWindow)
             }

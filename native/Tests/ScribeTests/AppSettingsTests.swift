@@ -39,6 +39,7 @@ final class AppSettingsTests: XCTestCase {
         // Off by default: the learned-vocabulary prompt section drops words.
         XCTAssertEqual(settings.dictionaryLearningEnabled, false)
         XCTAssertEqual(settings.vocabularyBiasingEnabled, false)
+        XCTAssertNil(settings.cleanupModel)
     }
 
     // MARK: - Round-trip set/get
@@ -83,6 +84,12 @@ final class AppSettingsTests: XCTestCase {
         let other = AppSettings(defaults: defaults)
         XCTAssertEqual(other.engine, "whisper")
         XCTAssertEqual(other.minWords, 99)
+    }
+
+    func testCleanupModelRoundTrips() {
+        settings.cleanupModel = "gemma4"
+        XCTAssertEqual(settings.cleanupModel, "gemma4")
+        XCTAssertEqual(AppSettings(defaults: defaults).cleanupModel, "gemma4")
     }
 
     // MARK: - importToml

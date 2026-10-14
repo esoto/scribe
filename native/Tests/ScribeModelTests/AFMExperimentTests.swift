@@ -2,31 +2,9 @@ import FoundationModels
 import XCTest
 
 /// Experiment, not a gate: runs the golden set through AFM prompt variants.
-/// Gated behind `AFM_EXPERIMENT=1` so the default `ScribeModelTests` run skips it.
+/// Gated behind `TEST_RUNNER_AFM_EXPERIMENT=1` so the default `ScribeModelTests`
+/// run skips it.
 final class AFMExperimentTests: XCTestCase {
-
-    // MARK: - Golden set (mirrors GoldenEvalTests' private Codable mirror)
-
-    private struct GoldenCase: Codable {
-        let id: String
-        let input: String
-        let mustContain: [String]
-        let mustNotContain: [String]
-        let comment: String?
-
-        enum CodingKeys: String, CodingKey {
-            case id
-            case input
-            case mustContain = "must_contain"
-            case mustNotContain = "must_not_contain"
-            case comment
-        }
-    }
-
-    private struct GoldenSet: Codable {
-        let description: String
-        let cases: [GoldenCase]
-    }
 
     private struct CaseResult {
         let id: String
@@ -59,9 +37,9 @@ final class AFMExperimentTests: XCTestCase {
     // MARK: - Test entry point
 
     func testAFMExperiment() async throws {
-        guard ProcessInfo.processInfo.environment["AFM_EXPERIMENT"] == "1" else {
+        guard ProcessInfo.processInfo.environment["TEST_RUNNER_AFM_EXPERIMENT"] == "1" else {
             throw XCTSkip(
-                "AFM experiment gated behind AFM_EXPERIMENT=1 (pass -TEST_RUNNER_AFM_EXPERIMENT=1 to xcodebuild) — skipped in default runs"
+                "AFM experiment gated behind TEST_RUNNER_AFM_EXPERIMENT=1 (set as an ENVIRONMENT variable in front of xcodebuild — xcodebuild forwards TEST_RUNNER_-prefixed env vars into the test process. Passed as an xcodebuild ARGUMENT it is silently dropped and the class skips while the run still reports success)"
             )
         }
         guard #available(macOS 26.0, *) else {
@@ -140,7 +118,7 @@ final class AFMExperimentTests: XCTestCase {
     @available(macOS 26.0, *)
     private static func options(for testCase: GoldenCase) -> GenerationOptions {
         GenerationOptions(
-            sampling: .greedy,
+            samplingMode: .greedy,
             temperature: 0.0,
             maximumResponseTokens: CleanupPrompt.maxTokens(inputTokens: testCase.input.count / 4)
         )

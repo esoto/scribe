@@ -1,5 +1,5 @@
 {
-  "description": "Cleanup golden set — run via `make eval`. REQUIRED before changing the cleanup prompt or model. Comparisons are lowercase substring checks.",
+  "description": "Cleanup golden set — run via `make test-models` (and `make test-models-gemma4`). REQUIRED before changing the cleanup prompt or model. Comparisons are lowercase substring checks.",
   "cases": [
     {
       "id": "en-correction-meeting",

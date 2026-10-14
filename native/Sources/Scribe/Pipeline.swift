@@ -37,7 +37,8 @@ private struct CleanupTimeoutError: Error {}
 final class DictationPipeline {
     private let recorder: RecorderLike
     private var stt: SttEngine
-    private let cleaner: CleanupBackend?
+    private var cleaner: CleanupBackend?
+    private(set) var cleanupModelName: String = ""
     private let paster: Pasting
     private let history: History
     private let config: PipelineConfig
@@ -127,6 +128,11 @@ final class DictationPipeline {
         self.engineName = name
     }
 
+    func setCleaner(_ cleaner: CleanupBackend?, name: String) {
+        self.cleaner = cleaner
+        self.cleanupModelName = name
+    }
+
     // MARK: - Processing (runs on the injected runner)
 
     private func process(_ pcm: [Float]) async {
@@ -181,7 +187,7 @@ final class DictationPipeline {
             }
             cleanupMs = Int((clock() - cleanStart) * 1000)
         }
-        onLog?("dictation: engine=\(engineName) stt=\(sttMs)ms bias=\(biasMs)ms cleanup=\(cleanupMs)ms cleaned=\(cleaned) chars=\(final.count)")
+        onLog?("dictation: engine=\(engineName) cleanupModel=\(cleanupModelName) stt=\(sttMs)ms bias=\(biasMs)ms cleanup=\(cleanupMs)ms cleaned=\(cleaned) chars=\(final.count)")
 
         if cleaned {
             onCleaned?(final)

@@ -5,10 +5,11 @@ Personal hold-to-talk dictation for macOS — fully local, English + Spanish.
 Hold the hotkey (**Right ⌥** by default), speak, release:
 [Parakeet TDT v3](https://huggingface.co/mlx-community/parakeet-tdt-0.6b-v3)
 transcribes (~0.2 s), [Gemma 3 4B](https://huggingface.co/mlx-community/gemma-3-4b-it-qat-4bit)
-strips fillers and resolves self-corrections, and the result is pasted into
-whatever app has focus. No cloud, no accounts. Audio and text never leave
-the machine; models download once on first use, then everything runs
-offline.
+strips fillers and resolves self-corrections — or pick Gemma 4 E4B, Gemma 4
+E2B or Apple Intelligence from the menu (see *Cleanup models*) — and the result
+is pasted into whatever app has focus. No cloud, no accounts. Audio and
+text never leave the machine; models download once on first use, then
+everything runs offline.
 
 A native Swift menu-bar app (`native/`) — it replaced the original Python
 implementation (removed 2026-07-09; see git history for the reference
@@ -45,8 +46,14 @@ everything re-downloads on next use.
 | Model | Size | Store subfolder |
 |---|---|---|
 | Gemma 3 4B (cleanup) | ~2.8 GB | `gemma/` |
+| Gemma 4 E4B (cleanup) | ~4.9 GB | `gemma/` |
+| Gemma 4 E2B (cleanup) | ~3.6 GB | `gemma/` |
+| Apple Intelligence (cleanup) | none — built into macOS 26+ | — |
 | Parakeet v3 (STT) | ~0.5 GB | `parakeet/` |
 | Whisper (optional STT) | ~1.5 GB | `whisper/` |
+
+Downloaded cleanup models can be deleted from **Manage Models…** (not
+the one in use).
 
 ## Usage
 
@@ -55,6 +62,11 @@ everything re-downloads on next use.
   status line while recording/transcribing.
 - **Engine** picker: Parakeet (fast, default) ↔ Whisper (better for
   Spanish-heavy dictation; loads on first switch).
+- **Cleanup Model** picker: Gemma 3 4B · Gemma 4 E4B · Gemma 4 E2B
+  (smallest, fastest) · Apple Intelligence (shown when available). Selecting one downloads
+  it with progress in the status line; the previous model is unloaded
+  once the new one is ready. **Manage Models…** lists what's on disk and
+  deletes what you no longer want.
 - **Cleanup** toggle: off = verbatim transcription pasted raw.
 - **History**: last 10 dictations (in memory only, never persisted); click
   one to copy it back to the clipboard.
@@ -64,6 +76,41 @@ everything re-downloads on next use.
   raw transcript is pasted instead — you never lose words.
 - The microphone is captured **only while the key is held** — the orange
   mic indicator turns off at key-up.
+
+## Cleanup models
+
+The **Cleanup Model** picker offers four models; the default is
+**Gemma 3 4B**. The intent is that the default must pass golden + guard;
+today it has one known guard failure, documented below. Existing installs
+keep the model they already use.
+
+| Model | Golden | Guard | Learned vocabulary | Avg cleanup latency |
+|---|---|---|---|---|
+| Gemma 3 4B (default) | 10/10 | 7/8 | no | ~950 ms |
+| Gemma 4 E4B | 9/10 | 7/8 | yes | ~460 ms |
+| Gemma 4 E2B | 8/10 | 7/8 | yes | ~330 ms |
+| Apple Intelligence | 8/10 | 4/8 | no | ~430 ms |
+
+Gemma 4 E2B is the fastest local model and the smallest download of the
+two Gemma 4 sizes, at the cost of two golden cases (a Spanish
+self-correction and a filler leak) — pick it for speed, E4B for accuracy.
+It shares E4B's single guard failure.
+
+Two guard failures are currently known, human-approved, and deliberately
+not recorded as `known_failures`:
+
+- **Gemma 3 fails `en-guard-translate`** — it returns an empty string (a
+  refusal); scribe's gates then fall back to pasting the raw transcript.
+- **Gemma 4 fails `en-guard-ignore-instructions`** — it answers the
+  injected instruction instead of cleaning the sentence (both E4B and
+  E2B).
+
+Learned vocabulary (Dictionary → **Learn New Terms**) reaches only models
+proven by `DictionaryFidelityTests` to keep every word — currently
+**Gemma 4 E4B** and **Gemma 4 E2B**; Gemma 3 and Apple Intelligence do
+not receive learned terms. Apple Intelligence is built into macOS 26+;
+if it turns off while selected, that dictation pastes the raw transcript
+and scribe switches to Gemma.
 
 ## Dictionary
 
@@ -97,24 +144,28 @@ against `headsner` — `Headstar` and `Hatsner` are 2 edits away, but so is
 is 2 edits — and so are **"camera"** and **"cancel"**. No threshold
 separates them, so a human confirms instead.
 
-**Learned terms (automatic) — off by default, and it should stay off for
-now.** The intent: distinctive vocabulary in cleaned dictations (proper
-nouns, acronyms, `camelCase`, words with digits) is counted, and anything
-appearing in **3 separate dictations** gets its spelling locked in. Terms
-go stale after 60 days unused (14 for ones never promoted).
+**Learned terms (automatic) — off by default.** The learned vocabulary
+only reaches models proven by `DictionaryFidelityTests` to keep every
+word — currently **Gemma 4 E4B** and **Gemma 4 E2B**. With other models the toggle still
+collects words, and the menu notes they aren't sent. The intent:
+distinctive vocabulary in cleaned dictations (proper nouns, acronyms,
+`camelCase`, words with digits) is counted, and anything appearing in
+**3 separate dictations** gets its spelling locked in. Terms go stale
+after 60 days unused (14 for ones never promoted).
 
-It's disabled because it currently **costs you words.** Measured against
-the real model, injecting the learned-vocabulary list makes cleanup delete
-words from the sentence — including words the list never mentions. A
+On Gemma 3 the glossary **costs you words**: measured against the real
+model, injecting the learned-vocabulary list makes cleanup delete words
+from the sentence — including words the list never mentions. A
 vocabulary of just `"Postgres"` was enough to turn *"deploy with kamal to
 hetzner tonight"* into *"Deploy with hetzner tonight."* Replacement pairs
-show no such effect. `DictionaryFidelityTests` pins this; **Learn New
-Terms** enables it anyway if you want to experiment.
+show no such effect. `DictionaryFidelityTests` pins this and drives the
+per-model gate above.
 
 Both are stored in `~/Library/Application Support/scribe/dictionary.json`
 — **individual words only, never transcripts.** Delete the file for a clean
 reset. Only learned terms reach the cleanup prompt (at most 30, highest-use
-first); editing a replacement costs nothing, since the model never sees it.
+first — and only on fidelity-safe models); editing a replacement costs
+nothing, since the model never sees it.
 
 ## Configuration
 
@@ -136,7 +187,8 @@ Change via `defaults write dev.esoto.scribe <key> <value>` and relaunch:
 | `historySize` | 10 | menu history length |
 | `idleUnloadMinutes` | 15 | unload models after idle (0 = keep resident) |
 | `dictionaryLearningEnabled` | false | auto-learn vocabulary (known to drop words — see Dictionary) |
-| `cleanupModelPath` | _(unset)_ | local MLX model folder to use for cleanup instead of stock Gemma |
+| `cleanupModel` | resolved at first launch | `gemma3` \| `gemma4` \| `gemma4e2b` \| `appleIntelligence` |
+| `cleanupModelPath` | _(unset)_ | local MLX model folder to use for cleanup instead of stock Gemma; when set, overrides `cleanupModel` and disables the picker |
 
 **Custom cleanup model:** point `cleanupModelPath` at any local MLX model
 folder (config.json + safetensors + tokenizer) and relaunch;
@@ -148,9 +200,11 @@ scores 10/10).
 
 ## Memory behavior
 
-Model weights dominate the footprint (~3.3 GB with Parakeet + Gemma warm —
-GPU/unified memory, invisible to RSS; check Activity Monitor's Memory
-column). scribe manages them on demand:
+Model weights dominate the footprint (~3.3 GB with Parakeet + Gemma 3 4B
+warm; Gemma 4 E4B peaks at ~4.7 GB, and the smaller Gemma 4 E2B below
+that — GPU/unified memory, invisible to RSS; check Activity Monitor's
+Memory column). Apple Intelligence runs
+outside scribe's process. scribe manages them on demand:
 
 - Models preload at launch and on key-down, so loads overlap with speech.
 - After `idleUnloadMinutes` without dictating, everything unloads and the
@@ -177,12 +231,33 @@ column). scribe manages them on demand:
 ## Development
 
 ```sh
-make generate     # regenerate the Xcode project after adding files
-make test         # unit suite (fast, no models)
-make test-models  # real-model suite: golden cleanup eval, STT fixtures, memory reclaim
+make generate              # regenerate the Xcode project after adding files
+make test                  # unit suite (fast, no models)
+make test-models           # real-model suite: golden cleanup eval, STT fixtures, memory reclaim
+make build-models          # compile-check the real-model test target (no GPU, no run)
+make test-models-gemma4    # golden + guard + fidelity for Gemma 4 E4B (CLEANUP_MODEL=gemma4)
+make test-models-e2b       # same for Gemma 4 E2B (CLEANUP_MODEL=gemma4e2b)
+make test-models-afm       # same for Apple Intelligence — report-only, exit code ignored
 ```
 
-The golden set (`tests_models/golden.json`) is REQUIRED to pass before
-changing the cleanup prompt or model. Architecture: one process; OS
-adapters are logic-free shells; every decision (state machine, gates,
-fallbacks) is pure and injected — see the spec.
+The per-model targets run only the `CLEANUP_MODEL`-aware classes
+(`GoldenEvalTests`, `InjectionGuardTests`, `DictionaryGoldenEvalTests`,
+`DictionaryFidelityTests`); the Gemma-3-hard-wired ones
+(`FastPathBoundaryTests`, `GemmaPreloadTests`, `MemoryReclaimTests`,
+`DictionaryWarmRebuildTests`) run under `make test-models` only.
+`CLEANUP_MODEL` must be an environment variable —
+`TEST_RUNNER_CLEANUP_MODEL=gemma4` — never an xcodebuild argument; the afm
+target ignores xcodebuild's exit code by design (Apple Intelligence is
+opt-in and not held to 10/10).
+
+The golden set (`tests_models/golden.json`) and the injection-guard set
+(`tests_models/injection_guard.json`) are REQUIRED to pass, per model,
+before changing the cleanup prompt or model: the default must pass
+golden + guard. Two guard failures are currently known and
+human-approved — Gemma 3 fails `en-guard-translate` (empty-string
+refusal; the gates fall back to the raw transcript) and Gemma 4 fails
+`en-guard-ignore-instructions` (it answers the injected instruction) —
+deliberately not recorded as `known_failures` (see *Cleanup models*).
+Architecture: one process; OS adapters are logic-free shells; every
+decision (state machine, gates, fallbacks) is pure and injected — see
+the spec.

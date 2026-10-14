@@ -49,4 +49,22 @@ final class ModelStoreTests: XCTestCase {
         let config = GemmaBackend.modelConfiguration(customPath: "/tmp/my-model")
         XCTAssertTrue(config.extraEOSTokens.isEmpty)
     }
+
+    func testGemma4ConfigurationUsesItsOwnTurnToken() {
+        let config = GemmaBackend.modelConfiguration(spec: CleanupModelCatalog.gemma4)
+        XCTAssertEqual(config.extraEOSTokens, ["<turn|>"])
+        XCTAssertEqual(config.name, "mlx-community/gemma-4-e4b-it-4bit")
+    }
+
+    func testCustomPathIgnoresTheSpecStopTokens() {
+        let config = GemmaBackend.modelConfiguration(spec: CleanupModelCatalog.gemma4, customPath: "/tmp/my-model")
+        XCTAssertTrue(config.extraEOSTokens.isEmpty)
+    }
+
+    /// Constructing a backend must not load a model — only conformance is checked.
+    func testGemmaBackendIsACleanupModelBackend() {
+        let backend: any CleanupModelBackend = GemmaBackend(spec: CleanupModelCatalog.gemma4)
+        backend.setDictionary(.empty)
+        XCTAssertTrue(backend.holdsMemory)
+    }
 }
