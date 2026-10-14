@@ -59,7 +59,7 @@ enum CleanupModelCatalog {
     static let gemma4 = CleanupModelSpec(
         id: .gemma4, label: "Gemma 4 E4B",
         kind: .mlx(repoID: "mlx-community/gemma-4-e4b-it-4bit", extraEOSTokens: ["<turn|>"]),
-        approxDownloadBytes: 4_900_000_000, fidelitySafe: false)
+        approxDownloadBytes: 4_900_000_000, fidelitySafe: true)
 
     static let appleIntelligence = CleanupModelSpec(
         id: .appleIntelligence, label: "Apple Intelligence",
