@@ -3,10 +3,10 @@ import XCTest
 
 /// Guards the 8-message chat layout: few-shot user turns must be wrapped in <transcript> too.
 final class GemmaChatStructureTests: XCTestCase {
-    func testBuildChatProducesExactlyEightMessages() {
+    func testBuildChatProducesExactlyTenMessages() {
         let chat = GemmaBackend.buildChat(for: "hello there", systemPrompt: CleanupPrompt.systemPrompt)
         XCTAssertEqual(chat.count, 1 + 2 * CleanupPrompt.fewShots.count + 1)
-        XCTAssertEqual(chat.count, 8)
+        XCTAssertEqual(chat.count, 10)
     }
 
     func testFirstMessageIsSystemPrompt() {

@@ -59,6 +59,10 @@ enum CleanupPrompt {
             "digamos que el deploy eh queda listo hoy",
             "Digamos que el deploy queda listo hoy."
         ),
+        (
+            "este bueno mandamos el informe el jueves no mejor el viernes temprano",
+            "Mandamos el informe el viernes temprano."
+        ),
     ]
 
     static func wrap(_ transcript: String) -> String {

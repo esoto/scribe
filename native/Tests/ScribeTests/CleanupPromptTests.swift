@@ -12,7 +12,7 @@ final class CleanupPromptTests: XCTestCase {
         XCTAssertTrue(all.lowercased().contains("no wait"))
         XCTAssertTrue(all.contains("código"))
         XCTAssertTrue(all.contains("deploy"))
-        XCTAssertEqual(CleanupPrompt.fewShots.count, 3)
+        XCTAssertEqual(CleanupPrompt.fewShots.count, 4)
     }
     func testWrap() {
         XCTAssertEqual(CleanupPrompt.wrap("hola"), "<transcript>\nhola\n</transcript>")
