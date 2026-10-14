@@ -12,6 +12,15 @@ func glyphFor(_ state: PipelineState) -> String {
     }
 }
 
+/// The menu-bar glyph: a download percentage while a cleanup model is still
+/// downloading, otherwise the pipeline state symbol. The state wins while
+/// recording/processing/error, so a background download never hides the
+/// feedback that matters most.
+func menuBarGlyph(_ state: PipelineState, progress: Double?) -> String {
+    guard state == .idle, let progress, progress < 1 else { return glyphFor(state) }
+    return "\(Int((progress * 100).rounded(.down)))%"
+}
+
 func truncateLabel(_ text: String, n: Int = 40) -> String {
     guard text.count > n else { return text }
     let cutIndex = text.index(text.startIndex, offsetBy: n - 1)

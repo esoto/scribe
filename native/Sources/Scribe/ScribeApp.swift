@@ -18,6 +18,9 @@ final class AppModel: ObservableObject {
     /// preload or a picker switch) — gates the progress status line so a
     /// late progress tick can't resurrect "Loading…" after commit.
     private var cleanupLoadInFlight = false
+    /// True once this switch reported progress below 1, so the completion
+    /// notification fires only when something really downloaded.
+    private var cleanupModelDidDownload = false
     /// Set once the AFM-lost fallback has fired; stops every key-down's
     /// availability refresh from re-notifying and retrying a fallback that
     /// already ran (or failed to load). Reset when AFM is available again.
@@ -55,6 +58,8 @@ final class AppModel: ObservableObject {
     @Published private(set) var activeCleanupModel: String
     @Published private(set) var pendingCleanupModel: String?
     @Published private(set) var cleanupModelStatus: String?
+    /// Download fraction (0…1) while a cleanup model downloads; nil otherwise.
+    @Published private(set) var cleanupModelProgress: Double?
     @Published private(set) var appleIntelligenceAvailable: Bool
     @Published private(set) var appleIntelligenceUnavailableReason: String?
     @Published private(set) var modelStatuses: [CleanupModelID: CleanupModelStore.Status] = [:]
@@ -63,7 +68,7 @@ final class AppModel: ObservableObject {
 
     private let pipelineConfig: PipelineConfig
 
-    var glyph: String { glyphFor(state) }
+    var glyph: String { menuBarGlyph(state, progress: cleanupModelProgress) }
     var grantsOk: Bool { grants.microphone && grants.accessibility && grants.inputMonitoring }
 
     init() {
@@ -191,6 +196,8 @@ final class AppModel: ObservableObject {
             Task { @MainActor in
                 guard let self, self.cleanupLoadInFlight else { return }
                 self.cleanupModelStatus = CleanupModelCatalog.statusText(label: label, fraction: fraction)
+                self.cleanupModelProgress = fraction
+                if fraction < 1 { self.cleanupModelDidDownload = true }
             }
         }
         appleIntelligenceLost.set { [weak self] in
@@ -273,6 +280,7 @@ final class AppModel: ObservableObject {
                 if self.pendingCleanupModel == nil {
                     self.cleanupLoadInFlight = false
                     self.cleanupModelStatus = nil
+                    self.cleanupModelProgress = nil
                 }
             }
             let elapsed = Date().timeIntervalSince(t0)
@@ -435,6 +443,7 @@ final class AppModel: ObservableObject {
             pendingCleanupModel = nil
             cleanupLoadInFlight = false
             cleanupModelStatus = nil
+            cleanupModelProgress = nil
         case .begin:
             cleanupSwitchTask?.cancel()
             pendingCleanupModel = name
@@ -449,6 +458,8 @@ final class AppModel: ObservableObject {
             let logger = self.logger
             cleanupLoadInFlight = true
             cleanupModelStatus = "Loading \(spec.label)…"
+            cleanupModelProgress = nil
+            cleanupModelDidDownload = false
             cleanupSwitchTask = Task { [weak self] in
                 await newCleaner.preload()
                 guard let self else { return }
@@ -474,7 +485,12 @@ final class AppModel: ObservableObject {
                 // is actually running (unlike init, which never overwrites).
                 self.settings.cleanupModel = name
                 self.cleanupModelStatus = nil
+                self.cleanupModelProgress = nil
                 logger.log("switched cleanup model to \(name)")
+                if self.cleanupModelDidDownload {
+                    self.cleanupModelDidDownload = false
+                    self.notify("\(spec.label) is ready.")
+                }
                 // The switch counts as activity: without this a model that
                 // just finished loading can be idle-unloaded within 60 s.
                 self.idleTracker.touch(now: ProcessInfo.processInfo.systemUptime)

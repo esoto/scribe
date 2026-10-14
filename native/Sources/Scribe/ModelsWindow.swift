@@ -93,6 +93,18 @@ struct ModelsWindow: View {
                 Text("A custom model is set via `defaults write dev.esoto.scribe cleanupModelPath`; it overrides this list.")
                     .font(.caption).foregroundStyle(.secondary)
             }
+            if let status = model.cleanupModelStatus {
+                HStack(spacing: 8) {
+                    if let fraction = model.cleanupModelProgress, fraction < 1 {
+                        ProgressView(value: fraction)
+                            .progressViewStyle(.linear)
+                            .frame(width: 140)
+                    } else {
+                        ProgressView().controlSize(.small)
+                    }
+                    Text(status).font(.caption).foregroundStyle(.secondary)
+                }
+            }
             GroupBox {
                 VStack(alignment: .leading, spacing: 10) {
                     ForEach(rows) { row in
