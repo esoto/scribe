@@ -61,7 +61,8 @@ final class PasteTarget: @unchecked Sendable {
     }
 }
 
-/// Only the pipeline worker calls this, never main, so blocking on the main queue cannot deadlock.
+/// Safe from any thread: reads directly on main, hops otherwise.
 func frontmostPID() -> pid_t? {
-    DispatchQueue.main.sync { NSWorkspace.shared.frontmostApplication?.processIdentifier }
+    let read = { NSWorkspace.shared.frontmostApplication?.processIdentifier }
+    return Thread.isMainThread ? read() : DispatchQueue.main.sync(execute: read)
 }

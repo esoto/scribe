@@ -60,7 +60,7 @@ final class PasteGuardTests: XCTestCase {
         let paster = guarded(inner, expected: 42, current: nil)
 
         XCTAssertThrowsError(try paster.paste("hola")) { error in
-            XCTAssertTrue(error is PasteGuardError)
+            XCTAssertEqual((error as? PasteGuardError)?.notice, "Focus changed — text copied, press ⌘V")
         }
         XCTAssertEqual(inner.copied, ["hola"])
         XCTAssertEqual(inner.pasted, [])
