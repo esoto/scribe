@@ -1,10 +1,11 @@
 import Foundation
 
 /// On-disk state of MLX cleanup models in the app's Hugging Face hub cache
-/// (`ModelStore.gemmaDirectory`): `models--<org>--<repo>/{blobs,refs/main,
-/// snapshots/<commit>/…}`, snapshot files symlinked into `blobs/`. Sizes
-/// come from `blobs/` only — walking `snapshots/` would count every file
-/// twice through its symlink.
+/// (`ModelStore.gemmaDirectory`): `models--<org>--<repo>/{blobs,snapshots/
+/// <commit>/…}`, snapshot files symlinked into `blobs/`. Installs made before
+/// models were pinned also have `refs/main` naming their commit. Sizes come
+/// from `blobs/` only — walking `snapshots/` would count every file twice
+/// through its symlink.
 struct CleanupModelStore {
     enum Status: Equatable {
         case notDownloaded
@@ -36,18 +37,48 @@ struct CleanupModelStore {
             "models--" + repoID.replacingOccurrences(of: "/", with: "--"), isDirectory: true)
     }
 
-    func status(_ repoID: String) -> Status {
+    /// `revision` defaults to the catalog's pin for `repoID` (else `main`), so a
+    /// caller that only knows the repo reports the commit the app will load.
+    func status(_ repoID: String, revision: String? = nil) -> Status {
         let dir = repoDirectory(repoID)
         guard FileManager.default.fileExists(atPath: dir.path) else { return .notDownloaded }
         let bytes = blobBytes(in: dir)
-        if isComplete(dir) { return .downloaded(bytes: bytes) }
+        let revision = revision ?? CleanupModelCatalog.pinnedRevision(repoID: repoID) ?? "main"
+        if snapshotDirectory(repoID: repoID, revision: revision) != nil { return .downloaded(bytes: bytes) }
         return bytes > 0 ? .partial(bytes: bytes) : .notDownloaded
     }
 
+    /// The snapshot for `revision` if it is complete, else nil. A commit hash
+    /// names `snapshots/<commit>` directly: a pinned download writes no `refs/`
+    /// entry, and a legacy install whose `refs/main` points at the same commit
+    /// has that directory too, so both layouts pass without a re-download. Any
+    /// other revision is a ref name read from `refs/<revision>`.
+    func snapshotDirectory(repoID: String, revision: String) -> URL? {
+        let dir = repoDirectory(repoID)
+        let commit: String
+        if Self.isCommitHash(revision) {
+            commit = revision
+        } else if let ref = try? String(
+            contentsOf: dir.appendingPathComponent("refs/\(revision)"), encoding: .utf8
+        ).trimmingCharacters(in: .whitespacesAndNewlines), !ref.isEmpty {
+            commit = ref
+        } else {
+            return nil
+        }
+        let snapshot = dir.appendingPathComponent("snapshots/\(commit)", isDirectory: true)
+        return isComplete(snapshot) ? snapshot : nil
+    }
+
+    /// Same test swift-huggingface uses to treat a revision as a commit rather than a ref.
+    private static func isCommitHash(_ revision: String) -> Bool {
+        revision.count == 40 && revision.allSatisfy(\.isHexDigit)
+    }
+
     /// Removes the whole `models--*` directory (blobs, refs, snapshots, trees)
-    /// plus the hub's `.metadata`/`.locks` sidecar folders for it if a hub
-    /// version wrote any (the current cache has none; each is skipped when
-    /// absent). Callers must refuse the model in use first (`canDeleteModel`).
+    /// plus the hub's `.metadata`/`.locks` sidecar folders for it. Every
+    /// download leaves `.locks` and pinned ones `.metadata`; delete clears both
+    /// (each is skipped when absent). Callers must refuse the model in use
+    /// first (`canDeleteModel`).
     func delete(_ repoID: String) throws {
         let name = repoDirectory(repoID).lastPathComponent
         let targets = [
@@ -60,33 +91,34 @@ struct CleanupModelStore {
         }
     }
 
-    /// Complete = refs/main names a snapshot holding config.json plus a
+    /// Complete = the snapshot holds everything a directory load needs:
+    /// config.json, tokenizer.json, tokenizer_config.json (without it the
+    /// tokenizer class is guessed and strict mode throws), a chat template
+    /// (.jinja or .json; without one the prompt goes to the model untemplated
+    /// and cleanup silently degrades) and a
     /// loadable weight set: every shard the index names, or the single-file
     /// `model.safetensors` the loader falls back to. Some repos publish a
     /// stale index beside a single-file model (gemma-3-4b-it-qat-4bit names
     /// two shards that were never uploaded), and an index alone must not
     /// report a working model as half-downloaded. `fileExists` follows
-    /// symlinks, so a link whose blob never finished counts as missing.
-    private func isComplete(_ dir: URL) -> Bool {
+    /// symlinks, so a link whose blob never finished counts as missing. The
+    /// small files are required because a directory load, unlike a load by id,
+    /// cannot fetch one an interrupted download never wrote.
+    private func isComplete(_ snapshot: URL) -> Bool {
         let fm = FileManager.default
-        guard
-            let commit = try? String(contentsOf: dir.appendingPathComponent("refs/main"), encoding: .utf8)
-                .trimmingCharacters(in: .whitespacesAndNewlines),
-            !commit.isEmpty
+        let has = { (name: String) in fm.fileExists(atPath: snapshot.appendingPathComponent(name).path) }
+        guard ["config.json", "tokenizer.json", "tokenizer_config.json"].allSatisfy(has),
+            has("chat_template.jinja") || has("chat_template.json")
         else { return false }
-        let snapshot = dir.appendingPathComponent("snapshots/\(commit)", isDirectory: true)
-        guard fm.fileExists(atPath: snapshot.appendingPathComponent("config.json").path) else { return false }
         let index = snapshot.appendingPathComponent("model.safetensors.index.json")
         if let data = try? Data(contentsOf: index),
             let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
             let weightMap = json["weight_map"] as? [String: String]
         {
             let shards = Set(weightMap.values)
-            if shards.allSatisfy({ fm.fileExists(atPath: snapshot.appendingPathComponent($0).path) }) {
-                return true
-            }
+            if shards.allSatisfy(has) { return true }
         }
-        return fm.fileExists(atPath: snapshot.appendingPathComponent("model.safetensors").path)
+        return has("model.safetensors")
     }
 
     private func blobBytes(in dir: URL) -> Int64 {

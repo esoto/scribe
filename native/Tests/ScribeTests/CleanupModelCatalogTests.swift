@@ -1,3 +1,4 @@
+import MLXLMCommon
 import XCTest
 
 final class CleanupModelCatalogTests: XCTestCase {
@@ -8,18 +9,49 @@ final class CleanupModelCatalogTests: XCTestCase {
     func testSpecsCarryTheirRepoAndStopToken() {
         XCTAssertEqual(
             CleanupModelCatalog.gemma3.kind,
-            .mlx(repoID: "mlx-community/gemma-3-4b-it-qat-4bit", extraEOSTokens: ["<end_of_turn>"]))
+            .mlx(
+                repoID: "mlx-community/gemma-3-4b-it-qat-4bit",
+                revision: "3d9ef289111449933c22761961f16a5df237ce2a", extraEOSTokens: ["<end_of_turn>"]))
         XCTAssertEqual(
             CleanupModelCatalog.gemma4.kind,
-            .mlx(repoID: "mlx-community/gemma-4-e4b-it-4bit", extraEOSTokens: ["<turn|>"]))
+            .mlx(
+                repoID: "mlx-community/gemma-4-e4b-it-4bit",
+                revision: "475b9088d29754a3379866cf5aeb6b41acd313c2", extraEOSTokens: ["<turn|>"]))
         XCTAssertEqual(
             CleanupModelCatalog.gemma4e2b.kind,
-            .mlx(repoID: "mlx-community/gemma-4-e2b-it-4bit", extraEOSTokens: ["<turn|>"]))
+            .mlx(
+                repoID: "mlx-community/gemma-4-e2b-it-4bit",
+                revision: "238767527555cb75a05732a84dff5d6ba0dd6809", extraEOSTokens: ["<turn|>"]))
         XCTAssertEqual(CleanupModelCatalog.appleIntelligence.kind, .appleIntelligence)
         XCTAssertNil(CleanupModelCatalog.appleIntelligence.repoID)
         XCTAssertEqual(CleanupModelCatalog.all.map(\.id), CleanupModelID.allCases)
         for id in CleanupModelID.allCases {
             XCTAssertEqual(CleanupModelCatalog.spec(id).id, id)
+        }
+    }
+
+    /// A branch name would let upstream swap the model under an installed app.
+    func testEveryMLXModelIsPinnedToACommit() throws {
+        for spec in CleanupModelCatalog.all where spec.repoID != nil {
+            let revision = try XCTUnwrap(spec.revision, "\(spec.id)")
+            XCTAssertNotNil(
+                revision.range(of: "^[0-9a-f]{40}$", options: .regularExpression), "\(spec.id): \(revision)")
+        }
+        XCTAssertNil(CleanupModelCatalog.appleIntelligence.revision)
+    }
+
+    func testPinnedRevisionLookupByRepo() {
+        XCTAssertEqual(
+            CleanupModelCatalog.pinnedRevision(repoID: "mlx-community/gemma-4-e4b-it-4bit"),
+            CleanupModelCatalog.gemma4.revision)
+        XCTAssertNil(CleanupModelCatalog.pinnedRevision(repoID: "mlx-community/not-in-the-catalog"))
+    }
+
+    func testStockConfigurationRequestsThePinnedRevision() throws {
+        for spec in CleanupModelCatalog.all where spec.repoID != nil {
+            XCTAssertEqual(
+                GemmaBackend.modelConfiguration(spec: spec).id,
+                .id(try XCTUnwrap(spec.repoID), revision: try XCTUnwrap(spec.revision)), "\(spec.id)")
         }
     }
 

@@ -82,13 +82,14 @@ final class GemmaBackend: CleanupModelBackend, @unchecked Sendable {
         "este esto es solo una frase de calentamiento para el cache sin problema"
 
     /// `spec` picks the stock model; `customModelPath` overrides it with a local MLX folder.
-    /// `onProgress` gets download progress (0…1; a cached snapshot reports 1) on any thread.
+    /// `onProgress` gets download progress (0…1) on any thread. A load from a local snapshot reports
+    /// nothing; AppModel clears the status line when the load ends.
     init(
         spec: CleanupModelSpec = CleanupModelCatalog.gemma3,
         customModelPath: String? = nil,
         onProgress: (@Sendable (Double) -> Void)? = nil
     ) {
-        let configuration = GemmaBackend.modelConfiguration(spec: spec, customPath: customModelPath)
+        let configuration = GemmaBackend.localFirstConfiguration(spec: spec, customPath: customModelPath)
         lazyModel = LazyModel(label: "cleanup-\(spec.id.rawValue)") {
             // Expanded macro so the hub client uses the app-managed model store.
             try await loadModelContainer(
@@ -111,10 +112,26 @@ final class GemmaBackend: CleanupModelBackend, @unchecked Sendable {
         if let customPath {
             return ModelConfiguration(directory: URL(fileURLWithPath: customPath))
         }
-        guard case .mlx(let repoID, let extraEOSTokens) = spec.kind else {
+        guard case .mlx(let repoID, let revision, let extraEOSTokens) = spec.kind else {
             preconditionFailure("GemmaBackend loads MLX models only, got \(spec.id)")
         }
-        return ModelConfiguration(id: repoID, extraEOSTokens: extraEOSTokens)
+        return ModelConfiguration(id: repoID, revision: revision, extraEOSTokens: extraEOSTokens)
+    }
+
+    /// Loading by id lets the hub client list the repo on huggingface.co whenever it has no tree
+    /// metadata of its own (every install from before pinning), even with all files on disk. A
+    /// complete pinned snapshot is handed over as a plain directory instead, so the load never
+    /// touches the network. Anything less complete falls back to the pinned id, which downloads
+    /// into the same cache.
+    static func localFirstConfiguration(
+        spec: CleanupModelSpec = CleanupModelCatalog.gemma3, customPath: String? = nil,
+        store: CleanupModelStore = CleanupModelStore()
+    ) -> ModelConfiguration {
+        let pinned = modelConfiguration(spec: spec, customPath: customPath)
+        guard customPath == nil, case .mlx(let repoID, let revision, let extraEOSTokens) = spec.kind,
+            let snapshot = store.snapshotDirectory(repoID: repoID, revision: revision)
+        else { return pinned }
+        return ModelConfiguration(directory: snapshot, extraEOSTokens: extraEOSTokens)
     }
 
     /// Message list sent to Gemma. Few-shot user turns must go through wrap() like the real query,
