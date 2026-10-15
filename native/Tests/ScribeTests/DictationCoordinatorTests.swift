@@ -398,12 +398,14 @@ final class DictationCoordinatorTests: XCTestCase {
         let watchdog = c.holdWatchdog
 
         c.setHotkey(.f13)
-        c.handleKeyUp()  // the old key's release, arriving late
 
+        XCTAssertFalse(recorder.armed, "the swap itself ends the hold")
+        XCTAssertEqual(watchdog?.isCancelled, true)
         let idle = await eventually { c.state == .idle }
         XCTAssertTrue(idle)
-        XCTAssertFalse(recorder.armed)
-        XCTAssertEqual(watchdog?.isCancelled, true)
+
+        pipelineClock.t = 1.0  // past the 0.3 s threshold: a release still reaching an armed pipeline queues a job
+        c.handleKeyUp()  // the old key's release, arriving late
         XCTAssertEqual(jobs.value, [], "a hold cut off by the swap must not become a dictation")
     }
 
