@@ -355,7 +355,7 @@ struct ScribeApp: App {
         }
 
         Window("scribe dictionary", id: dictionaryWindowID) {
-            DictionaryWindow(model: model.dictionaryModel)
+            DictionaryWindow(model: model.dictionaryModel, cleanupModels: model.cleanupModels)
         }
 
         Window("scribe settings", id: settingsWindowID) {

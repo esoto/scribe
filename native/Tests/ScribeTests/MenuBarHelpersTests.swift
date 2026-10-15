@@ -129,4 +129,10 @@ final class MenuBarHelpersTests: XCTestCase {
         XCTAssertEqual(historyRowLabel(cleaned), "hello there")
         XCTAssertEqual(historyRowLabel(raw), "hello there · raw")
     }
+
+    func testEngineLabelIsTheOptionLabelAndFallsBackToTheId() {
+        XCTAssertEqual(engineLabel("parakeet"), "Parakeet (fast)")
+        XCTAssertEqual(engineLabel("whisper"), "Whisper (best Spanish)")
+        XCTAssertEqual(engineLabel("unknown"), "unknown")
+    }
 }
