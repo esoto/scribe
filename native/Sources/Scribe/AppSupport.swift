@@ -2,7 +2,7 @@ import Foundation
 
 /// Append-only file logger. Serialized on a private queue, so it is safe to call from any thread.
 /// Rotates once: when the file passes `maxBytes` the current log becomes `<name>.1` and a fresh file starts.
-final class FileLogger: @unchecked Sendable {
+final class FileLogger: Sendable {
     static let logsDirectory: URL = {
         FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Logs/scribe", isDirectory: true)
@@ -34,6 +34,7 @@ final class FileLogger: @unchecked Sendable {
             let line = "\(timestamp) \(message)\n"
             guard let data = line.data(using: .utf8) else { return }
             guard let handle = try? FileHandle(forWritingTo: fileURL) else {
+                // The log file itself is unwritable: stdout is the only place left (T9b's print sweep must keep this).
                 print("[scribe] \(message)")
                 return
             }
@@ -51,9 +52,14 @@ final class FileLogger: @unchecked Sendable {
     /// Keeps exactly one previous file (`scribe.log.1`): older history is not worth the disk or the attention.
     static func rotateIfNeeded(_ fileURL: URL, maxBytes: Int) {
         let fm = FileManager.default
-        guard let size = (try? fm.attributesOfItem(atPath: fileURL.path)[.size] as? NSNumber)?.intValue,
-              size >= maxBytes
-        else { return }
+        guard let size = (try? fm.attributesOfItem(atPath: fileURL.path)[.size] as? NSNumber)?.intValue else {
+            if !fm.fileExists(atPath: fileURL.path) {   // deleted while running: start a fresh one
+                try? fm.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+                fm.createFile(atPath: fileURL.path, contents: nil)
+            }
+            return
+        }
+        guard size >= maxBytes else { return }
         let previous = fileURL.appendingPathExtension("1")
         try? fm.removeItem(at: previous)
         try? fm.moveItem(at: fileURL, to: previous)

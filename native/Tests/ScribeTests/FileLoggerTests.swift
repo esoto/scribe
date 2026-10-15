@@ -61,7 +61,24 @@ final class FileLoggerTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: wav.path))
     }
 
-    func test_expiry_is_a_no_op_without_a_file() throws {
-        FileLogger.expireFailedAudio(in: try tempDir(), olderThanDays: 7)   // must not throw or crash
+    func test_expiry_touches_only_last_failed_wav() throws {
+        let dir = try tempDir()
+        let sibling = dir.appendingPathComponent("scribe.log")
+        try Data("old log".utf8).write(to: sibling)
+        let eightDaysAgo = Date(timeIntervalSinceNow: -8 * 86_400)
+        try FileManager.default.setAttributes([.modificationDate: eightDaysAgo], ofItemAtPath: sibling.path)
+        FileLogger.expireFailedAudio(in: dir, olderThanDays: 7)   // no last_failed.wav present: must not throw
+        XCTAssertTrue(FileManager.default.fileExists(atPath: sibling.path))
+    }
+
+    func test_recreates_a_log_deleted_while_running() throws {
+        let url = try tempDir().appendingPathComponent("scribe.log")
+        let logger = FileLogger(fileURL: url)
+        logger.log("before")
+        logger.flush()
+        try FileManager.default.removeItem(at: url)
+        logger.log("after delete")
+        logger.flush()
+        XCTAssertTrue(try String(contentsOf: url, encoding: .utf8).hasSuffix(" after delete\n"))
     }
 }
