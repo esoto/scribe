@@ -29,7 +29,8 @@ final class Paster {
         self.restoreDelay = restoreDelay
     }
 
-    func paste(_ text: String) throws {
+    /// `target` is GuardedPaster's concern; the default keeps direct callers unchanged.
+    func paste(_ text: String, target: pid_t? = nil) throws {
         let (saved, setCount) = lock.withLock {
             let saved: [PasteboardItemData]?
             if let pending, pasteboard.changeCount() == pending.setCount {
@@ -53,6 +54,14 @@ final class Paster {
             schedule(restoreDelay) { [weak self] in
                 self?.restore(saved: saved, setCount: setCount)
             }
+        }
+    }
+
+    /// For when ⌘V can't be sent. The user pastes by hand, so there is no restore to wipe the text.
+    func copyOnly(_ text: String) {
+        lock.withLock {
+            pending = nil
+            pasteboard.setTransient(text)
         }
     }
 

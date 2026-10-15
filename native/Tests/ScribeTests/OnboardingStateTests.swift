@@ -105,4 +105,37 @@ final class OnboardingStateTests: XCTestCase {
         XCTAssertTrue(url.absoluteString.contains("x-apple.systempreferences"))
         XCTAssertTrue(url.absoluteString.contains("com.apple.preference.security"))
     }
+
+    func testGrantChangePublishesOnlyWhenTheStatusDiffers() {
+        let all = GrantStatus(microphone: true, accessibility: true, inputMonitoring: true)
+        XCTAssertFalse(GrantChange(from: all, to: all).publish)
+        XCTAssertTrue(
+            GrantChange(from: all, to: GrantStatus(microphone: true, accessibility: false, inputMonitoring: true)).publish)
+    }
+
+    func testGrantChangeFlagsOnlyFalseToTrueFlipsOfMicAndInputMonitoring() {
+        let none = GrantStatus(microphone: false, accessibility: false, inputMonitoring: false)
+        let all = GrantStatus(microphone: true, accessibility: true, inputMonitoring: true)
+
+        let granted = GrantChange(from: none, to: all)
+        XCTAssertTrue(granted.microphoneNewlyGranted)
+        XCTAssertTrue(granted.inputMonitoringNewlyGranted)
+
+        // Revocation and steady state must not re-run the reactions.
+        let revoked = GrantChange(from: all, to: none)
+        XCTAssertFalse(revoked.microphoneNewlyGranted)
+        XCTAssertFalse(revoked.inputMonitoringNewlyGranted)
+        let steady = GrantChange(from: all, to: all)
+        XCTAssertFalse(steady.microphoneNewlyGranted)
+        XCTAssertFalse(steady.inputMonitoringNewlyGranted)
+    }
+
+    func testGrantChangeIgnoresAccessibilityFlipsForReactions() {
+        let off = GrantStatus(microphone: true, accessibility: false, inputMonitoring: true)
+        let on = GrantStatus(microphone: true, accessibility: true, inputMonitoring: true)
+        let change = GrantChange(from: off, to: on)
+        XCTAssertTrue(change.publish)
+        XCTAssertFalse(change.microphoneNewlyGranted)
+        XCTAssertFalse(change.inputMonitoringNewlyGranted)
+    }
 }

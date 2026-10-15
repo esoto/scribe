@@ -12,6 +12,19 @@ struct GrantStatus: Equatable {
     var inputMonitoring: Bool
 }
 
+/// What a fresh probe means for the published grants. Only a false→true flip of mic or Input Monitoring needs a reaction.
+struct GrantChange: Equatable {
+    let publish: Bool
+    let microphoneNewlyGranted: Bool
+    let inputMonitoringNewlyGranted: Bool
+
+    init(from old: GrantStatus, to fresh: GrantStatus) {
+        publish = fresh != old
+        microphoneNewlyGranted = fresh.microphone && !old.microphone
+        inputMonitoringNewlyGranted = fresh.inputMonitoring && !old.inputMonitoring
+    }
+}
+
 enum OnboardingStep: Equatable {
     case request(Grant)
     case done

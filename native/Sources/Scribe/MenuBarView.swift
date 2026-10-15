@@ -12,20 +12,37 @@ func glyphFor(_ state: PipelineState) -> String {
     }
 }
 
-/// The menu-bar glyph: a download percentage while a cleanup model is still
-/// downloading, otherwise the pipeline state symbol. The state wins while
+/// The menu-bar glyph: ⚠ while idle with a permission missing, a download percentage while a cleanup model
+/// is still downloading, otherwise the pipeline state symbol. The state wins while
 /// recording/processing/error, so a background download never hides the
 /// feedback that matters most.
-func menuBarGlyph(_ state: PipelineState, progress: Double?) -> String {
-    guard state == .idle, let progress, progress < 1 else { return glyphFor(state) }
+func menuBarGlyph(_ state: PipelineState, progress: Double?, needsAttention: Bool) -> String {
+    guard state == .idle else { return glyphFor(state) }
+    if needsAttention { return glyphFor(.error) }
+    guard let progress, progress < 1 else { return glyphFor(state) }
     return "\(Int((progress * 100).rounded(.down)))%"
 }
 
-/// Menu status line. An STT model download wins while idle or transcribing: a dictation made during the
+/// The first missing permission, in Setup order, as the menu's status line; nil when all are granted.
+func attentionText(for grants: GrantStatus) -> String? {
+    guard let first = OnboardingState.missing(grants).first else { return nil }
+    let name: String
+    switch first {
+    case .microphone: name = "Microphone"
+    case .accessibility: name = "Accessibility"
+    case .inputMonitoring: name = "Input Monitoring"
+    }
+    return "\(name) is off — open Setup / Doctor…"
+}
+
+/// Menu status line. While idle a missing permission wins, since dictation is broken until it's fixed.
+/// An STT model download wins while transcribing: a dictation made during the
 /// upgrade download waits on it, and "Transcribing…" alone would look like a hang.
-func menuStatusText(_ state: PipelineState, sttDownload: String?, cleanupStatus: String?) -> String? {
+func menuStatusText(
+    _ state: PipelineState, sttDownload: String?, cleanupStatus: String?, attention: String?
+) -> String? {
     switch state {
-    case .idle: return sttDownload ?? cleanupStatus
+    case .idle: return attention ?? sttDownload ?? cleanupStatus
     case .recording: return "Recording…"
     case .processing: return sttDownload ?? "Transcribing…"
     case .error: return "Error — check log"
@@ -56,7 +73,9 @@ struct MenuBarView: View {
     @Environment(\.openWindow) private var openWindow
 
     private var statusText: String? {
-        menuStatusText(model.state, sttDownload: model.sttDownloadStatus, cleanupStatus: model.cleanupModelStatus)
+        menuStatusText(
+            model.state, sttDownload: model.sttDownloadStatus, cleanupStatus: model.cleanupModelStatus,
+            attention: attentionText(for: model.grants))
     }
 
     var body: some View {
