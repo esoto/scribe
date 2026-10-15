@@ -95,6 +95,7 @@ struct MenuBarView: View {
     @ObservedObject var permissions: PermissionsModel
     @ObservedObject var dictation: DictationCoordinator
     @ObservedObject var cleanupModels: CleanupModelController
+    @ObservedObject var engineController: EngineController
     @Environment(\.openWindow) private var openWindow
 
     init(model: AppModel) {
@@ -103,12 +104,13 @@ struct MenuBarView: View {
         self.permissions = model.permissions
         self.dictation = model.dictation
         self.cleanupModels = model.cleanupModels
+        self.engineController = model.engineController
     }
 
     private var statusText: String? {
         menuStatusText(
-            dictation.state, sttDownload: model.sttDownloadStatus, cleanupStatus: cleanupModels.cleanupModelStatus,
-            attention: attentionText(for: permissions.grants))
+            dictation.state, sttDownload: model.sttDownloadStatus, engineStatus: engineController.engineStatus,
+            cleanupStatus: cleanupModels.cleanupModelStatus, attention: attentionText(for: permissions.grants))
     }
 
     var body: some View {
@@ -119,7 +121,7 @@ struct MenuBarView: View {
         }
 
         Picker("Engine", selection: Binding(
-            get: { model.activeEngineName },
+            get: { engineController.pendingEngineName ?? engineController.activeEngineName },
             set: { model.switchEngine(to: $0) }
         )) {
             ForEach(engineOptions, id: \.id) { option in

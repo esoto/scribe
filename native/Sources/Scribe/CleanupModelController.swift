@@ -42,6 +42,7 @@ final class CleanupModelController: ObservableObject {
     private let onCleanerCommitted: (any CleanupModelBackend, String) -> Void
     private let notify: (String) -> Void
     private let touchIdle: () -> Void
+    private let failureStickySeconds: Double
     private let log: @Sendable (String) -> Void
 
     /// Bridges backend download progress (any thread) to this controller, which can't be captured while its
@@ -59,6 +60,8 @@ final class CleanupModelController: ObservableObject {
     /// availability refresh from re-notifying and retrying a fallback that
     /// already ran (or failed to load). Reset when AFM is available again.
     private var didFallbackFromAppleIntelligence = false
+    /// Drops a failed switch's "Couldn't load…" status after `failureStickySeconds`; a newer switch cancels it.
+    private var failureClear: Task<Void, Never>?
 
     init(
         settings: AppSettings,
@@ -71,6 +74,7 @@ final class CleanupModelController: ObservableObject {
         onCleanerCommitted: @escaping (any CleanupModelBackend, String) -> Void,
         notify: @escaping (String) -> Void,
         touchIdle: @escaping () -> Void,
+        failureStickySeconds: Double = 10,
         log: @escaping @Sendable (String) -> Void
     ) {
         self.settings = settings
@@ -83,6 +87,7 @@ final class CleanupModelController: ObservableObject {
         self.onCleanerCommitted = onCleanerCommitted
         self.notify = notify
         self.touchIdle = touchIdle
+        self.failureStickySeconds = failureStickySeconds
         self.log = log
 
         let statuses = computeStatuses()
@@ -149,6 +154,8 @@ final class CleanupModelController: ObservableObject {
             cleanupModelProgress = nil
         case .begin:
             cleanupSwitchTask?.cancel()
+            failureClear?.cancel()
+            failureClear = nil
             pendingCleanupModel = name
             let selection = CleanupModelCatalog.Selection.model(id)
             let spec = CleanupModelCatalog.spec(id)
@@ -175,10 +182,11 @@ final class CleanupModelController: ObservableObject {
                     self.cleanupModelStatus = "Couldn't load \(spec.label) — still using \(previousLabel)"
                     self.cleanupModelProgress = nil
                     log("cleanup model switch to \(name) failed to load")
+                    self.scheduleFailureClear()
                     self.refreshDownloadedModels()
                     return
                 }
-                // Second cancellation check: `await newCleaner.isLoaded` above is a suspension point a revert or newer switch can land in (switchEngine has none between its check and commit).
+                // Second cancellation check: `await newCleaner.isLoaded` above is a suspension point a revert or newer switch can land in.
                 if Task.isCancelled {
                     await newCleaner.unload()
                     return
@@ -205,6 +213,18 @@ final class CleanupModelController: ObservableObject {
                 await previous.unload()
                 self.refreshDownloadedModels()
             }
+        }
+    }
+
+    /// Lets the failure message be read, then drops it so a one-off failure doesn't pin the status line forever.
+    private func scheduleFailureClear() {
+        failureClear?.cancel()
+        let seconds = failureStickySeconds
+        failureClear = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(seconds * 1e9))
+            guard !Task.isCancelled, let self else { return }
+            self.cleanupModelStatus = nil
+            self.failureClear = nil
         }
     }
 
