@@ -85,8 +85,15 @@ struct OnboardingWindow: View {
             }
 
             Divider()
-            Text(OnboardingState.summary(model.grants))
-                .foregroundStyle(.secondary)
+            HStack {
+                Text(OnboardingState.summary(model.grants))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                // "Error — check log" names this file; this is the one place in the app that opens it.
+                Button("Show Log in Finder") {
+                    NSWorkspace.shared.activateFileViewerSelecting([FileLogger.logFileURL])
+                }
+            }
         }
         .padding(24)
         .frame(width: 420)

@@ -81,4 +81,8 @@ final class FileLoggerTests: XCTestCase {
         logger.flush()
         XCTAssertTrue(try String(contentsOf: url, encoding: .utf8).hasSuffix(" after delete\n"))
     }
+
+    func test_log_file_url_is_the_file_the_menu_points_at() {
+        XCTAssertTrue(FileLogger.logFileURL.path.hasSuffix("/Library/Logs/scribe/scribe.log"))
+    }
 }
