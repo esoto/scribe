@@ -64,11 +64,7 @@ Upgrading from a v3 install downloads Ultra on first launch (progress shows in t
   permission, plus a live status line while recording/transcribing.
 - **Engine** picker: Parakeet (fast, default) ↔ Whisper (better for
   Spanish-heavy dictation; loads on first switch).
-- **Cleanup Model** picker: Gemma 3 4B · Gemma 4 E4B · Gemma 4 E2B
-  (smallest, fastest) · Apple Intelligence (shown when available). Selecting one downloads
-  it with progress in the status line; the previous model is unloaded
-  once the new one is ready. **Manage Models…** lists what's on disk and
-  deletes what you no longer want.
+- **Settings…** (⌘,): hotkey, hold delay, sounds, Launch at Login, idle unload, history size, microphone, and the cleanup model (download, switch, delete).
 - **Cleanup** toggle: off = verbatim transcription pasted raw.
 - **History**: last 10 dictations (in memory only, never persisted); click
   one to copy it back to the clipboard.
@@ -178,24 +174,26 @@ Settings live in `UserDefaults` under `dev.esoto.scribe` (a legacy
 `~/.config/scribe/config.toml` is imported once, first launch only).
 Change via `defaults write dev.esoto.scribe <key> <value>` and relaunch:
 
+Most of these have a control in **Settings…** (⌘,) and apply immediately; the rest are advanced keys that still need a relaunch.
+
 | Key | Default | Meaning |
 |---|---|---|
-| `hotkey` | `right_option` | `right_command` \| `right_option` \| `f13` |
-| `holdThreshold` | 0.3 | seconds the key must be held |
-| `engine` | `parakeet` | `parakeet` \| `whisper` |
-| `cleanupEnabled` | true | Gemma cleanup pass on/off |
+| `hotkey` | `right_option` | `right_command` \| `right_option` \| `f13` (Settings) |
+| `holdThreshold` | 0.3 | seconds the key must be held (Settings) |
+| `engine` | `parakeet` | `parakeet` \| `whisper` (Settings) |
+| `cleanupEnabled` | true | Gemma cleanup pass on/off (Settings) |
 | `minWords` | 4 | utterances shorter than this skip cleanup |
 | `cleanupTimeout` | 6.0 | seconds before falling back to raw text |
 | `restoreDelay` | 2.0 | seconds before restoring the prior clipboard |
 | `energyGate` | 0.0005 | silence gate (anti-hallucination); speech ~0.001+ |
-| `sounds` | true | start/error sounds |
-| `historySize` | 10 | menu history length |
-| `idleUnloadMinutes` | 15 | unload models after idle (0 = keep resident) |
+| `sounds` | true | start/error sounds (Settings) |
+| `historySize` | 10 | menu history length (Settings) |
+| `idleUnloadMinutes` | 15 | unload models after idle (0 = keep resident) (Settings) |
 | `dictionaryLearningEnabled` | false | auto-learn vocabulary (known to drop words — see Dictionary) |
-| `cleanupModel` | resolved at first launch | `gemma3` \| `gemma4` \| `gemma4e2b` \| `appleIntelligence` |
+| `cleanupModel` | resolved at first launch | `gemma3` \| `gemma4` \| `gemma4e2b` \| `appleIntelligence` (Settings) |
 | `cleanupModelPath` | _(unset)_ | local MLX model folder to use for cleanup instead of stock Gemma; when set, overrides `cleanupModel` and disables the picker |
 | `vocabularyBiasingEnabled` | false | acoustic vocabulary biasing for Parakeet (experimental) |
-| `microphoneUID` | _(unset)_ | input device UID; unset follows the system default input |
+| `microphoneUID` | _(unset)_ | input device UID; unset follows the system default input (Settings) |
 
 **Custom cleanup model:** point `cleanupModelPath` at any local MLX model
 folder (config.json + safetensors + tokenizer) and relaunch;
