@@ -18,6 +18,8 @@ struct ModelRow: Identifiable, Equatable {
     let canUse: Bool
     let canDelete: Bool
     let bytesOnDisk: Int64
+    let useLabel: String
+    let canCancel: Bool
 }
 
 /// Decimal GB/MB with a POSIX "." separator. Free function, unit-tested.
@@ -41,7 +43,7 @@ func modelRows(
                 id: spec.id, label: spec.label,
                 detail: isActive ? "In use · built into macOS" : (appleIntelligenceReason ?? "Built into macOS · no download"),
                 isActive: isActive, canUse: appleIntelligenceReason == nil && !isActive,
-                canDelete: false, bytesOnDisk: 0)
+                canDelete: false, bytesOnDisk: 0, useLabel: "Use", canCancel: false)
         }
         let status = statuses[spec.id] ?? .notDownloaded
         let detail: String
@@ -54,7 +56,9 @@ func modelRows(
             id: spec.id, label: spec.label, detail: detail, isActive: isActive,
             canUse: !isActive && spec.id.rawValue != pending,
             canDelete: status != .notDownloaded && canDeleteModel(spec.id, active: active, pending: pending),
-            bytesOnDisk: status.bytes)
+            bytesOnDisk: status.bytes,
+            useLabel: status.isDownloaded ? "Use" : "Download & Use",
+            canCancel: spec.id.rawValue == pending)
     }
 }
 
