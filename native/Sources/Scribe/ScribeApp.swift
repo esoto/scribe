@@ -312,7 +312,9 @@ final class AppModel: ObservableObject {
             if cleanupEnabled, let self, self.cleaner === cleaner {
                 self.cleanupLoadInFlight = true
                 await cleaner.preload()
-                cleanupLoaded = await cleaner.isLoaded
+                // A switch that committed during the warm-up unloads this cleaner; that is superseded, not failed.
+                let loaded = await cleaner.isLoaded
+                cleanupLoaded = loaded || self.cleaner !== cleaner
                 // A user-initiated switch may have started downloading while
                 // this preload ran; it owns the flag and the status line then.
                 if self.pendingCleanupModel == nil {

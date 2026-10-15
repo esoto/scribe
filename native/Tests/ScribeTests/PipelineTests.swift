@@ -514,20 +514,25 @@ final class PipelineTests: XCTestCase {
 
     // MARK: - Diagnostics: every degraded outcome leaves a line in scribe.log
 
-    /// The log promises no dictated text, so every assertion here also checks the transcript never leaks into it.
-    private func assertNoDictatedText(_ h: Harness, file: StaticString = #filePath, line: UInt = #line) {
-        XCTAssertFalse(
-            h.logs.value.contains { $0.contains("hello there world") },
-            "dictated text reached the log: \(h.logs.value)", file: file, line: line)
+    /// The log promises no dictated text: neither the transcript nor the cleaner's output may appear in any line.
+    /// Strings under 4 characters are skipped, as they would match unrelated log text.
+    private func assertNoDictatedText(
+        _ h: Harness, stt: FakeStt, cleaner: FakeCleaner, file: StaticString = #filePath, line: UInt = #line
+    ) {
+        for secret in [stt.text, cleaner.out] where secret.count >= 4 {
+            XCTAssertFalse(
+                h.logs.value.contains { $0.contains(secret) },
+                "dictated text reached the log: \(h.logs.value)", file: file, line: line)
+        }
     }
 
     /// The `dictation:` summary of a single dictation run with `cleaner`.
     private func dictationLine(
-        cleaner: CleanupBackend, stt: SttEngine = FakeStt(), config: PipelineConfig = PipelineConfig()
+        cleaner: FakeCleaner, stt: FakeStt = FakeStt(), config: PipelineConfig = PipelineConfig()
     ) -> String {
         let h = make(stt: stt, cleaner: cleaner, config: config)
         dictateBounded(h)
-        assertNoDictatedText(h)
+        assertNoDictatedText(h, stt: stt, cleaner: cleaner)
         return h.logs.value.last { $0.hasPrefix("dictation:") } ?? "<no dictation line: \(h.logs.value)>"
     }
 
@@ -573,7 +578,8 @@ final class PipelineTests: XCTestCase {
     }
 
     func testOutOfBandCleanupLogsLengthAsTheSkipReason() {
-        XCTAssertTrue(dictationLine(cleaner: FakeCleaner(out: "hi")).hasSuffix(" cleanup_skip=length"))
+        let line = dictationLine(cleaner: FakeCleaner(out: "a much longer rewrite than anything the speaker said"))
+        XCTAssertTrue(line.hasSuffix(" cleanup_skip=length"), line)
     }
 
     func testLanguageFlipLogsLanguageAsTheSkipReason() {
