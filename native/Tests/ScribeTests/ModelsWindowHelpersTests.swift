@@ -79,4 +79,10 @@ final class ModelsWindowHelpersTests: XCTestCase {
         let rows = modelRows(statuses: [:], active: "gemma3", pending: "gemma4", appleIntelligenceReason: "x")
         XCTAssertEqual(rows.filter(\.canCancel).map(\.id), [.gemma4])
     }
+
+    func testNoCancelWhenTheActiveModelCannotBeReselected() {
+        let rows = modelRows(
+            statuses: [:], active: "appleIntelligence", pending: "gemma4", appleIntelligenceReason: "Turned off")
+        XCTAssertEqual(rows.filter(\.canCancel).map(\.id), [])
+    }
 }
