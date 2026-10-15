@@ -130,10 +130,12 @@ final class EngineController: ObservableObject {
 
     // MARK: - Residency
 
-    /// Idle sweep: frees every resident engine. True when anything was unloaded.
+    /// Idle sweep: frees every resident engine except a switch's target. True when anything was unloaded.
     func unloadAll() async -> Bool {
         var unloadedAny = false
-        for engine in engines.values {
+        // Sweeping a switch's target between its load and the switch's `isLoaded` check would report a load that
+        // succeeded as failed.
+        for (name, engine) in engines where name != pendingEngineName {
             if await engine.isLoaded {
                 await engine.unload()
                 unloadedAny = true

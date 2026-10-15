@@ -258,7 +258,7 @@ final class EngineControllerTests: XCTestCase {
         XCTAssertEqual(c.activeEngineName, "parakeet")
         XCTAssertEqual(h.parakeet.unloadCalls, 0)
         XCTAssertEqual(h.settings.engine, "parakeet")
-        XCTAssertNil(c.engineStatus, "a cancelled load that ends not loaded must not report a failure")
+        XCTAssertNil(c.engineStatus, "a revert must leave no status behind")
     }
 
     // MARK: - Ignore
@@ -409,5 +409,19 @@ final class EngineControllerTests: XCTestCase {
         XCTAssertFalse(unloaded)
         XCTAssertEqual(h.parakeet.unloadCalls, 0)
         XCTAssertEqual(h.whisper.unloadCalls, 0)
+    }
+
+    func testUnloadAllSparesTheEngineASwitchIsAboutToCommit() async {
+        let c = h.makeController()
+        let task = beginSwitch(c, to: "whisper")
+        h.whisper.loaded = true  // the load finished; the switch hasn't checked `isLoaded` yet
+
+        _ = await c.unloadAll()
+
+        XCTAssertEqual(h.whisper.unloadCalls, 0)
+        XCTAssertEqual(h.parakeet.unloadCalls, 1)
+        h.whisper.releasePreload()
+        await task.value
+        XCTAssertEqual(c.activeEngineName, "whisper")
     }
 }
