@@ -470,6 +470,24 @@ final class UserDictionaryStoreTests: XCTestCase {
         XCTAssertTrue(text.contains("Kamal"), "the rewrite at launch must not drop learned terms")
     }
 
+    func testReEnablingAfterALongOffPeriodKeepsLearnedTermsAndTheirDates() {
+        let store = makeStore()
+        let promoted = promoteKamal(store)
+        store.learningEnabled = false
+        clock.advance(days: 90)
+        store.learningEnabled = true
+        XCTAssertEqual(store.allGlossaryEntries.map(\.term), ["Kamal"])
+        XCTAssertEqual(store.allGlossaryEntries.first?.lastSeen, promoted?.lastSeen, "dates stay true")
+
+        let relaunched = makeStore()
+        relaunched.learningEnabled = true  // fails if the floor never reached disk
+        XCTAssertEqual(relaunched.allGlossaryEntries.map(\.term), ["Kamal"])
+
+        clock.advance(days: 61)
+        relaunched.observe(cleanedText: "something else with MLX inside")
+        XCTAssertTrue(relaunched.allGlossaryEntries.isEmpty, "terms still age out once learning resumes")
+    }
+
     func testGlossaryStillDecaysWhileLearningIsOn() {
         let store = makeStore()
         _ = promoteKamal(store)

@@ -27,6 +27,8 @@ private struct DictionaryFile: Codable {
     var pairs: [ReplacementPair]
     var glossary: [GlossaryEntry]
     var candidates: [GlossaryEntry]
+    // Optional so files written before this field still decode.
+    var learningResumedAt: Date?
 }
 
 /// Owns manual replacement pairs and the auto-learned glossary. Persists words only, never transcripts.
@@ -53,6 +55,7 @@ final class UserDictionaryStore: @unchecked Sendable {
     private var glossary: [GlossaryEntry] = []
     private var candidates: [GlossaryEntry] = []
     private var enabled = true
+    private var learningResumedAt: Date?
     private var lastSnapshot = DictionarySnapshot.empty
     private var lastStructure = Structure.empty
     private var changeHandler: ((DictionarySnapshot) -> Void)?
@@ -91,10 +94,14 @@ final class UserDictionaryStore: @unchecked Sendable {
                 let wasEnabled = enabled
                 enabled = newValue
                 if newValue {
-                    // Words heard while off must neither reach disk nor count toward promotion.
-                    if !wasEnabled { candidates.removeAll() }
+                    if !wasEnabled {
+                        // Words heard while off must neither reach disk nor count toward promotion.
+                        candidates.removeAll()
+                        learningResumedAt = now()
+                    }
                     decayLocked()
-                    notifyIfChangedLocked()
+                    // Persisted so the floor survives a quit before the next write.
+                    persistAndNotifyLocked()
                 } else {
                     // Persisting rewrites the file without candidates, purging any left by an earlier run.
                     candidates.removeAll()
@@ -209,6 +216,7 @@ final class UserDictionaryStore: @unchecked Sendable {
         pairs = file.pairs
         glossary = file.glossary
         candidates = file.candidates
+        learningResumedAt = file.learningResumedAt
     }
 
     private func persistAndNotifyLocked() {
@@ -218,7 +226,7 @@ final class UserDictionaryStore: @unchecked Sendable {
         // Unpromoted words stay in memory while learning is off; the README promises nothing new reaches disk.
         let file = DictionaryFile(
             version: Self.fileVersion, pairs: pairs, glossary: glossary,
-            candidates: enabled ? candidates : [])
+            candidates: enabled ? candidates : [], learningResumedAt: learningResumedAt)
         if let data = try? encoder.encode(file) {
             try? data.write(to: fileURL, options: .atomic)
         }
@@ -245,12 +253,15 @@ final class UserDictionaryStore: @unchecked Sendable {
     /// Candidates always age out. The glossary is skipped while learning is off, so switching it off never erodes learned terms.
     private func decayLocked(includingGlossary: Bool = true) {
         let t = now()
-        func stale(_ entry: GlossaryEntry, days: Double) -> Bool {
-            t.timeIntervalSince(entry.lastSeen) > days * 86_400
+        func stale(_ entry: GlossaryEntry, days: Double, floor: Date = .distantPast) -> Bool {
+            t.timeIntervalSince(max(entry.lastSeen, floor)) > days * 86_400
         }
         candidates.removeAll { stale($0, days: Self.candidateDecayDays) }
         if includingGlossary, enabled {
-            glossary.removeAll { stale($0, days: Self.glossaryDecayDays) }
+            // The off period must not count against learned terms; lastSeen stays true for the editor.
+            glossary.removeAll {
+                stale($0, days: Self.glossaryDecayDays, floor: learningResumedAt ?? .distantPast)
+            }
         }
     }
 
