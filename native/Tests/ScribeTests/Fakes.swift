@@ -53,6 +53,8 @@ final class FakeStt: SttEngine {
     let err: Error?
     let hang: Bool
     private(set) var calls = 0
+    // Audio as received, so tests can assert an enhancer ran before transcription.
+    private(set) var received: [[Float]] = []
 
     init(text: String = "so um hello there world", err: Error? = nil, hang: Bool = false) {
         self.text = text
@@ -62,9 +64,29 @@ final class FakeStt: SttEngine {
 
     func transcribe(_ pcm: [Float]) async throws -> String {
         calls += 1
+        received.append(pcm)
         if hang { await hangForever() }
         if let err { throw err }
         return text
+    }
+}
+
+final class FakeEnhancer: AudioEnhancer {
+    let out: [Float]
+    let err: Error?
+    private(set) var calls = 0
+    private(set) var received: [[Float]] = []
+
+    init(out: [Float] = [Float](repeating: 0.5, count: 16000), err: Error? = nil) {
+        self.out = out
+        self.err = err
+    }
+
+    func enhance(_ pcm: [Float]) async throws -> [Float] {
+        calls += 1
+        received.append(pcm)
+        if let err { throw err }
+        return out
     }
 }
 

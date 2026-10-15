@@ -58,6 +58,11 @@ targets:
     platform: macOS
     sources: [Sources/ScribeSpike]
     dependencies: *mlDeps
+  ScribeNoiseSpike:
+    type: tool
+    platform: macOS
+    sources: [Sources/ScribeNoiseSpike]
+    dependencies: *mlDeps
   ScribeTests:
     type: bundle.unit-test
     platform: macOS

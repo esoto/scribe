@@ -48,7 +48,9 @@ final class PipelineTests: XCTestCase {
         config: PipelineConfig = PipelineConfig(),
         pairs: [ReplacementPair] = [],
         runner: ((@escaping () async -> Void) -> Void)? = nil,
-        frontmost: @escaping () -> pid_t? = { nil }
+        frontmost: @escaping () -> pid_t? = { nil },
+        enhancer: AudioEnhancer? = nil,
+        enhanceEnabled: Bool = false
     ) -> Harness {
         let clock = FakeClock()
         let states = Box<PipelineState>()
@@ -70,6 +72,8 @@ final class PipelineTests: XCTestCase {
             onState: { states.append($0) },
             onNotice: { notices.append($0) },
             saveFailedAudio: { saved.append($0) },
+            enhancer: enhancer,
+            enhanceAudioEnabled: enhanceEnabled,
             onLog: { logs.append($0) },
             onCleaned: { cleanedTexts.append($0) },
             replacementPairs: { pairs },
@@ -852,5 +856,39 @@ final class PipelineTests: XCTestCase {
         h.clock.t += 1.0
         h.pipeline.keyUp()
         XCTAssertEqual(stt.calls, 0)
+    }
+
+    // MARK: - Audio enhancement (experimental, off by default)
+
+    func testEnhancementIsOffByDefaultSoSttSeesTheRawCapture() {
+        let stt = FakeStt()
+        let enhancer = FakeEnhancer()
+        let h = make(stt: stt, enhancer: enhancer)
+        dictate(h)
+        XCTAssertEqual(enhancer.calls, 0)
+        XCTAssertEqual(stt.received, [VOICED])
+    }
+
+    func testEnhancementRunsBeforeSttWhenEnabled() {
+        let stt = FakeStt()
+        let cleaned = [Float](repeating: 0.5, count: 16000)
+        let enhancer = FakeEnhancer(out: cleaned)
+        let h = make(stt: stt, enhancer: enhancer, enhanceEnabled: true)
+        dictate(h)
+        XCTAssertEqual(enhancer.calls, 1)
+        XCTAssertEqual(enhancer.received, [VOICED], "enhancer must see the raw capture")
+        XCTAssertEqual(stt.received, [cleaned], "STT must see the enhanced audio, not the raw capture")
+    }
+
+    /// A failed denoise must not cost the dictation: fall back to the raw capture.
+    func testEnhancementFailureFallsBackToRawAudio() {
+        let stt = FakeStt()
+        let enhancer = FakeEnhancer(err: TestError(message: "model download failed"))
+        let h = make(stt: stt, enhancer: enhancer, enhanceEnabled: true)
+        dictate(h)
+        XCTAssertEqual(enhancer.calls, 1)
+        XCTAssertEqual(stt.received, [VOICED])
+        XCTAssertEqual(h.pipeline.engineName, "parakeet")
+        XCTAssertTrue(h.notices.value.isEmpty, "a swallowed enhancement failure is not user-facing")
     }
 }

@@ -27,6 +27,7 @@ final class AppSettings {
         static let microphoneUID = "microphoneUID"
         static let dictionaryLearningEnabled = "dictionaryLearningEnabled"
         static let vocabularyBiasingEnabled = "vocabularyBiasingEnabled"
+        static let enhanceAudioEnabled = "enhanceAudioEnabled"
         static let didImportToml = "didImportToml"
     }
 
@@ -54,6 +55,13 @@ final class AppSettings {
     var cleanupEnabled: Bool {
         get { defaults.object(forKey: Key.cleanupEnabled) as? Bool ?? true }
         set { defaults.set(newValue, forKey: Key.cleanupEnabled) }
+    }
+
+    /// LocalVQE enhancement before STT. Off by default: measured to hurt Parakeet more often
+    /// than it helps, so it ships as an opt-in experiment rather than a default behaviour.
+    var enhanceAudioEnabled: Bool {
+        get { defaults.object(forKey: Key.enhanceAudioEnabled) as? Bool ?? false }
+        set { defaults.set(newValue, forKey: Key.enhanceAudioEnabled) }
     }
 
     /// Parakeet vocabulary biasing. Default off: rescoring loose enough to catch manglings also

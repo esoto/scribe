@@ -79,9 +79,12 @@ final class DictationPipeline {
     private let onHint: (String) -> Void
     /// Fires after a paste that went through, never when the text only reached the clipboard.
     private let onPasted: () -> Void
+    /// Runs before STT when `enhanceAudioEnabled`; nil leaves the captured audio untouched.
+    private let enhancer: AudioEnhancer?
 
     private(set) var engineName: String
     var cleanupEnabled: Bool
+    var enhanceAudioEnabled: Bool
 
     private var downAt: Double?
     /// Per hold, not per pipeline: queued jobs outlive later key-downs, which would otherwise retarget them.
@@ -109,6 +112,8 @@ final class DictationPipeline {
         onNotice: @escaping (String) -> Void,
         saveFailedAudio: @escaping ([Float]) -> Void,
         cleanupEnabled: Bool = true,
+        enhancer: AudioEnhancer? = nil,
+        enhanceAudioEnabled: Bool = false,
         onLog: ((String) -> Void)? = nil,
         onCleaned: ((String) -> Void)? = nil,
         replacementPairs: @escaping () -> [ReplacementPair] = { [] },
@@ -130,6 +135,8 @@ final class DictationPipeline {
         self.onNotice = onNotice
         self.saveFailedAudio = saveFailedAudio
         self.cleanupEnabled = cleanupEnabled
+        self.enhancer = enhancer
+        self.enhanceAudioEnabled = enhanceAudioEnabled
         self.onLog = onLog
         self.onCleaned = onCleaned
         self.replacementPairs = replacementPairs
@@ -241,6 +248,15 @@ final class DictationPipeline {
 
         let t0 = clock()
         let sttStart = t0
+        // Enhancement is best-effort: a failed or slow denoise must not cost the dictation,
+        // so any error falls back to the raw capture.
+        var input = pcm
+        var enhanceMs = 0
+        if enhanceAudioEnabled, let enhancer {
+            let enhanceStart = clock()
+            input = (try? await enhancer.enhance(pcm)) ?? pcm
+            enhanceMs = Int((clock() - enhanceStart) * 1000)
+        }
         func failTranscription(_ notice: String, reason: String) {
             // The status row says "Error — check log", so the log has to say what failed.
             onLog?("stt failed (\(engineName)): \(reason)")
@@ -252,7 +268,7 @@ final class DictationPipeline {
         let raw: String
         do {
             let engine = stt
-            raw = Gates.normalize(try await withDeadline(config.sttTimeout) { try await engine.transcribe(pcm) })
+            raw = Gates.normalize(try await withDeadline(config.sttTimeout) { try await engine.transcribe(input) })
         } catch let sttError as SttError {
             failTranscription("Transcription failed: \(sttError.message)", reason: sttError.message)
             return
@@ -270,7 +286,7 @@ final class DictationPipeline {
         // STT time includes Parakeet vocab biasing; split it out so stt=/bias= are disjoint.
         let sttTotalMs = Int((clock() - sttStart) * 1000)
         let biasMs = (stt as? ParakeetEngine)?.lastBiasMs ?? 0
-        let sttMs = max(0, sttTotalMs - biasMs)
+        let sttMs = max(0, sttTotalMs - biasMs - enhanceMs)
 
         guard !raw.isEmpty else {
             onNotice("Nothing transcribed")
@@ -302,7 +318,7 @@ final class DictationPipeline {
             }
             cleanupMs = Int((clock() - cleanStart) * 1000)
         }
-        onLog?("dictation: engine=\(engineName) cleanupModel=\(cleanupModelName) stt=\(sttMs)ms bias=\(biasMs)ms cleanup=\(cleanupMs)ms cleaned=\(cleaned) chars=\(final.count)\(skipNote)")
+        onLog?("dictation: engine=\(engineName) cleanupModel=\(cleanupModelName) stt=\(sttMs)ms bias=\(biasMs)ms enhance=\(enhanceMs)ms cleanup=\(cleanupMs)ms cleaned=\(cleaned) chars=\(final.count)\(skipNote)")
 
         if cleaned {
             onCleaned?(final)
