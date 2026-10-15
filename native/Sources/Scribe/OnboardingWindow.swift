@@ -85,8 +85,20 @@ struct OnboardingWindow: View {
             }
 
             Divider()
-            Text(OnboardingState.summary(model.grants))
-                .foregroundStyle(.secondary)
+            HStack {
+                Text(OnboardingState.summary(model.grants))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                // "Error — check log" names this file; this is the one place in the app that opens it.
+                Button("Show Log in Finder") {
+                    if FileManager.default.fileExists(atPath: FileLogger.logFileURL.path) {
+                        NSWorkspace.shared.activateFileViewerSelecting([FileLogger.logFileURL])
+                    } else {
+                        // Deleted and not yet recreated by the next write: show the folder instead of doing nothing.
+                        NSWorkspace.shared.open(FileLogger.logsDirectory)
+                    }
+                }
+            }
         }
         .padding(24)
         .frame(width: 420)
