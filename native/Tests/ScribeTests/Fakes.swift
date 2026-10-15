@@ -14,10 +14,13 @@ struct TestError: Error, CustomStringConvertible {
     var description: String { message }
 }
 
-final class FakeRecorder: RecorderLike {
+final class FakeRecorder: RecorderLike, RecorderPreparing {
     let pcm: [Float]
     let armError: Error?
     private(set) var armed = false
+    var prewarmError: Error?
+    private(set) var prewarmCalls = 0
+    private(set) var preferredInputs: [String?] = []
 
     init(pcm: [Float] = VOICED, armError: Error? = nil) {
         self.pcm = pcm
@@ -32,6 +35,15 @@ final class FakeRecorder: RecorderLike {
     func disarm() -> [Float] {
         armed = false
         return pcm
+    }
+
+    func prewarm() throws {
+        prewarmCalls += 1
+        if let prewarmError { throw prewarmError }
+    }
+
+    func setPreferredInput(uid: String?) {
+        preferredInputs.append(uid)
     }
 }
 
@@ -246,4 +258,41 @@ final class FakeTCCProbe: TCCProbing {
 
     func requestAccessibility() { events.append("request-accessibility") }
     func requestInputMonitoring() { events.append("request-inputMonitoring") }
+}
+
+final class FakeNotifier: Notifier {
+    private(set) var delivered: [(title: String, body: String)] = []
+    private(set) var authorizationRequests = 0
+    /// When set, every delivery reports it through `onError`.
+    var deliveryError: Error?
+
+    func requestAuthorization(log: @escaping @Sendable (String) -> Void) {
+        authorizationRequests += 1
+    }
+
+    func deliver(title: String, body: String, onError: @escaping @Sendable (Error) -> Void) {
+        delivered.append((title, body))
+        if let deliveryError { onError(deliveryError) }
+    }
+}
+
+final class FakeHotkeyMonitor: HotkeyMonitoring {
+    var onModifierEvent: ((String) -> Void)?
+    var installError: Error?
+    var reinstallError: Error?
+    private(set) var installCalls = 0
+    private(set) var reinstallCalls = 0
+    private(set) var forgetCalls = 0
+
+    func install() throws {
+        installCalls += 1
+        if let installError { throw installError }
+    }
+
+    func reinstall() throws {
+        reinstallCalls += 1
+        if let reinstallError { throw reinstallError }
+    }
+
+    func forgetHeldKey() { forgetCalls += 1 }
 }

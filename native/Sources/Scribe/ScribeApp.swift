@@ -1,6 +1,5 @@
 import AppKit
 import SwiftUI
-import UserNotifications
 
 /// Composition root: builds every collaborator and owns the app's mutable runtime state.
 @MainActor
@@ -32,21 +31,14 @@ final class AppModel: ObservableObject {
     let dictionary: UserDictionaryStore
     /// Set at the end of init's phase 2: its closures read `cleaner`, which needs a fully initialized self.
     private(set) var dictionaryModel: DictionaryModel!
-    /// Same phase-2 construction as `dictionaryModel`: its reactions call back into this model.
-    private(set) var permissions: PermissionsModel!
+    let permissions: PermissionsModel
+    let dictation: DictationCoordinator
     nonisolated let logger: FileLogger
 
-    private(set) var pipeline: DictationPipeline!
-    private var hotkeyMonitor: HotkeyMonitor!
-    // Concrete so start() can prewarm its audio engine ahead of the first key-down.
-    private var recorder: Recorder!
     private var engineSwitchTask: Task<Void, Never>?
     // Target of the in-flight engine switch; nil when none.
     private var pendingEngineName: String?
 
-    @Published private(set) var state: PipelineState = .idle
-    private var errorRevert: Task<Void, Never>?
-    private var holdWatchdog: Task<Void, Never>?
     @Published private(set) var activeEngineName: String
     @Published private(set) var cleanupEnabled: Bool
     @Published private(set) var microphoneUID: String?
@@ -66,8 +58,6 @@ final class AppModel: ObservableObject {
     @Published private(set) var modelStatuses: [CleanupModelID: CleanupModelStore.Status] = [:]
 
     var activeCleanupFidelitySafe: Bool { activeSelection.fidelitySafe }
-
-    private let pipelineConfig: PipelineConfig
 
     init() {
         let defaults = UserDefaults.standard
@@ -120,8 +110,9 @@ final class AppModel: ObservableObject {
         self.appleIntelligenceUnavailableReason = AppleIntelligence.unavailableReason
         let lostHandoff = AppleIntelligenceLostHandoff()
         self.appleIntelligenceLost = lostHandoff
-        self.cleaner = CleanupModelCatalog.makeBackend(
+        let cleaner = CleanupModelCatalog.makeBackend(
             selection, relay: progressRelay, onAppleIntelligenceLost: { lostHandoff.fire() }, onLog: log)
+        self.cleaner = cleaner
         self.idleTracker = IdleTracker(unloadAfterMinutes: settings.idleUnloadMinutes)
 
         let dictionary = UserDictionaryStore()
@@ -132,7 +123,7 @@ final class AppModel: ObservableObject {
         self.cleanupEnabled = settings.cleanupEnabled
         self.microphoneUID = settings.microphoneUID
 
-        self.pipelineConfig = PipelineConfig(
+        let config = PipelineConfig(
             holdThreshold: settings.holdThreshold,
             energyGate: settings.energyGate,
             minWords: settings.minWords,
@@ -140,6 +131,60 @@ final class AppModel: ObservableObject {
             lengthBand: settings.lengthBand,
             sampleRate: 16000.0
         )
+
+        let engine = self.engines[startingEngine]!
+        let recorder = Recorder(sampleRate: config.sampleRate, engineControl: AVEngineControl(onLog: log))
+        recorder.setPreferredInput(uid: settings.microphoneUID)
+        let paster = self.paster
+
+        // Permissions and the coordinator call into each other; this ref closes the loop once both exist.
+        var lateDictation: DictationCoordinator!
+        let permissions = PermissionsModel(
+            probe: LiveTCCProbe(),
+            onMicrophoneGranted: { lateDictation.prewarmRecorderIfGranted() },
+            onInputMonitoringGranted: { lateDictation.activateHotkeyIfNeeded() })
+        let dictation = DictationCoordinator(
+            recorder: recorder,
+            pipelineConfig: config,
+            hotkey: settings.hotkey,
+            makePipeline: { sinks in
+                let pipeline = DictationPipeline(
+                    recorder: recorder,
+                    stt: engine,
+                    cleaner: cleaner,
+                    paster: GuardedPaster(
+                        inner: paster,
+                        accessibilityGranted: { TCC.accessibilityGranted() },
+                        currentFrontmost: frontmostPID),
+                    history: history,
+                    config: config,
+                    clock: { Date().timeIntervalSince1970 },
+                    // keyDown runs on main (tap callback), so a direct read is safe.
+                    frontmost: { NSWorkspace.shared.frontmostApplication?.processIdentifier },
+                    onState: sinks.onState,
+                    onNotice: sinks.onNotice,
+                    saveFailedAudio: sinks.saveFailedAudio,
+                    cleanupEnabled: settings.cleanupEnabled,
+                    onLog: log,
+                    // Store is thread-safe and observe() is fire-and-forget: no main-actor hop.
+                    onCleaned: { [dictionary] text in dictionary.observe(cleanedText: text) },
+                    replacementPairs: { [dictionary] in dictionary.allPairs }
+                )
+                pipeline.setCleaner(cleaner, name: selection.storageID)
+                return pipeline
+            },
+            makeHotkeyMonitor: { onDown, onUp in
+                HotkeyMonitor(key: settings.hotkey, onDown: onDown, onUp: onUp)
+            },
+            notifier: UserNotifier(),
+            playSound: { Sounds.play($0) },
+            soundsEnabled: { settings.sounds },
+            microphoneGranted: { permissions.grants.microphone },
+            reportInputMonitoring: { permissions.setInputMonitoring($0) },
+            log: log)
+        lateDictation = dictation
+        self.permissions = permissions
+        self.dictation = dictation
 
         // All stored properties are initialized, so self can be captured by callbacks arriving off the main actor.
         let parakeet = self.engines["parakeet"] as? ParakeetEngine
@@ -150,50 +195,8 @@ final class AppModel: ObservableObject {
             currentSelection: { [unowned self] in self.activeSelection },
             log: log)
         // Before any preload, so the first warm-up uses the dictionary-augmented prompt.
-        self.cleaner.setDictionary(CleanupModelCatalog.promptSnapshot(dictionary.snapshot, for: selection))
-        self.permissions = PermissionsModel(
-            probe: LiveTCCProbe(),
-            onMicrophoneGranted: { [unowned self] in self.prewarmRecorderIfGranted() },
-            onInputMonitoringGranted: { [unowned self] in self.activateHotkeyIfNeeded() })
-        let engine = self.engines[startingEngine]!
-        let recorder = Recorder(sampleRate: pipelineConfig.sampleRate, engineControl: AVEngineControl(onLog: log))
-        recorder.setPreferredInput(uid: settings.microphoneUID)
-        self.recorder = recorder
-        self.pipeline = DictationPipeline(
-            recorder: recorder,
-            stt: engine,
-            cleaner: self.cleaner,
-            paster: GuardedPaster(
-                inner: self.paster,
-                accessibilityGranted: { TCC.accessibilityGranted() },
-                currentFrontmost: frontmostPID),
-            history: self.history,
-            config: pipelineConfig,
-            clock: { Date().timeIntervalSince1970 },
-            // keyDown runs on main (tap callback), so a direct read is safe.
-            frontmost: { NSWorkspace.shared.frontmostApplication?.processIdentifier },
-            onState: { [weak self] newState in
-                Task { @MainActor in
-                    self?.applyState(newState)
-                }
-            },
-            onNotice: { [weak self] message in
-                Task { @MainActor in
-                    self?.notify(message)
-                }
-            },
-            saveFailedAudio: { [weak self] pcm in
-                Task { @MainActor in
-                    self?.saveFailedAudio(pcm)
-                }
-            },
-            cleanupEnabled: settings.cleanupEnabled,
-            onLog: log,
-            // Store is thread-safe and observe() is fire-and-forget: no main-actor hop.
-            onCleaned: { [dictionary] text in dictionary.observe(cleanedText: text) },
-            replacementPairs: { [dictionary] in dictionary.allPairs }
-        )
-        pipeline.setCleaner(self.cleaner, name: selection.storageID)
+        cleaner.setDictionary(CleanupModelCatalog.promptSnapshot(dictionary.snapshot, for: selection))
+        dictation.onKeyDown = { [weak self] in self?.prepareForKeyDown() }
 
         progressRelay.set { [weak self] label, fraction in
             Task { @MainActor in
@@ -212,52 +215,16 @@ final class AppModel: ObservableObject {
             Task { @MainActor in self?.handleAppleIntelligenceLost() }
         }
 
-        self.hotkeyMonitor = HotkeyMonitor(
-            key: settings.hotkey,
-            onDown: { [weak self] in self?.handleKeyDown() },
-            onUp: { [weak self] in self?.handleKeyUp() }
-        )
-
         start()
     }
 
     // MARK: - Startup
 
-    /// Installs the hotkey tap and starts the preload + idle-unload loops. Must run on main (CGEventTap).
+    /// Starts the coordinator (hotkey tap) and the preload + idle-unload loops. Must run on main (CGEventTap).
     private func start() {
         // last_failed.wav is for debugging a recent failure, not for keeping audio around.
         FileLogger.expireFailedAudio()
-        // Only prewarms if already granted; the prompt comes only from the onboarding Request button.
-        prewarmRecorderIfGranted()
-
-        hotkeyMonitor.onModifierEvent = { [logger] line in logger.log("tap: \(line)") }
-        do {
-            try hotkeyMonitor.install()
-            permissions.setInputMonitoring(true)
-            logger.log("hotkey installed (key=\(settings.hotkey.rawValue))")
-        } catch {
-            logger.log("hotkey install failed: \(error)")
-            permissions.setInputMonitoring(false)
-        }
-
-        // Sleep mid-hold can swallow the key-up; the buffered audio must not paste into whatever has focus on wake.
-        NSWorkspace.shared.notificationCenter.addObserver(
-            forName: NSWorkspace.willSleepNotification, object: nil, queue: .main
-        ) { [weak self] _ in
-            MainActor.assumeIsolated {
-                self?.holdWatchdog?.cancel()
-                self?.pipeline.cancelHold()
-                self?.hotkeyMonitor.forgetHeldKey()
-            }
-        }
-
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { [logger] granted, error in
-            if let error {
-                logger.log("notification authorization failed: \(error)")
-            } else if !granted {
-                logger.log("notification authorization denied")
-            }
-        }
+        dictation.start()
 
         microphones = AudioDevices.inputDevices()
         AudioDevices.onDevicesChanged { [weak self] in
@@ -354,54 +321,11 @@ final class AppModel: ObservableObject {
         }
     }
 
-    // MARK: - Pipeline callbacks (always entered on @MainActor — see init())
-
-    private func applyState(_ newState: PipelineState) {
-        state = newState
-        errorRevert?.cancel()
-        if newState == .error {
-            // Sticky for 5 s so the ⚠ glyph and status line can be seen; the next state clears it earlier.
-            errorRevert = Task { @MainActor [weak self] in
-                try? await Task.sleep(nanoseconds: 5_000_000_000)
-                guard !Task.isCancelled, let self, self.state == .error else { return }
-                self.state = .idle
-            }
-        }
-        guard settings.sounds else { return }
-        if newState == .recording {
-            Sounds.play("Pop")
-        } else if newState == .error {
-            Sounds.play("Basso")
-        }
-    }
-
-    private func notify(_ message: String) {
-        let content = UNMutableNotificationContent()
-        content.title = "scribe"
-        content.body = message
-        let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
-        let logger = self.logger
-        UNUserNotificationCenter.current().add(request) { error in
-            if let error {
-                logger.log("notification delivery failed: \(message) (\(error))")
-            }
-        }
-    }
-
-    private func saveFailedAudio(_ pcm: [Float]) {
-        let url = FileLogger.logsDirectory.appendingPathComponent("last_failed.wav")
-        do {
-            try WavWriter.write(pcm: pcm, sampleRate: UInt32(pipelineConfig.sampleRate), to: url)
-        } catch {
-            logger.log("failed to save failed-audio wav: \(error)")
-        }
-    }
-
     // MARK: - Hotkey wiring
 
-    /// Touches the idle tracker, pre-warms engine + cleaner if unloaded, arms the hold watchdog, and forwards
-    /// to the pipeline. Runs on main (CGEventTap callback).
-    private func handleKeyDown() {
+    /// The coordinator's key-down hook: touches the idle tracker and pre-warms engine + cleaner if unloaded.
+    /// Runs on main (CGEventTap callback), before the coordinator arms the watchdog and starts recording.
+    private func prepareForKeyDown() {
         idleTracker.touch(now: ProcessInfo.processInfo.systemUptime)
         refreshAppleIntelligenceAvailability()
         // Deferred: a flip can reinstall the event tap, which must not happen inside the tap's own callback.
@@ -422,22 +346,6 @@ final class AppModel: ObservableObject {
                 }
             }
         }
-
-        // A release the tap never reports must not leave the mic recording until the ring buffer overflows.
-        let maxHold = pipelineConfig.maxHold
-        holdWatchdog?.cancel()
-        holdWatchdog = Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: UInt64(maxHold * 1e9))
-            guard !Task.isCancelled else { return }
-            self?.pipeline.forceStop()
-            self?.hotkeyMonitor.forgetHeldKey()
-        }
-        pipeline.keyDown()
-    }
-
-    private func handleKeyUp() {
-        holdWatchdog?.cancel()
-        pipeline.keyUp()
     }
 
     // MARK: - Menu actions
@@ -469,7 +377,7 @@ final class AppModel: ObservableObject {
                     }
                     return
                 }
-                self.pipeline.setEngine(newEngine, name: name)
+                self.dictation.pipeline.setEngine(newEngine, name: name)
                 self.activeEngineName = name
                 self.pendingEngineName = nil
                 self.settings.engine = name
@@ -543,7 +451,7 @@ final class AppModel: ObservableObject {
                 }
                 self.cleaner = newCleaner
                 self.activeSelection = selection
-                self.pipeline.setCleaner(newCleaner, name: name)
+                self.dictation.pipeline.setCleaner(newCleaner, name: name)
                 self.activeCleanupModel = name
                 self.pendingCleanupModel = nil
                 // Persists user picks AND the AFM→Gemma runtime fallback on
@@ -555,7 +463,7 @@ final class AppModel: ObservableObject {
                 logger.log("switched cleanup model to \(name)")
                 if self.cleanupModelDidDownload {
                     self.cleanupModelDidDownload = false
-                    self.notify("\(spec.label) is ready.")
+                    self.dictation.notify("\(spec.label) is ready.")
                 }
                 // The switch counts as activity: without this a model that
                 // just finished loading can be idle-unloaded within 60 s.
@@ -588,7 +496,7 @@ final class AppModel: ObservableObject {
         didFallbackFromAppleIntelligence = true
         let target = CleanupModelCatalog.fallbackID(isDownloaded: { self.modelStatuses[$0]?.isDownloaded ?? false })
         logger.log("apple intelligence unavailable — switching cleanup to \(target.rawValue)")
-        notify("Apple Intelligence is unavailable — switching cleanup to \(CleanupModelCatalog.spec(target).label)…")
+        dictation.notify("Apple Intelligence is unavailable — switching cleanup to \(CleanupModelCatalog.spec(target).label)…")
         switchCleanupModel(to: target)
     }
 
@@ -641,14 +549,12 @@ final class AppModel: ObservableObject {
         guard uid != microphoneUID else { return }
         microphoneUID = uid
         settings.microphoneUID = uid
-        recorder.setPreferredInput(uid: uid)
-        logger.log("microphone set to \(uid ?? "system default")")
-        prewarmRecorderIfGranted()
+        dictation.selectMicrophone(uid: uid)
     }
 
     func setCleanupEnabled(_ on: Bool) {
         cleanupEnabled = on
-        pipeline.cleanupEnabled = on
+        dictation.setCleanupEnabled(on)
         settings.cleanupEnabled = on
     }
 
@@ -669,30 +575,6 @@ final class AppModel: ObservableObject {
         pasteboard.set(text)
     }
 
-    // MARK: - Onboarding
-
-    /// Live-activates the hotkey tap after Input Monitoring is granted. Must run on main.
-    func activateHotkeyIfNeeded() {
-        do {
-            try hotkeyMonitor.reinstall()
-            permissions.setInputMonitoring(true)
-        } catch {
-            logger.log("hotkey reinstall failed: \(error)")
-            permissions.setInputMonitoring(false)
-        }
-    }
-
-    /// Best-effort prewarm of the recorder's audio engine without starting capture. Guarded on the
-    /// current grant so it never triggers the mic prompt; failure is non-fatal.
-    func prewarmRecorderIfGranted() {
-        guard permissions.grants.microphone else { return }
-        do {
-            try recorder.prewarm()
-            logger.log("recorder prewarmed")
-        } catch {
-            logger.log("recorder prewarm failed: \(error)")
-        }
-    }
 }
 
 /// Same phase-1-init workaround as ProgressRelay, for the AFM-lost signal.
@@ -737,16 +619,18 @@ struct ScribeApp: App {
 private struct MenuBarLabel: View {
     @ObservedObject var model: AppModel
     @ObservedObject var permissions: PermissionsModel
+    @ObservedObject var dictation: DictationCoordinator
     @Environment(\.openWindow) private var openWindow
     @State private var didAutoOpen = false
 
     init(model: AppModel) {
         self.model = model
         self.permissions = model.permissions
+        self.dictation = model.dictation
     }
 
     var body: some View {
-        Text(menuBarGlyph(model.state, progress: model.cleanupModelProgress, needsAttention: !permissions.grantsOk))
+        Text(menuBarGlyph(dictation.state, progress: model.cleanupModelProgress, needsAttention: !permissions.grantsOk))
             .onAppear {
                 guard !didAutoOpen else { return }
                 didAutoOpen = true

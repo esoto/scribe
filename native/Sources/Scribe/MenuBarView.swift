@@ -72,24 +72,26 @@ struct MenuBarView: View {
     @ObservedObject var model: AppModel
     @ObservedObject var dictionaryModel: DictionaryModel
     @ObservedObject var permissions: PermissionsModel
+    @ObservedObject var dictation: DictationCoordinator
     @Environment(\.openWindow) private var openWindow
 
     init(model: AppModel) {
         self.model = model
         self.dictionaryModel = model.dictionaryModel
         self.permissions = model.permissions
+        self.dictation = model.dictation
     }
 
     private var statusText: String? {
         menuStatusText(
-            model.state, sttDownload: model.sttDownloadStatus, cleanupStatus: model.cleanupModelStatus,
+            dictation.state, sttDownload: model.sttDownloadStatus, cleanupStatus: model.cleanupModelStatus,
             attention: attentionText(for: permissions.grants))
     }
 
     var body: some View {
         if let statusText {
             Text(statusText)
-                .foregroundStyle(model.state == .error ? Color.red : Color.secondary)
+                .foregroundStyle(dictation.state == .error ? Color.red : Color.secondary)
             Divider()
         }
 
