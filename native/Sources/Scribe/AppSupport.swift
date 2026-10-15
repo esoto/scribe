@@ -1,17 +1,25 @@
 import Foundation
 
 /// Append-only file logger. Serialized on a private queue, so it is safe to call from any thread.
+/// Rotates once: when the file passes `maxBytes` the current log becomes `<name>.1` and a fresh file starts.
 final class FileLogger: @unchecked Sendable {
     static let logsDirectory: URL = {
         FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Logs/scribe", isDirectory: true)
     }()
+    /// 5 MB is weeks of normal use; the unrotated log reached 1.7 MB in three months with every modifier key logged.
+    static let defaultMaxBytes = 5 * 1024 * 1024
 
     private let fileURL: URL
+    private let maxBytes: Int
     private let queue = DispatchQueue(label: "dev.esoto.scribe.filelogger")
 
-    init(fileURL: URL = FileLogger.logsDirectory.appendingPathComponent("scribe.log")) {
+    init(
+        fileURL: URL = FileLogger.logsDirectory.appendingPathComponent("scribe.log"),
+        maxBytes: Int = FileLogger.defaultMaxBytes
+    ) {
         self.fileURL = fileURL
+        self.maxBytes = maxBytes
         let dir = fileURL.deletingLastPathComponent()
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         if !FileManager.default.fileExists(atPath: fileURL.path) {
@@ -20,7 +28,8 @@ final class FileLogger: @unchecked Sendable {
     }
 
     func log(_ message: String) {
-        queue.async { [fileURL] in
+        queue.async { [fileURL, maxBytes] in
+            Self.rotateIfNeeded(fileURL, maxBytes: maxBytes)
             let timestamp = ISO8601DateFormatter().string(from: Date())
             let line = "\(timestamp) \(message)\n"
             guard let data = line.data(using: .utf8) else { return }
@@ -31,6 +40,37 @@ final class FileLogger: @unchecked Sendable {
             defer { try? handle.close() }
             handle.seekToEndOfFile()
             try? handle.write(contentsOf: data)
+        }
+    }
+
+    /// Waits for every queued line to be written. Tests only.
+    func flush() {
+        queue.sync {}
+    }
+
+    /// Keeps exactly one previous file (`scribe.log.1`): older history is not worth the disk or the attention.
+    static func rotateIfNeeded(_ fileURL: URL, maxBytes: Int) {
+        let fm = FileManager.default
+        guard let size = (try? fm.attributesOfItem(atPath: fileURL.path)[.size] as? NSNumber)?.intValue,
+              size >= maxBytes
+        else { return }
+        let previous = fileURL.appendingPathExtension("1")
+        try? fm.removeItem(at: previous)
+        try? fm.moveItem(at: fileURL, to: previous)
+        fm.createFile(atPath: fileURL.path, contents: nil)
+    }
+
+    /// `last_failed.wav` exists to debug a recent failure, not to keep audio around: gone after `days`.
+    static func expireFailedAudio(
+        in directory: URL = FileLogger.logsDirectory,
+        olderThanDays days: Double = 7,
+        now: Date = Date()
+    ) {
+        let url = directory.appendingPathComponent("last_failed.wav")
+        let fm = FileManager.default
+        guard let modified = (try? fm.attributesOfItem(atPath: url.path)[.modificationDate]) as? Date else { return }
+        if now.timeIntervalSince(modified) > days * 86_400 {
+            try? fm.removeItem(at: url)
         }
     }
 }
