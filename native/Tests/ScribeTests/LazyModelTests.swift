@@ -18,6 +18,14 @@ private final class CountingFactory: @unchecked Sendable {
     }
 }
 
+/// Thread-safe line collector: LazyModel logs from its load task, not the test's thread.
+private final class LogSink: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage: [String] = []
+    func append(_ line: String) { lock.withLock { storage.append(line) } }
+    var lines: [String] { lock.withLock { storage } }
+}
+
 final class LazyModelTests: XCTestCase {
     func testNotLoadedInitially() async {
         let factory = CountingFactory()
@@ -106,5 +114,54 @@ final class LazyModelTests: XCTestCase {
         let loaded = await model.isLoaded
         XCTAssertFalse(loaded)
         XCTAssertEqual(factory.calls, 1)
+    }
+
+    func testFailedPreloadLogsTheLabelAndTheError() async {
+        let factory = CountingFactory()
+        factory.shouldFail = true
+        let sink = LogSink()
+        let model = LazyModel(label: "parakeet", onLog: { sink.append($0) }) { try await factory.make() }
+
+        await model.preload()
+
+        XCTAssertEqual(sink.lines.count, 1, "\(sink.lines)")
+        let line = sink.lines.first ?? ""
+        XCTAssertTrue(line.contains("parakeet"), line)
+        XCTAssertTrue(line.contains("preload failed"), line)
+        XCTAssertTrue(line.contains("factory failed"), line)
+    }
+
+    func testSuccessfulLoadLogsItsLabelAndDuration() async {
+        let factory = CountingFactory()
+        let sink = LogSink()
+        let model = LazyModel(label: "whisper", onLog: { sink.append($0) }) { try await factory.make() }
+
+        await model.preload()
+
+        XCTAssertEqual(sink.lines.count, 1, "\(sink.lines)")
+        let line = sink.lines.first ?? ""
+        XCTAssertTrue(line.hasPrefix("whisper loaded in "), line)
+    }
+
+    func testLoadForPreloadReturnsNilAndLogsInsteadOfThrowing() async {
+        let factory = CountingFactory()
+        factory.shouldFail = true
+        let sink = LogSink()
+        let model = LazyModel(label: "cleanup", onLog: { sink.append($0) }) { try await factory.make() }
+
+        let loaded = await model.loadForPreload()
+
+        XCTAssertNil(loaded)
+        XCTAssertEqual(sink.lines.count, 1, "\(sink.lines)")
+        XCTAssertEqual(factory.calls, 1, "logging a failure must not trigger a second load attempt")
+    }
+
+    func testLoadForPreloadReturnsTheModelOnSuccess() async {
+        let factory = CountingFactory()
+        let model = LazyModel(label: "cleanup") { try await factory.make() }
+
+        let loaded = await model.loadForPreload()
+
+        XCTAssertEqual(loaded, "model-1")
     }
 }

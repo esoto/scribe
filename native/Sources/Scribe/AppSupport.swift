@@ -36,7 +36,7 @@ final class FileLogger: Sendable {
             let line = "\(timestamp) \(message)\n"
             guard let data = line.data(using: .utf8) else { return }
             guard let handle = try? FileHandle(forWritingTo: fileURL) else {
-                // The log file itself is unwritable: stdout is the only place left (T9b's print sweep must keep this).
+                // The log file itself is unwritable: stdout is the only place left.
                 print("[scribe] \(message)")
                 return
             }

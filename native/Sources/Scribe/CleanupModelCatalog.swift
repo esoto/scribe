@@ -183,11 +183,12 @@ extension CleanupModelCatalog {
     /// Constructs (never loads) the backend for a selection.
     static func makeBackend(
         _ selection: Selection, relay: ProgressRelay,
-        onAppleIntelligenceLost: @escaping @Sendable () -> Void
+        onAppleIntelligenceLost: @escaping @Sendable () -> Void,
+        onLog: (@Sendable (String) -> Void)? = nil
     ) -> any CleanupModelBackend {
         switch selection {
         case .custom(let path):
-            return GemmaBackend(spec: gemma3, customModelPath: path)
+            return GemmaBackend(spec: gemma3, customModelPath: path, onLog: onLog)
         case .model(let id):
             let spec = spec(id)
             if case .appleIntelligence = spec.kind, #available(macOS 26.0, *) {
@@ -196,7 +197,8 @@ extension CleanupModelCatalog {
             // Pre-26 never reaches here with AFM: resolve() and the picker only
             // offer it while AppleIntelligence.isAvailable.
             let mlxSpec = spec.repoID == nil ? gemma3 : spec
-            return GemmaBackend(spec: mlxSpec, onProgress: { relay.report(model: mlxSpec.label, fraction: $0) })
+            return GemmaBackend(
+                spec: mlxSpec, onProgress: { relay.report(model: mlxSpec.label, fraction: $0) }, onLog: onLog)
         }
     }
 }

@@ -12,7 +12,7 @@ final class HotkeyMonitor {
     private let onDown: () -> Void
     private let onUp: () -> Void
 
-    /// Fires only for modifier events, so logging it can never capture typed text.
+    /// Fires only for the hotkey's own modifier key, so logging it can never capture typed text.
     var onModifierEvent: ((String) -> Void)?
 
     private var tap: CFMachPort?
@@ -121,7 +121,8 @@ final class HotkeyMonitor {
         let action = monitor.machine.handle(
             eventType: Int(type.rawValue), keycode: keycode, flags: event.flags.rawValue
         )
-        if type == .flagsChanged {
+        // Every modifier press system-wide reaches this tap; only the hotkey's own key explains a missed or stuck hold.
+        if type == .flagsChanged, keycode == monitor.keycode {
             monitor.onModifierEvent?(
                 "flagsChanged keycode=\(keycode) flags=0x\(String(event.flags.rawValue, radix: 16)) -> \(action.map(String.init(describing:)) ?? "nil")"
             )

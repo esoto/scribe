@@ -6,11 +6,13 @@ import WhisperKit
 actor LazyModel<M> {
     private let label: String
     private let factory: () async throws -> M
+    private let onLog: (@Sendable (String) -> Void)?
     private var model: M?
     private var inFlight: Task<M, Error>?
 
-    init(label: String, factory: @escaping () async throws -> M) {
+    init(label: String, onLog: (@Sendable (String) -> Void)? = nil, factory: @escaping () async throws -> M) {
         self.label = label
+        self.onLog = onLog
         self.factory = factory
     }
 
@@ -21,11 +23,11 @@ actor LazyModel<M> {
         if let inFlight {
             return try await inFlight.value
         }
-        let task = Task { [factory, label] () throws -> M in
+        let task = Task { [factory, label, onLog] () throws -> M in
             let t0 = Date()
             let loaded = try await factory()
             let elapsed = Date().timeIntervalSince(t0)
-            print("[LazyModel] \(label) loaded in \(String(format: "%.2f", elapsed))s")
+            onLog?("\(label) loaded in \(String(format: "%.2f", elapsed))s")
             return loaded
         }
         inFlight = task
@@ -44,9 +46,19 @@ actor LazyModel<M> {
         model != nil
     }
 
-    /// Best-effort warm-up; swallows failure so the next real get() retries.
+    /// Best-effort warm-up; the failure is logged (nobody is awaiting it) and the next real get() retries.
     func preload() async {
-        _ = try? await get()
+        _ = await loadForPreload()
+    }
+
+    /// For warm-ups that need the model itself; a failure must not be silent or "models ready" would lie.
+    func loadForPreload() async -> M? {
+        do {
+            return try await get()
+        } catch {
+            onLog?("\(label) preload failed: \(error)")
+            return nil
+        }
     }
 }
 
@@ -61,6 +73,7 @@ final class ParakeetEngine: UnloadableEngine {
     let name = "parakeet"
 
     private let lazyModel: LazyModel<AsrManager>
+    private let onLog: (@Sendable (String) -> Void)?
     /// Auxiliary CTC keyword-spotter (separate download). Its factory throws on failure so LazyModel doesn't cache it; applyBiasing catches and transcribes unbiased.
     private let lazyCtc: LazyModel<CtcModels>
 
@@ -83,8 +96,12 @@ final class ParakeetEngine: UnloadableEngine {
     static let biasMinSimilarity: Float = 0.75
 
     /// `onDownloadProgress` reports the Ultra download (0…1) on any thread; 1 also means "done or gave up".
-    init(onDownloadProgress: (@Sendable (Double) -> Void)? = nil) {
-        lazyModel = LazyModel(label: "parakeet") {
+    init(
+        onDownloadProgress: (@Sendable (Double) -> Void)? = nil,
+        onLog: (@Sendable (String) -> Void)? = nil
+    ) {
+        self.onLog = onLog
+        lazyModel = LazyModel(label: "parakeet", onLog: onLog) {
             do {
                 // Downloaded into the app-managed store, not FluidAudio's default cache.
                 let dir: URL
@@ -104,13 +121,13 @@ final class ParakeetEngine: UnloadableEngine {
                 // older install left on disk. Not cached as Ultra, so the next load retries it.
                 let v3 = ModelStore.parakeetV3Directory()
                 guard AsrModels.modelsExist(at: v3, version: .v3) else { throw error }
-                print("[ParakeetEngine] Ultra unavailable (\(error)); falling back to v3 on disk")
+                onLog?("parakeet: Ultra unavailable (\(error)); falling back to v3 on disk")
                 let manager = AsrManager(config: .default)
                 try await manager.loadModels(try await AsrModels.load(from: v3, version: .v3))
                 return manager
             }
         }
-        lazyCtc = LazyModel(label: "parakeet-ctc") {
+        lazyCtc = LazyModel(label: "parakeet-ctc", onLog: onLog) {
             // Throws (not try?) so LazyModel doesn't cache a failed load; the next dictation retries.
             try await CtcModels.downloadAndLoad(
                 to: ModelStore.ctcDirectory, variant: .ctc110m)
@@ -143,7 +160,11 @@ final class ParakeetEngine: UnloadableEngine {
         guard !terms.isEmpty else { lastBiasOutcomeForTesting = .disabled; return result.text }
 
         // A load failure throws; degrade to plain text without caching it.
-        guard let ctc = try? await lazyCtc.get() else {
+        let ctc: CtcModels
+        do {
+            ctc = try await lazyCtc.get()
+        } catch {
+            onLog?("parakeet: vocabulary biasing skipped, CTC model unavailable: \(error)")
             lastBiasOutcomeForTesting = .noCtcModel
             return result.text
         }
@@ -172,7 +193,7 @@ final class ParakeetEngine: UnloadableEngine {
             lastBiasOutcomeForTesting = out.wasModified ? .applied : .unmodified
             return out.wasModified ? out.text : result.text
         } catch {
-            print("[ParakeetEngine] vocabulary biasing skipped: \(error)")
+            onLog?("parakeet: vocabulary biasing skipped: \(error)")
             lastBiasOutcomeForTesting = .failed
             return result.text
         }
@@ -249,8 +270,8 @@ final class WhisperEngine: UnloadableEngine {
 
     private let lazyModel: LazyModel<WhisperKit>
 
-    init() {
-        lazyModel = LazyModel(label: "whisper") {
+    init(onLog: (@Sendable (String) -> Void)? = nil) {
+        lazyModel = LazyModel(label: "whisper", onLog: onLog) {
             // downloadBase roots models in the app-managed store, not ~/Documents/huggingface.
             try await WhisperKit(
                 WhisperKitConfig(

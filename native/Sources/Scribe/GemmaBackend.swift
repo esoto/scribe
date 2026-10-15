@@ -52,6 +52,7 @@ private struct WarmPrefix {
 /// which serializes calls with a real async mutex; dictionarySnapshot has its own NSLock.
 final class GemmaBackend: CleanupModelBackend, @unchecked Sendable {
     private let lazyModel: LazyModel<ModelContainer>
+    private let onLog: (@Sendable (String) -> Void)?
 
     /// nil until warm-up succeeds.
     private var warmPrefix: WarmPrefix?
@@ -87,10 +88,12 @@ final class GemmaBackend: CleanupModelBackend, @unchecked Sendable {
     init(
         spec: CleanupModelSpec = CleanupModelCatalog.gemma3,
         customModelPath: String? = nil,
-        onProgress: (@Sendable (Double) -> Void)? = nil
+        onProgress: (@Sendable (Double) -> Void)? = nil,
+        onLog: (@Sendable (String) -> Void)? = nil
     ) {
+        self.onLog = onLog
         let configuration = GemmaBackend.localFirstConfiguration(spec: spec, customPath: customModelPath)
-        lazyModel = LazyModel(label: "cleanup-\(spec.id.rawValue)") {
+        lazyModel = LazyModel(label: "cleanup-\(spec.id.rawValue)", onLog: onLog) {
             // Expanded macro so the hub client uses the app-managed model store.
             try await loadModelContainer(
                 from: #hubDownloader(
@@ -202,7 +205,7 @@ final class GemmaBackend: CleanupModelBackend, @unchecked Sendable {
             let prefixLen = GemmaBackend.commonPrefixLength(tokensEN, tokensES)
 
             guard prefixLen > 0, prefixLen < tokensEN.count, prefixLen < tokensES.count else {
-                print("[GemmaBackend] prefix-reuse disabled: degenerate common prefix (\(prefixLen))")
+                onLog?("cleanup: prefix-reuse disabled, degenerate common prefix (\(prefixLen) tokens)")
                 return
             }
 
@@ -220,18 +223,17 @@ final class GemmaBackend: CleanupModelBackend, @unchecked Sendable {
                     (GemmaBackend.warmupSampleEN, tokensEN),
                     (GemmaBackend.warmupSampleES, tokensES),
                 ],
-                context: context)
+                context: context,
+                onLog: onLog)
 
             warmPrefix = WarmPrefix(
                 cache: cache, systemPrompt: systemPrompt, prefixLen: prefixLen,
                 prefixTokens: prefixTokens, fastPathWrapOverlap: fastPathWrapOverlap)
-            print(
-                "[GemmaBackend] warm prefix ready: prefixLen=\(prefixLen) fastPath=\(fastPathWrapOverlap != nil) wrapOverlap=\(fastPathWrapOverlap.map(String.init) ?? "n/a")"
+            onLog?(
+                "cleanup: warm prefix ready, prefixLen=\(prefixLen) fastPath=\(fastPathWrapOverlap != nil) wrapOverlap=\(fastPathWrapOverlap.map(String.init) ?? "n/a")"
             )
         } catch {
-            print(
-                "[GemmaBackend] prefix warm-up failed, falling back to uncached generation: \(error)"
-            )
+            onLog?("cleanup: prefix warm-up failed, falling back to uncached generation: \(error)")
         }
     }
 
@@ -240,7 +242,8 @@ final class GemmaBackend: CleanupModelBackend, @unchecked Sendable {
     private static func parityGateOverlap(
         prefixTokens: [Int],
         samples: [(text: String, fullTokens: [Int])],
-        context: ModelContext
+        context: ModelContext,
+        onLog: (@Sendable (String) -> Void)?
     ) async -> Int? {
         let bos = prefixTokens.first
         var agreedOverlap: Int?
@@ -257,8 +260,8 @@ final class GemmaBackend: CleanupModelBackend, @unchecked Sendable {
                 let overlap = GemmaBackend.overlapLength(
                     suffixOf: prefixTokens, prefixOf: incrementalTokens)
                 if let agreedOverlap, agreedOverlap != overlap {
-                    print(
-                        "[GemmaBackend] prefix-reuse fast path disabled: wrap-overlap disagreement between samples (\(agreedOverlap) vs \(overlap))"
+                    onLog?(
+                        "cleanup: prefix-reuse fast path disabled, wrap-overlap disagreement between samples (\(agreedOverlap) vs \(overlap))"
                     )
                     return nil
                 }
@@ -266,14 +269,14 @@ final class GemmaBackend: CleanupModelBackend, @unchecked Sendable {
 
                 let candidate = prefixTokens + Array(incrementalTokens.dropFirst(overlap))
                 guard candidate == fullTokens else {
-                    print("[GemmaBackend] prefix-reuse fast path disabled: token parity mismatch")
-                    print("[GemmaBackend]   sample: \(sample)")
-                    print("[GemmaBackend]   expected tokens: \(fullTokens)")
-                    print("[GemmaBackend]   got tokens:      \(candidate)")
+                    // Counts only: a full token dump is hundreds of ints per line.
+                    onLog?(
+                        "cleanup: prefix-reuse fast path disabled, token parity mismatch (expected \(fullTokens.count) tokens, got \(candidate.count))"
+                    )
                     return nil
                 }
             } catch {
-                print("[GemmaBackend] prefix-reuse fast path disabled: parity check failed: \(error)")
+                onLog?("cleanup: prefix-reuse fast path disabled, parity check failed: \(error)")
                 return nil
             }
         }
@@ -319,7 +322,7 @@ final class GemmaBackend: CleanupModelBackend, @unchecked Sendable {
                 guard tokens.count >= wrapOverlap,
                     toStrip == Array(warm.prefixTokens.suffix(wrapOverlap))
                 else {
-                    print("[GemmaBackend] cleanup: fast-path boundary mismatch, using full render")
+                    onLog?("cleanup: fast-path boundary mismatch, using full render")
                     return try await GemmaBackend.runFreshGeneration(
                         chat: chat, parameters: parameters, context: context)
                 }
@@ -338,9 +341,7 @@ final class GemmaBackend: CleanupModelBackend, @unchecked Sendable {
             guard fullTokens.count > warm.prefixLen,
                 Array(fullTokens[0..<warm.prefixLen]) == warm.prefixTokens
             else {
-                print(
-                    "[GemmaBackend] prefix mismatch for this call — falling back to uncached generation"
-                )
+                onLog?("cleanup: prefix mismatch for this call, falling back to uncached generation")
                 return try await GemmaBackend.runFreshGeneration(
                     chat: chat, parameters: parameters, context: context)
             }
@@ -401,7 +402,7 @@ final class GemmaBackend: CleanupModelBackend, @unchecked Sendable {
     }
     /// Loads and warms up, so the first dictation after an idle unload doesn't pay warm-up cost.
     func preload() async {
-        guard let container = try? await lazyModel.get() else { return }
+        guard let container = await lazyModel.loadForPreload() else { return }
         let parameters = GenerateParameters(temperature: 0.0)
         await container.perform { context in
             // Current prompt, so preload also rebuilds a prefix made stale by a dictionary change.
