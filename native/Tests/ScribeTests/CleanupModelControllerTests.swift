@@ -20,6 +20,8 @@ final class CleanupModelControllerTests: XCTestCase {
         var committed: [(backend: any CleanupModelBackend, name: String)] = []
         var notifications: [String] = []
         var touchIdleCalls = 0
+        /// `backends[0].unloadCalls` seen inside each commit callback: the old model must still be loaded then.
+        var previousUnloadsAtCommit: [Int] = []
         var afmAvailable = true
         var afmReason: String?
         var snapshot = DictionarySnapshot(pairs: [], glossary: [])
@@ -70,7 +72,10 @@ final class CleanupModelControllerTests: XCTestCase {
                 isAppleIntelligenceAvailable: { self.afmAvailable },
                 appleIntelligenceUnavailableReason: { self.afmReason },
                 dictionarySnapshot: { self.snapshot },
-                onCleanerCommitted: { backend, name in self.committed.append((backend, name)) },
+                onCleanerCommitted: { backend, name in
+                    self.committed.append((backend, name))
+                    self.previousUnloadsAtCommit.append(self.backends[0].unloadCalls)
+                },
                 notify: { self.notifications.append($0) },
                 touchIdle: { self.touchIdleCalls += 1 },
                 log: { line in logs.mutate { $0.append(line) } })
@@ -234,6 +239,7 @@ final class CleanupModelControllerTests: XCTestCase {
         await task.value
 
         // The old model must stay usable until the new one is in place: the commit callback saw it still loaded.
+        XCTAssertEqual(h.previousUnloadsAtCommit, [0], "the old model is still loaded when the new one reaches the pipeline")
         XCTAssertEqual(previous.events.filter { $0 == "unload" }.count, 1)
         XCTAssertEqual(h.committed.count, 1)
     }
@@ -732,6 +738,7 @@ final class CleanupModelControllerTests: XCTestCase {
 
     func testStartupPreloadWhenDisabledSucceedsWithoutLoading() async {
         let c = h.makeController()
+        h.backends[0].releasePreload()  // a regression must fail the assertion, not hang on the gate
 
         let loaded = await c.preloadAtStartup(h.backends[0], enabled: false)
 
@@ -741,7 +748,7 @@ final class CleanupModelControllerTests: XCTestCase {
 
     func testStartupPreloadSkipsACleanerThatHasBeenReplaced() async {
         let c = h.makeController()
-        let stale = FakeCleanupModelBackend(gatedPreload: true)
+        let stale = FakeCleanupModelBackend()  // ungated: a regression must fail, not hang
 
         let loaded = await c.preloadAtStartup(stale, enabled: true)
 
@@ -799,6 +806,7 @@ final class CleanupModelControllerTests: XCTestCase {
         let c = h.makeController()
         let cleaner = h.backends[0]
         cleaner.loaded = true
+        cleaner.releasePreload()  // a regression must fail the assertion, not hang on the gate
 
         await c.warmUpIfNeeded(cleaner, enabled: true)
 
@@ -808,6 +816,7 @@ final class CleanupModelControllerTests: XCTestCase {
     func testWarmUpDoesNothingWhenCleanupIsDisabled() async {
         let c = h.makeController()
         let cleaner = h.backends[0]
+        cleaner.releasePreload()  // a regression must fail the assertion, not hang on the gate
 
         await c.warmUpIfNeeded(cleaner, enabled: false)
 
@@ -820,6 +829,7 @@ final class CleanupModelControllerTests: XCTestCase {
         let (task, backend) = beginSwitch(c, to: .gemma4)
         backend.releasePreload(loaded: true)
         await task.value
+        stale.releasePreload()  // a regression must fail the assertion, not hang on the gate
 
         await c.warmUpIfNeeded(stale, enabled: true)
 
