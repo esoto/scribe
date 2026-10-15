@@ -145,6 +145,7 @@ final class FakeCleanupModelBackend: CleanupModelBackend, @unchecked Sendable {
     private var _unloadCalls = 0
     private var _dictionaries: [DictionarySnapshot] = []
     private var _events: [String] = []
+    private var _onIsLoaded: (() -> Void)?
     private var gate: CheckedContinuation<Void, Never>?
     private var gateReleased = false
     private let gated: Bool
@@ -164,9 +165,23 @@ final class FakeCleanupModelBackend: CleanupModelBackend, @unchecked Sendable {
     var dictionaries: [DictionarySnapshot] { lock.withLock { _dictionaries } }
     /// "setDictionary", "preload", "unload" in call order.
     var events: [String] { lock.withLock { _events } }
-    var holdsMemory: Bool { lock.withLock { _holdsMemory } }
+    var holdsMemory: Bool {
+        get { lock.withLock { _holdsMemory } }
+        set { lock.withLock { _holdsMemory = newValue } }
+    }
 
-    var isLoaded: Bool { get async { lock.withLock { _loaded } } }
+    /// Runs inside `isLoaded`, i.e. at the suspension point a caller awaits: lets a test land a cancellation there.
+    var onIsLoaded: (() -> Void)? {
+        get { lock.withLock { _onIsLoaded } }
+        set { lock.withLock { _onIsLoaded = newValue } }
+    }
+
+    var isLoaded: Bool {
+        get async {
+            onIsLoaded?()
+            return lock.withLock { _loaded }
+        }
+    }
 
     func setDictionary(_ snapshot: DictionarySnapshot) {
         lock.withLock {
@@ -295,4 +310,19 @@ final class FakeHotkeyMonitor: HotkeyMonitoring {
     }
 
     func forgetHeldKey() { forgetCalls += 1 }
+}
+
+/// A value shared with `@Sendable` closures (detached tasks, background queues) under a lock.
+final class Locked<T>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored: T
+
+    init(_ value: T) { stored = value }
+
+    var value: T {
+        get { lock.withLock { stored } }
+        set { lock.withLock { stored = newValue } }
+    }
+
+    func mutate(_ change: (inout T) -> Void) { lock.withLock { change(&stored) } }
 }

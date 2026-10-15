@@ -78,7 +78,7 @@ func deleteConfirmationTitle(_ row: ModelRow?) -> String {
 /// Lists every cleanup model with its disk state: use one, or delete a
 /// downloaded one you're done trying. The model in use can't be deleted.
 struct ModelsWindow: View {
-    @ObservedObject var model: AppModel
+    @ObservedObject var model: CleanupModelController
     @State private var pendingDelete: ModelRow?
 
     private var rows: [ModelRow] {

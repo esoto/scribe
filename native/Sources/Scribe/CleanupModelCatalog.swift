@@ -1,6 +1,6 @@
 import Foundation
 
-/// Bridges GemmaBackend download progress (any thread) to AppModel, which
+/// Bridges GemmaBackend download progress (any thread) to CleanupModelController, which
 /// can't be captured while its stored properties are still initializing.
 final class ProgressRelay: @unchecked Sendable {
     private let lock = NSLock()
@@ -18,7 +18,7 @@ final class ProgressRelay: @unchecked Sendable {
 
 /// The cleanup models scribe offers, and the pure rules that pick one at
 /// launch, choose a fallback, and gate what each may see in its prompt.
-/// Pure (no I/O) so the rules are unit-testable without an AppModel — same
+/// Pure (no I/O) so the rules are unit-testable without a controller — same
 /// idea as `EngineSwitch`.
 enum CleanupModelID: String, CaseIterable, Sendable {
     case gemma3
@@ -121,7 +121,7 @@ enum CleanupModelCatalog {
         /// `cleanupModelPath` set via `defaults write` — overrides the picker.
         case custom(path: String)
 
-        /// Value published as `AppModel.activeCleanupModel` and logged.
+        /// Value published as `CleanupModelController.activeCleanupModel` and logged.
         var storageID: String {
             switch self {
             case .model(let id): return id.rawValue

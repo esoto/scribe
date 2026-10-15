@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-/// Menu bar UI. The view delegates every decision to `AppModel`.
+/// Menu bar UI. The view delegates every decision to the models it observes.
 
 func glyphFor(_ state: PipelineState) -> String {
     switch state {
@@ -73,6 +73,7 @@ struct MenuBarView: View {
     @ObservedObject var dictionaryModel: DictionaryModel
     @ObservedObject var permissions: PermissionsModel
     @ObservedObject var dictation: DictationCoordinator
+    @ObservedObject var cleanupModels: CleanupModelController
     @Environment(\.openWindow) private var openWindow
 
     init(model: AppModel) {
@@ -80,11 +81,12 @@ struct MenuBarView: View {
         self.dictionaryModel = model.dictionaryModel
         self.permissions = model.permissions
         self.dictation = model.dictation
+        self.cleanupModels = model.cleanupModels
     }
 
     private var statusText: String? {
         menuStatusText(
-            dictation.state, sttDownload: model.sttDownloadStatus, cleanupStatus: model.cleanupModelStatus,
+            dictation.state, sttDownload: model.sttDownloadStatus, cleanupStatus: cleanupModels.cleanupModelStatus,
             attention: attentionText(for: permissions.grants))
     }
 
@@ -106,25 +108,25 @@ struct MenuBarView: View {
         .pickerStyle(.inline)
 
         Picker("Cleanup Model", selection: Binding(
-            get: { model.activeCleanupModel },
-            set: { if let id = CleanupModelID(rawValue: $0) { model.switchCleanupModel(to: id) } }
+            get: { cleanupModels.activeCleanupModel },
+            set: { if let id = CleanupModelID(rawValue: $0) { cleanupModels.switchCleanupModel(to: id) } }
         )) {
             ForEach(
                 CleanupModelCatalog.all.filter {
-                    $0.id != .appleIntelligence || model.appleIntelligenceAvailable
-                        || model.activeCleanupModel == $0.id.rawValue
+                    $0.id != .appleIntelligence || cleanupModels.appleIntelligenceAvailable
+                        || cleanupModels.activeCleanupModel == $0.id.rawValue
                 }, id: \.id
             ) { spec in
-                Text(pickerLabel(spec, status: model.modelStatuses[spec.id] ?? .notDownloaded))
+                Text(pickerLabel(spec, status: cleanupModels.modelStatuses[spec.id] ?? .notDownloaded))
                     .tag(spec.id.rawValue)
             }
             // A defaults-set custom path overrides the picker — keep it visible.
-            if model.activeCleanupModel == "custom" {
+            if cleanupModels.activeCleanupModel == "custom" {
                 Text("Custom model (set via defaults)").tag("custom")
             }
         }
         .pickerStyle(.menu)
-        .disabled(model.activeCleanupModel == "custom")
+        .disabled(cleanupModels.activeCleanupModel == "custom")
 
         Button("Manage Models…") {
             openModelsWindow(openWindow)
@@ -185,7 +187,7 @@ struct MenuBarView: View {
                 )
             )
             if let note = learningNote(
-                fidelitySafe: model.activeCleanupFidelitySafe, learningOn: dictionaryModel.dictionaryLearningEnabled)
+                fidelitySafe: cleanupModels.activeCleanupFidelitySafe, learningOn: dictionaryModel.dictionaryLearningEnabled)
             {
                 Text(note)
             }
