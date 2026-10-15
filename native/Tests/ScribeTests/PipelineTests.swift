@@ -45,7 +45,8 @@ final class PipelineTests: XCTestCase {
         history: History = History(maxLen: 10),
         config: PipelineConfig = PipelineConfig(),
         pairs: [ReplacementPair] = [],
-        runner: ((@escaping () async -> Void) -> Void)? = nil
+        runner: ((@escaping () async -> Void) -> Void)? = nil,
+        frontmost: @escaping () -> pid_t? = { nil }
     ) -> Harness {
         let clock = FakeClock()
         let states = Box<PipelineState>()
@@ -62,6 +63,7 @@ final class PipelineTests: XCTestCase {
             config: config,
             clock: { clock.t },
             runner: runner ?? makeSyncRunner(),
+            frontmost: frontmost,
             onState: { states.append($0) },
             onNotice: { notices.append($0) },
             saveFailedAudio: { saved.append($0) },
@@ -274,6 +276,56 @@ final class PipelineTests: XCTestCase {
         XCTAssertFalse(h.notices.value.contains("Paste failed — press ⌘V to paste manually"))
         // The text is on the clipboard and in history, so the dictation still counts.
         XCTAssertEqual(hist.items().count, 1)
+    }
+
+    func testPasteIsGivenTheAppFocusedAtKeyDown() {
+        let paster = FakePaster()
+        let h = make(paster: paster, frontmost: { 7 })
+        dictate(h)
+        XCTAssertEqual(paster.targets, [7])
+    }
+
+    func testPasteTargetIsNilWhenNoAppIsReported() {
+        let paster = FakePaster()
+        let h = make(paster: paster)
+        dictate(h)
+        XCTAssertEqual(paster.targets, [nil])
+    }
+
+    func testQueuedJobKeepsItsTargetWhenFocusMovesAndANewRecordingStarts() {
+        let runner = ManualRunner()
+        let paster = FakePaster()
+        var front: pid_t? = 1
+        let h = make(paster: paster, runner: runner.run, frontmost: { front })
+        dictate(h)
+        front = 2
+        h.pipeline.keyDown()
+        runner.drain()
+        XCTAssertEqual(paster.targets, [1])
+    }
+
+    func testShortTapDoesNotRetargetTheQueuedJob() {
+        let runner = ManualRunner()
+        let paster = FakePaster()
+        var front: pid_t? = 1
+        let h = make(paster: paster, runner: runner.run, frontmost: { front })
+        dictate(h)
+        front = 2
+        dictate(h, hold: 0.1)
+        runner.drain()
+        XCTAssertEqual(paster.targets, [1])
+    }
+
+    func testEachQueuedJobPastesToItsOwnKeyDownApp() {
+        let runner = ManualRunner()
+        let paster = FakePaster()
+        var front: pid_t? = 1
+        let h = make(paster: paster, runner: runner.run, frontmost: { front })
+        dictate(h)
+        front = 2
+        dictate(h)
+        runner.drain()
+        XCTAssertEqual(paster.targets, [1, 2])
     }
 
     func testHistoryRecordsEngineAndRawFinal() {

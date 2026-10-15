@@ -36,7 +36,6 @@ final class AppModel: ObservableObject {
     private var hotkeyMonitor: HotkeyMonitor!
     // Concrete so start() can prewarm its audio engine ahead of the first key-down.
     private var recorder: Recorder!
-    private let pasteTarget = PasteTarget()
     private var engineSwitchTask: Task<Void, Never>?
     // Target of the in-flight engine switch; nil when none.
     private var pendingEngineName: String?
@@ -161,7 +160,6 @@ final class AppModel: ObservableObject {
         let recorder = Recorder(sampleRate: pipelineConfig.sampleRate)
         recorder.setPreferredInput(uid: settings.microphoneUID)
         self.recorder = recorder
-        let pasteTarget = self.pasteTarget
         self.pipeline = DictationPipeline(
             recorder: recorder,
             stt: engine,
@@ -169,11 +167,12 @@ final class AppModel: ObservableObject {
             paster: GuardedPaster(
                 inner: self.paster,
                 accessibilityGranted: { TCC.accessibilityGranted() },
-                expectedFrontmost: { pasteTarget.get() },
                 currentFrontmost: frontmostPID),
             history: self.history,
             config: pipelineConfig,
             clock: { Date().timeIntervalSince1970 },
+            // keyDown runs on main (tap callback), so a direct read is safe.
+            frontmost: { NSWorkspace.shared.frontmostApplication?.processIdentifier },
             onState: { [weak self] newState in
                 Task { @MainActor in
                     self?.applyState(newState)
@@ -404,7 +403,6 @@ final class AppModel: ObservableObject {
     /// Runs on main (CGEventTap callback).
     private func handleKeyDown() {
         idleTracker.touch(now: ProcessInfo.processInfo.systemUptime)
-        pasteTarget.set(NSWorkspace.shared.frontmostApplication?.processIdentifier)
         refreshAppleIntelligenceAvailability()
         // Deferred: a flip can reinstall the event tap, which must not happen inside the tap's own callback.
         Task { [weak self] in self?.refreshGrants() }

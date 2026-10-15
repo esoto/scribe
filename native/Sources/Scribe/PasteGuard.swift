@@ -18,46 +18,29 @@ extension Paster: PasteDelivering {}
 final class GuardedPaster: Pasting {
     private let inner: PasteDelivering
     private let accessibilityGranted: () -> Bool
-    private let expectedFrontmost: () -> pid_t?
     private let currentFrontmost: () -> pid_t?
 
     init(
         inner: PasteDelivering,
         accessibilityGranted: @escaping () -> Bool,
-        expectedFrontmost: @escaping () -> pid_t?,
         currentFrontmost: @escaping () -> pid_t?
     ) {
         self.inner = inner
         self.accessibilityGranted = accessibilityGranted
-        self.expectedFrontmost = expectedFrontmost
         self.currentFrontmost = currentFrontmost
     }
 
-    func paste(_ text: String) throws {
+    func paste(_ text: String, target: pid_t?) throws {
         guard accessibilityGranted() else {
             inner.copyOnly(text)
             throw PasteGuardError(notice: "Accessibility is off — text copied, press ⌘V")
         }
         // No key-down pid means nothing to compare against, so no guard.
-        if let expected = expectedFrontmost(), expected != currentFrontmost() {
+        if let target, target != currentFrontmost() {
             inner.copyOnly(text)
             throw PasteGuardError(notice: "Focus changed — text copied, press ⌘V")
         }
-        try inner.paste(text)
-    }
-}
-
-/// The app that had focus at key-down: written on main by the event tap, read on the pipeline worker at paste time.
-final class PasteTarget: @unchecked Sendable {
-    private let lock = NSLock()
-    private var pid: pid_t?
-
-    func set(_ pid: pid_t?) {
-        lock.withLock { self.pid = pid }
-    }
-
-    func get() -> pid_t? {
-        lock.withLock { pid }
+        try inner.paste(text, target: target)
     }
 }
 
