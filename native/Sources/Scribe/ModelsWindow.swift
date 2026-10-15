@@ -49,7 +49,9 @@ func modelRows(
             canDelete: status != .notDownloaded && canDeleteModel(spec.id, active: active, pending: pending),
             bytesOnDisk: status.bytes,
             useLabel: status.isDownloaded ? "Use" : "Download & Use",
-            canCancel: spec.id.rawValue == pending)
+            canCancel: spec.id.rawValue == pending
+                // Cancel re-selects the active model; an unavailable Apple Intelligence can't be re-selected.
+                && !(active == CleanupModelID.appleIntelligence.rawValue && appleIntelligenceReason != nil))
     }
 }
 
