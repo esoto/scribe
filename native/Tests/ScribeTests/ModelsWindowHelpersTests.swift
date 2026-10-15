@@ -72,4 +72,17 @@ final class ModelsWindowHelpersTests: XCTestCase {
         XCTAssertEqual(deleteConfirmationTitle(row), "Delete Gemma 4 E4B (4.9 GB)?")
         XCTAssertEqual(deleteConfirmationTitle(nil), "")
     }
+
+    func testUseLabelSaysDownloadWhenNothingIsOnDisk() {
+        let rows = modelRows(statuses: [:], active: "gemma3", pending: nil, appleIntelligenceReason: "x")
+        XCTAssertEqual(rows.first { $0.id == .gemma4 }?.useLabel, "Download & Use")
+        let downloaded = modelRows(
+            statuses: [.gemma4: .downloaded(bytes: 1)], active: "gemma3", pending: nil, appleIntelligenceReason: "x")
+        XCTAssertEqual(downloaded.first { $0.id == .gemma4 }?.useLabel, "Use")
+    }
+
+    func testOnlyThePendingRowCanCancel() {
+        let rows = modelRows(statuses: [:], active: "gemma3", pending: "gemma4", appleIntelligenceReason: "x")
+        XCTAssertEqual(rows.filter(\.canCancel).map(\.id), [.gemma4])
+    }
 }
