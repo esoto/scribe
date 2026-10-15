@@ -33,6 +33,7 @@ func withDeadline<T: Sendable>(
             gate.track(work)
             Task {
                 try? await Task.sleep(nanoseconds: UInt64(max(seconds, 0) * 1_000_000_000))
+                // Resume before cancelling, or the operation's CancellationError could win the gate.
                 gate.resume(.failure(DeadlineExceeded()))
                 gate.cancelOperation()
             }

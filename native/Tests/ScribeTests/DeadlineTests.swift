@@ -155,4 +155,16 @@ final class DeadlineTests: XCTestCase {
         let observed = await arrived(cancelled)
         XCTAssertTrue(observed, "the operation never observed the caller's cancellation")
     }
+
+    func test_a_cancel_that_arrives_before_the_operation_is_tracked_cancels_it_on_track() async {
+        let gate = ResumeOnce<Int>()
+        gate.cancelOperation()
+        let (cancelled, signal) = AsyncStream<Void>.makeStream()
+        let work = Task {
+            do { try await Task.sleep(nanoseconds: 5_000_000_000) } catch { signal.yield() }
+        }
+        gate.track(work)
+        let observed = await arrived(cancelled)
+        XCTAssertTrue(observed, "track ignored a cancel that arrived before it")
+    }
 }
