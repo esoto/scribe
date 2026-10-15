@@ -75,8 +75,8 @@ struct CleanupModelStore {
     }
 
     /// Removes the whole `models--*` directory (blobs, refs, snapshots, trees)
-    /// plus the hub's `.metadata`/`.locks` sidecar folders for it if a hub
-    /// version wrote any (the current cache has none; each is skipped when
+    /// plus the hub's `.metadata`/`.locks` sidecar folders for it (pinned
+    /// downloads write `.metadata/<repo>/<commit>.json`; each is skipped when
     /// absent). Callers must refuse the model in use first (`canDeleteModel`).
     func delete(_ repoID: String) throws {
         let name = repoDirectory(repoID).lastPathComponent
@@ -90,32 +90,33 @@ struct CleanupModelStore {
         }
     }
 
-    /// Complete = the snapshot holds config.json, tokenizer.json and a
+    /// Complete = the snapshot holds everything a directory load needs:
+    /// config.json, tokenizer.json, tokenizer_config.json (without it the
+    /// tokenizer class is guessed and strict mode throws), a chat template
+    /// (.jinja or .json; without one every clean() fails) and a
     /// loadable weight set: every shard the index names, or the single-file
     /// `model.safetensors` the loader falls back to. Some repos publish a
     /// stale index beside a single-file model (gemma-3-4b-it-qat-4bit names
     /// two shards that were never uploaded), and an index alone must not
     /// report a working model as half-downloaded. `fileExists` follows
     /// symlinks, so a link whose blob never finished counts as missing. The
-    /// tokenizer is required because a directory load, unlike a load by id,
-    /// cannot fetch a file an interrupted download never wrote.
+    /// small files are required because a directory load, unlike a load by id,
+    /// cannot fetch one an interrupted download never wrote.
     private func isComplete(_ snapshot: URL) -> Bool {
         let fm = FileManager.default
-        for required in ["config.json", "tokenizer.json"]
-        where !fm.fileExists(atPath: snapshot.appendingPathComponent(required).path) {
-            return false
-        }
+        let has = { (name: String) in fm.fileExists(atPath: snapshot.appendingPathComponent(name).path) }
+        guard ["config.json", "tokenizer.json", "tokenizer_config.json"].allSatisfy(has),
+            has("chat_template.jinja") || has("chat_template.json")
+        else { return false }
         let index = snapshot.appendingPathComponent("model.safetensors.index.json")
         if let data = try? Data(contentsOf: index),
             let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
             let weightMap = json["weight_map"] as? [String: String]
         {
             let shards = Set(weightMap.values)
-            if shards.allSatisfy({ fm.fileExists(atPath: snapshot.appendingPathComponent($0).path) }) {
-                return true
-            }
+            if shards.allSatisfy(has) { return true }
         }
-        return fm.fileExists(atPath: snapshot.appendingPathComponent("model.safetensors").path)
+        return has("model.safetensors")
     }
 
     private func blobBytes(in dir: URL) -> Int64 {

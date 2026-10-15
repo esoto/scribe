@@ -82,7 +82,8 @@ final class GemmaBackend: CleanupModelBackend, @unchecked Sendable {
         "este esto es solo una frase de calentamiento para el cache sin problema"
 
     /// `spec` picks the stock model; `customModelPath` overrides it with a local MLX folder.
-    /// `onProgress` gets download progress (0…1; a cached snapshot reports 1) on any thread.
+    /// `onProgress` gets download progress (0…1) on any thread. A load from a local snapshot reports
+    /// nothing; AppModel clears the status line when the load ends.
     init(
         spec: CleanupModelSpec = CleanupModelCatalog.gemma3,
         customModelPath: String? = nil,

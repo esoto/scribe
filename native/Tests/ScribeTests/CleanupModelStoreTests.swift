@@ -19,18 +19,23 @@ final class CleanupModelStoreTests: XCTestCase {
         super.tearDown()
     }
 
-    /// Builds a hub-cache repo mirroring the REAL on-disk layout
-    /// (`models--mlx-community--gemma-3-4b-it-qat-4bit`): `blobs/`,
+    /// Builds a hub-cache repo in the LEGACY on-disk layout written before models
+    /// were pinned (`models--mlx-community--gemma-3-4b-it-qat-4bit`): `blobs/`,
     /// `refs/main`, `snapshots/<commit>/` whose entries are RELATIVE symlinks
-    /// (`../../blobs/<blob>`), and a `trees/<commit>.json`. There are NO
-    /// `.metadata/` or `.locks/` sidecars in the real cache.
+    /// (`../../blobs/<blob>`), and a `trees/<commit>.json`, with no `.metadata/`
+    /// or `.locks/` sidecars. `writeRef: false` gives the pinned-download layout
+    /// instead. The files a directory load needs besides weights and config.json
+    /// are added empty unless named in `omitting`.
     private func makeRepo(
         _ files: [String: Int], shards: [String]? = nil, writeRef: Bool = true,
-        repoID: String? = nil, commit: String = "abc123", tokenizer: Bool = true
+        repoID: String? = nil, commit: String = "abc123", omitting: Set<String> = []
     ) throws {
         let fm = FileManager.default
         var files = files
-        if tokenizer && files["tokenizer.json"] == nil { files["tokenizer.json"] = 0 }
+        for name in ["tokenizer.json", "tokenizer_config.json", "chat_template.jinja"]
+        where files[name] == nil && !omitting.contains(name) {
+            files[name] = 0
+        }
         let dir = store.repoDirectory(repoID ?? repo)
         let blobs = dir.appendingPathComponent("blobs", isDirectory: true)
         let snap = dir.appendingPathComponent("snapshots/\(commit)", isDirectory: true)
@@ -100,7 +105,7 @@ final class CleanupModelStoreTests: XCTestCase {
         XCTAssertEqual(store.status(repo), .partial(bytes: 1010))
     }
 
-    /// The real cache has no sidecars: delete must tolerate their absence and
+    /// A legacy cache has no sidecars: delete must tolerate their absence and
     /// remove the WHOLE `models--*` directory (blobs, refs, snapshots, trees).
     func testDeleteWithoutSidecarsRemovesTheWholeRepoDirectory() throws {
         try makeRepo(["config.json": 10, "model.safetensors": 1000])
@@ -111,7 +116,7 @@ final class CleanupModelStoreTests: XCTestCase {
         XCTAssertEqual(store.status(repo), .notDownloaded)
     }
 
-    /// Defensive: other hub versions do write sidecars; delete clears them too.
+    /// Pinned downloads write a `.metadata` sidecar (and older hubs a `.locks` one); delete clears both.
     func testDeleteRemovesRepoAndHubSidecars() throws {
         try makeRepo(["config.json": 10, "model.safetensors": 1000])
         let name = store.repoDirectory(repo).lastPathComponent
@@ -170,13 +175,50 @@ final class CleanupModelStoreTests: XCTestCase {
                 atPath: store.repoDirectory(repo).appendingPathComponent("snapshots/\(otherCommit)").path))
     }
 
-    /// A directory load cannot fetch what an interrupted download never wrote,
-    /// so a snapshot without its tokenizer must not take the local-first path.
+    /// A directory load cannot fetch what an interrupted download never wrote, so a
+    /// snapshot missing any file the loader needs must not take the local-first path.
     func testSnapshotWithoutTokenizerIsIncomplete() throws {
         try makeRepo(
-            ["config.json": 10, "model.safetensors": 1000], writeRef: false, commit: pinned, tokenizer: false)
+            ["config.json": 10, "model.safetensors": 1000], writeRef: false, commit: pinned,
+            omitting: ["tokenizer.json"])
         XCTAssertNil(store.snapshotDirectory(repoID: repo, revision: pinned))
         XCTAssertEqual(store.status(repo, revision: pinned), .partial(bytes: 1010))
+    }
+
+    /// Without tokenizer_config.json the tokenizer class is guessed and strict mode throws.
+    func testSnapshotWithoutTokenizerConfigIsIncomplete() throws {
+        try makeRepo(
+            ["config.json": 10, "model.safetensors": 1000], writeRef: false, commit: pinned,
+            omitting: ["tokenizer_config.json"])
+        XCTAssertNil(store.snapshotDirectory(repoID: repo, revision: pinned))
+        XCTAssertEqual(store.status(repo, revision: pinned), .partial(bytes: 1010))
+    }
+
+    /// Without a chat template every clean() fails.
+    func testSnapshotWithoutChatTemplateIsIncomplete() throws {
+        try makeRepo(
+            ["config.json": 10, "model.safetensors": 1000], writeRef: false, commit: pinned,
+            omitting: ["chat_template.jinja"])
+        XCTAssertNil(store.snapshotDirectory(repoID: repo, revision: pinned))
+        XCTAssertEqual(store.status(repo, revision: pinned), .partial(bytes: 1010))
+    }
+
+    /// Gemma 3 ships chat_template.json rather than .jinja.
+    func testChatTemplateJsonAloneSatisfiesTheTemplateRequirement() throws {
+        try makeRepo(
+            ["config.json": 10, "model.safetensors": 1000, "chat_template.json": 5], writeRef: false,
+            commit: pinned, omitting: ["chat_template.jinja"])
+        XCTAssertNotNil(store.snapshotDirectory(repoID: repo, revision: pinned))
+        XCTAssertEqual(store.status(repo, revision: pinned), .downloaded(bytes: 1015))
+    }
+
+    /// A symlink whose blob never finished downloading counts as missing.
+    func testDanglingWeightLinkIsIncomplete() throws {
+        try makeRepo(["config.json": 10, "model.safetensors": 1000], writeRef: false, commit: pinned)
+        try FileManager.default.removeItem(
+            at: store.repoDirectory(repo).appendingPathComponent("blobs/blob-model.safetensors"))
+        XCTAssertNil(store.snapshotDirectory(repoID: repo, revision: pinned))
+        XCTAssertEqual(store.status(repo, revision: pinned), .partial(bytes: 10))
     }
 
     func testPinnedSnapshotWithoutWeightsIsIncomplete() throws {
