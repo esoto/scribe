@@ -75,9 +75,10 @@ struct CleanupModelStore {
     }
 
     /// Removes the whole `models--*` directory (blobs, refs, snapshots, trees)
-    /// plus the hub's `.metadata`/`.locks` sidecar folders for it (pinned
-    /// downloads write `.metadata/<repo>/<commit>.json`; each is skipped when
-    /// absent). Callers must refuse the model in use first (`canDeleteModel`).
+    /// plus the hub's `.metadata`/`.locks` sidecar folders for it. Every
+    /// download leaves `.locks` and pinned ones `.metadata`; delete clears both
+    /// (each is skipped when absent). Callers must refuse the model in use
+    /// first (`canDeleteModel`).
     func delete(_ repoID: String) throws {
         let name = repoDirectory(repoID).lastPathComponent
         let targets = [
@@ -93,7 +94,8 @@ struct CleanupModelStore {
     /// Complete = the snapshot holds everything a directory load needs:
     /// config.json, tokenizer.json, tokenizer_config.json (without it the
     /// tokenizer class is guessed and strict mode throws), a chat template
-    /// (.jinja or .json; without one every clean() fails) and a
+    /// (.jinja or .json; without one the prompt goes to the model untemplated
+    /// and cleanup silently degrades) and a
     /// loadable weight set: every shard the index names, or the single-file
     /// `model.safetensors` the loader falls back to. Some repos publish a
     /// stale index beside a single-file model (gemma-3-4b-it-qat-4bit names

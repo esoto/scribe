@@ -22,9 +22,10 @@ final class CleanupModelStoreTests: XCTestCase {
     /// Builds a hub-cache repo in the LEGACY on-disk layout written before models
     /// were pinned (`models--mlx-community--gemma-3-4b-it-qat-4bit`): `blobs/`,
     /// `refs/main`, `snapshots/<commit>/` whose entries are RELATIVE symlinks
-    /// (`../../blobs/<blob>`), and a `trees/<commit>.json`, with no `.metadata/`
-    /// or `.locks/` sidecars. `writeRef: false` gives the pinned-download layout
-    /// instead. The files a directory load needs besides weights and config.json
+    /// (`../../blobs/<blob>`), and a `trees/<commit>.json`. It writes no
+    /// `.metadata/` or `.locks/` sidecars; the tests that need them add their own.
+    /// `writeRef: false` gives the pinned-download layout instead. The files a
+    /// directory load needs besides weights and config.json
     /// are added empty unless named in `omitting`.
     private func makeRepo(
         _ files: [String: Int], shards: [String]? = nil, writeRef: Bool = true,
@@ -105,7 +106,7 @@ final class CleanupModelStoreTests: XCTestCase {
         XCTAssertEqual(store.status(repo), .partial(bytes: 1010))
     }
 
-    /// A legacy cache has no sidecars: delete must tolerate their absence and
+    /// A repo without sidecars: delete must tolerate their absence and
     /// remove the WHOLE `models--*` directory (blobs, refs, snapshots, trees).
     func testDeleteWithoutSidecarsRemovesTheWholeRepoDirectory() throws {
         try makeRepo(["config.json": 10, "model.safetensors": 1000])
@@ -116,7 +117,7 @@ final class CleanupModelStoreTests: XCTestCase {
         XCTAssertEqual(store.status(repo), .notDownloaded)
     }
 
-    /// Pinned downloads write a `.metadata` sidecar (and older hubs a `.locks` one); delete clears both.
+    /// Every download leaves `.locks` and pinned ones `.metadata`; delete clears both.
     func testDeleteRemovesRepoAndHubSidecars() throws {
         try makeRepo(["config.json": 10, "model.safetensors": 1000])
         let name = store.repoDirectory(repo).lastPathComponent
@@ -194,7 +195,7 @@ final class CleanupModelStoreTests: XCTestCase {
         XCTAssertEqual(store.status(repo, revision: pinned), .partial(bytes: 1010))
     }
 
-    /// Without a chat template every clean() fails.
+    /// Without a chat template the prompt goes to the model untemplated and cleanup silently degrades.
     func testSnapshotWithoutChatTemplateIsIncomplete() throws {
         try makeRepo(
             ["config.json": 10, "model.safetensors": 1000], writeRef: false, commit: pinned,
