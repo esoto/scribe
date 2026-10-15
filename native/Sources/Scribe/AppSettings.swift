@@ -30,7 +30,7 @@ final class AppSettings {
         static let didImportToml = "didImportToml"
     }
 
-    /// Dev binding: right ⌥, so it doesn't clash with the Python app's right ⌘ while both run.
+    /// Right ⌥ is the default: rarely used alone, and it leaves Right ⌘ free for app shortcuts.
     var hotkey: HotKey {
         get {
             guard let raw = defaults.string(forKey: Key.hotkey), let key = HotKey(rawValue: raw) else {

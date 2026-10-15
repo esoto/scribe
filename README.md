@@ -191,6 +191,8 @@ Change via `defaults write dev.esoto.scribe <key> <value>` and relaunch:
 | `dictionaryLearningEnabled` | false | auto-learn vocabulary (known to drop words — see Dictionary) |
 | `cleanupModel` | resolved at first launch | `gemma3` \| `gemma4` \| `gemma4e2b` \| `appleIntelligence` |
 | `cleanupModelPath` | _(unset)_ | local MLX model folder to use for cleanup instead of stock Gemma; when set, overrides `cleanupModel` and disables the picker |
+| `vocabularyBiasingEnabled` | false | acoustic vocabulary biasing for Parakeet (experimental) |
+| `microphoneUID` | _(unset)_ | input device UID; unset follows the system default input |
 
 **Custom cleanup model:** point `cleanupModelPath` at any local MLX model
 folder (config.json + safetensors + tokenizer) and relaunch;

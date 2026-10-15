@@ -124,6 +124,7 @@
       <span class="glyph" id="demoGlyph">◦</span><span id="demoLabel">See it dictate</span>
     </button>
   </div>
+  <p class="note">macOS 15+, Apple silicon. Not notarized — right-click, Open on first launch. Models (~3.5 GB) download once.</p>
 </header>
 
 <div class="demo">
@@ -139,7 +140,7 @@
   <div class="step">
     <div class="n">2</div>
     <div class="t">Speak</div>
-    <div class="d">Parakeet transcribes in ~0.2 s. Gemma 3 4B strips fillers and resolves self-corrections.</div>
+    <div class="d">Parakeet Ultra transcribes in ~0.2 s. A local cleanup model — Gemma 3 4B by default — strips fillers and resolves self-corrections.</div>
   </div>
   <div class="step">
     <div class="n">3</div>
@@ -149,7 +150,7 @@
 </section>
 
 <section class="wrap learns">
-  <h2>It learns <span class="violet">your</span> words.</h2>
+  <h2>Teach it <span class="violet">your</span> words.</h2>
   <p class="lede">Cleanup knows English and Spanish — not the names of your projects,
      tools and teammates. Teach it the ones it keeps getting wrong.</p>
 
@@ -184,15 +185,15 @@
 
 <section class="privacy">
   <div class="wrap">
-    <h2>Full privacy. Your conversations go nowhere.</h2>
+    <h2>Audio and text never leave the machine.</h2>
     <div class="grid">
       <div class="cell">
         <div class="t">Local models only</div>
-        <div class="d">Parakeet TDT v3 for speech, Gemma 3 4B for cleanup — downloaded once, then everything runs offline.</div>
+        <div class="d">Parakeet Ultra for speech, a cleanup model you choose — Gemma 3 4B by default — downloaded once, then everything runs offline.</div>
       </div>
       <div class="cell">
         <div class="t">Transcripts never saved</div>
-        <div class="d">History keeps the last 10 dictations in memory only. The one thing written to disk is your dictionary — individual words, never transcripts.</div>
+        <div class="d">History keeps the last 10 dictations in memory only. Transcripts are never written to disk. scribe writes your dictionary (individual words), a diagnostic log that contains no dictated text, and — only when a dictation fails — one audio file you can delete.</div>
       </div>
       <div class="cell">
         <div class="t">Nothing sent</div>
