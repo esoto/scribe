@@ -29,7 +29,7 @@ enum CleanupModelID: String, CaseIterable, Sendable {
 
 struct CleanupModelSpec: Equatable, Sendable {
     enum Kind: Equatable, Sendable {
-        case mlx(repoID: String, extraEOSTokens: Set<String>)
+        case mlx(repoID: String, revision: String, extraEOSTokens: Set<String>)
         case appleIntelligence
     }
 
@@ -44,22 +44,37 @@ struct CleanupModelSpec: Equatable, Sendable {
     let fidelitySafe: Bool
 
     var repoID: String? {
-        if case .mlx(let repoID, _) = kind { return repoID }
+        if case .mlx(let repoID, _, _) = kind { return repoID }
+        return nil
+    }
+
+    var revision: String? {
+        if case .mlx(_, let revision, _) = kind { return revision }
         return nil
     }
 }
 
 enum CleanupModelCatalog {
+    // Each model is pinned to a commit: the cleanup model reads every dictation,
+    // so a swapped upstream repo must not become a silent model swap. The SHAs
+    // are `main` as resolved from the Hugging Face API on 2026-10-14. Moving
+    // one means re-running the golden, guard and fidelity evals first.
     static let gemma3 = CleanupModelSpec(
         id: .gemma3, label: "Gemma 3 4B",
-        kind: .mlx(repoID: "mlx-community/gemma-3-4b-it-qat-4bit", extraEOSTokens: ["<end_of_turn>"]),
+        kind: .mlx(
+            repoID: "mlx-community/gemma-3-4b-it-qat-4bit",
+            revision: "3d9ef289111449933c22761961f16a5df237ce2a",  // 2026-10-14
+            extraEOSTokens: ["<end_of_turn>"]),
         approxDownloadBytes: 2_800_000_000, fidelitySafe: false)
 
     /// Plain 4-bit PTQ build. NOT the QAT-OptiQ build: that one answered the
     /// haiku injection case and peaks at 6.8 GB (2026-10-10 benchmark).
     static let gemma4 = CleanupModelSpec(
         id: .gemma4, label: "Gemma 4 E4B",
-        kind: .mlx(repoID: "mlx-community/gemma-4-e4b-it-4bit", extraEOSTokens: ["<turn|>"]),
+        kind: .mlx(
+            repoID: "mlx-community/gemma-4-e4b-it-4bit",
+            revision: "475b9088d29754a3379866cf5aeb6b41acd313c2",  // 2026-10-14
+            extraEOSTokens: ["<turn|>"]),
         approxDownloadBytes: 4_900_000_000, fidelitySafe: true)
 
     /// Smaller sibling of E4B (2.3B effective vs 4.5B; 3.6 GB vs 4.9 GB) and
@@ -69,7 +84,10 @@ enum CleanupModelCatalog {
     /// default.
     static let gemma4e2b = CleanupModelSpec(
         id: .gemma4e2b, label: "Gemma 4 E2B",
-        kind: .mlx(repoID: "mlx-community/gemma-4-e2b-it-4bit", extraEOSTokens: ["<turn|>"]),
+        kind: .mlx(
+            repoID: "mlx-community/gemma-4-e2b-it-4bit",
+            revision: "238767527555cb75a05732a84dff5d6ba0dd6809",  // 2026-10-14
+            extraEOSTokens: ["<turn|>"]),
         approxDownloadBytes: 3_600_000_000, fidelitySafe: true)
 
     static let appleIntelligence = CleanupModelSpec(
@@ -77,6 +95,12 @@ enum CleanupModelCatalog {
         kind: .appleIntelligence, approxDownloadBytes: nil, fidelitySafe: false)
 
     static let all: [CleanupModelSpec] = [gemma3, gemma4, gemma4e2b, appleIntelligence]
+
+    /// Lets callers that only know the repo (the on-disk store) check the commit
+    /// the app will actually load.
+    static func pinnedRevision(repoID: String) -> String? {
+        all.first { $0.repoID == repoID }?.revision
+    }
 
     static func spec(_ id: CleanupModelID) -> CleanupModelSpec {
         switch id {

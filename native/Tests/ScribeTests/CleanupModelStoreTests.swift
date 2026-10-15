@@ -1,8 +1,11 @@
+import MLXLMCommon
 import XCTest
 
 final class CleanupModelStoreTests: XCTestCase {
     private var root: URL!
     private let repo = "mlx-community/test-model"
+    private let pinned = "3d9ef289111449933c22761961f16a5df237ce2a"
+    private let otherCommit = "0123456789abcdef0123456789abcdef01234567"
     private var store: CleanupModelStore { CleanupModelStore(root: root) }
 
     override func setUp() {
@@ -21,16 +24,19 @@ final class CleanupModelStoreTests: XCTestCase {
     /// `refs/main`, `snapshots/<commit>/` whose entries are RELATIVE symlinks
     /// (`../../blobs/<blob>`), and a `trees/<commit>.json`. There are NO
     /// `.metadata/` or `.locks/` sidecars in the real cache.
-    private func makeRepo(_ files: [String: Int], shards: [String]? = nil, writeRef: Bool = true) throws {
+    private func makeRepo(
+        _ files: [String: Int], shards: [String]? = nil, writeRef: Bool = true,
+        repoID: String? = nil, commit: String = "abc123"
+    ) throws {
         let fm = FileManager.default
-        let dir = store.repoDirectory(repo)
+        let dir = store.repoDirectory(repoID ?? repo)
         let blobs = dir.appendingPathComponent("blobs", isDirectory: true)
-        let snap = dir.appendingPathComponent("snapshots/abc123", isDirectory: true)
+        let snap = dir.appendingPathComponent("snapshots/\(commit)", isDirectory: true)
         try fm.createDirectory(at: blobs, withIntermediateDirectories: true)
         try fm.createDirectory(at: snap, withIntermediateDirectories: true)
         let trees = dir.appendingPathComponent("trees", isDirectory: true)
         try fm.createDirectory(at: trees, withIntermediateDirectories: true)
-        try Data(count: 500).write(to: trees.appendingPathComponent("abc123.json"))  // must not count toward size
+        try Data(count: 500).write(to: trees.appendingPathComponent("\(commit).json"))  // must not count toward size
         for (name, size) in files {
             try Data(count: size).write(to: blobs.appendingPathComponent("blob-\(name)"))
             try fm.createSymbolicLink(
@@ -43,7 +49,7 @@ final class CleanupModelStoreTests: XCTestCase {
         }
         if writeRef {
             try fm.createDirectory(at: dir.appendingPathComponent("refs"), withIntermediateDirectories: true)
-            try "abc123".write(to: dir.appendingPathComponent("refs/main"), atomically: true, encoding: .utf8)
+            try commit.write(to: dir.appendingPathComponent("refs/main"), atomically: true, encoding: .utf8)
         }
     }
 
@@ -119,5 +125,147 @@ final class CleanupModelStoreTests: XCTestCase {
         XCTAssertFalse(CleanupModelStore.Status.partial(bytes: 5).isDownloaded)
         XCTAssertEqual(CleanupModelStore.Status.partial(bytes: 5).bytes, 5)
         XCTAssertEqual(CleanupModelStore.Status.notDownloaded.bytes, 0)
+    }
+
+    // MARK: - Pinned revisions
+
+    /// What a SHA-pinned download leaves behind: swift-huggingface passes no ref
+    /// for a commit-hash revision, so `refs/` never exists.
+    func testPinnedSnapshotWithoutRefsIsComplete() throws {
+        try makeRepo(["config.json": 10, "model.safetensors": 1000], writeRef: false, commit: pinned)
+        XCTAssertEqual(
+            store.snapshotDirectory(repoID: repo, revision: pinned),
+            store.repoDirectory(repo).appendingPathComponent("snapshots/\(pinned)", isDirectory: true))
+        XCTAssertEqual(store.status(repo, revision: pinned), .downloaded(bytes: 1010))
+    }
+
+    func testOtherCommitIsIncompleteForThePin() throws {
+        try makeRepo(["config.json": 10, "model.safetensors": 1000], writeRef: false, commit: pinned)
+        XCTAssertNil(store.snapshotDirectory(repoID: repo, revision: otherCommit))
+        XCTAssertEqual(store.status(repo, revision: otherCommit), .partial(bytes: 1010))
+    }
+
+    /// Existing installs have refs/main -> the commit they downloaded. When it
+    /// is the pinned commit nothing may be re-downloaded, and nothing rewritten.
+    func testLegacyRefsMainLayoutIsCompleteForTheMatchingPin() throws {
+        try makeRepo(["config.json": 10, "model.safetensors": 1000], commit: pinned)
+        let ref = store.repoDirectory(repo).appendingPathComponent("refs/main")
+        XCTAssertEqual(store.status(repo, revision: pinned), .downloaded(bytes: 1010))
+        XCTAssertEqual(store.status(repo, revision: "main"), .downloaded(bytes: 1010))
+        XCTAssertEqual(try String(contentsOf: ref, encoding: .utf8), pinned)
+        XCTAssertNotNil(store.snapshotDirectory(repoID: repo, revision: pinned))
+    }
+
+    /// A legacy snapshot at a different commit is not the pinned model: it
+    /// reports incomplete (so the pin is fetched) but the files are left alone.
+    func testLegacyInstallAtAnotherCommitIsNotThePinnedModel() throws {
+        try makeRepo(["config.json": 10, "model.safetensors": 1000], commit: otherCommit)
+        XCTAssertNil(store.snapshotDirectory(repoID: repo, revision: pinned))
+        XCTAssertEqual(store.status(repo, revision: pinned), .partial(bytes: 1010))
+        XCTAssertEqual(store.status(repo, revision: "main"), .downloaded(bytes: 1010))
+        XCTAssertTrue(
+            FileManager.default.fileExists(
+                atPath: store.repoDirectory(repo).appendingPathComponent("snapshots/\(otherCommit)").path))
+    }
+
+    func testPinnedSnapshotWithoutWeightsIsIncomplete() throws {
+        try makeRepo(["config.json": 10], writeRef: false, commit: pinned)
+        XCTAssertNil(store.snapshotDirectory(repoID: repo, revision: pinned))
+        XCTAssertEqual(store.status(repo, revision: pinned), .partial(bytes: 10))
+    }
+
+    func testBranchRevisionStillNeedsItsRef() throws {
+        try makeRepo(["config.json": 10, "model.safetensors": 1000], writeRef: false, commit: pinned)
+        XCTAssertNil(store.snapshotDirectory(repoID: repo, revision: "main"))
+    }
+
+    /// Only a real 40-hex commit skips refs/; anything else is a ref name.
+    func testFortyNonHexCharactersIsABranchName() throws {
+        let notASHA = String(repeating: "z", count: 40)
+        try makeRepo(["config.json": 10, "model.safetensors": 1000], writeRef: false, commit: notASHA)
+        XCTAssertNil(store.snapshotDirectory(repoID: repo, revision: notASHA))
+    }
+
+    /// Callers that only know the repo (the menu, the models window) get the
+    /// catalog's pin, so a fresh pinned download is not reported "incomplete".
+    func testStatusDefaultsToTheCatalogPin() throws {
+        let spec = CleanupModelCatalog.gemma3
+        let repoID = try XCTUnwrap(spec.repoID)
+        try makeRepo(
+            ["config.json": 10, "model.safetensors": 1000], writeRef: false,
+            repoID: repoID, commit: try XCTUnwrap(spec.revision))
+        XCTAssertEqual(store.status(repoID), .downloaded(bytes: 1010))
+        XCTAssertEqual(store.status(repoID, revision: otherCommit), .partial(bytes: 1010))
+    }
+
+    func testDeleteRemovesAPinnedDownloadsMetadataSidecar() throws {
+        try makeRepo(["config.json": 10, "model.safetensors": 1000], writeRef: false, commit: pinned)
+        let sidecar = root.appendingPathComponent(".metadata/\(store.repoDirectory(repo).lastPathComponent)")
+        try FileManager.default.createDirectory(at: sidecar, withIntermediateDirectories: true)
+        try Data("{}".utf8).write(to: sidecar.appendingPathComponent("\(pinned).json"))
+        try store.delete(repo)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: sidecar.path))
+        XCTAssertEqual(store.status(repo, revision: pinned), .notDownloaded)
+    }
+
+    // MARK: - Local-first model configuration
+
+    private final class SpyDownloader: Downloader, @unchecked Sendable {
+        private let lock = NSLock()
+        private var recorded: [(id: String, revision: String?)] = []
+        var calls: [(id: String, revision: String?)] { lock.withLock { recorded } }
+
+        func download(
+            id: String, revision: String?, matching patterns: [String], useLatest: Bool,
+            progressHandler: @Sendable @escaping (Progress) -> Void
+        ) async throws -> URL {
+            lock.withLock { recorded.append((id, revision)) }
+            return FileManager.default.temporaryDirectory
+        }
+    }
+
+    func testCompletePinnedSnapshotLoadsFromDiskWithoutTheDownloader() async throws {
+        let spec = CleanupModelCatalog.gemma3
+        let repoID = try XCTUnwrap(spec.repoID)
+        let revision = try XCTUnwrap(spec.revision)
+        try makeRepo(
+            ["config.json": 10, "model.safetensors": 1000], writeRef: false, repoID: repoID, commit: revision)
+        let config = GemmaBackend.localFirstConfiguration(spec: spec, store: store)
+        let spy = SpyDownloader()
+        let resolved = try await resolve(configuration: config, from: spy, useLatest: false) { _ in }
+        XCTAssertTrue(spy.calls.isEmpty)
+        XCTAssertEqual(resolved.modelDirectory, store.snapshotDirectory(repoID: repoID, revision: revision))
+        XCTAssertEqual(resolved.extraEOSTokens, ["<end_of_turn>"])
+    }
+
+    func testMissingSnapshotDownloadsExactlyThePinnedRevision() async throws {
+        let spec = CleanupModelCatalog.gemma4
+        let config = GemmaBackend.localFirstConfiguration(spec: spec, store: store)
+        let spy = SpyDownloader()
+        _ = try await resolve(configuration: config, from: spy, useLatest: false) { _ in }
+        XCTAssertEqual(spy.calls.map(\.id), ["mlx-community/gemma-4-e4b-it-4bit"])
+        XCTAssertEqual(spy.calls.map(\.revision), [spec.revision])
+        XCTAssertEqual(config.extraEOSTokens, ["<turn|>"])
+    }
+
+    func testIncompletePinnedSnapshotFallsBackToTheDownloader() async throws {
+        let spec = CleanupModelCatalog.gemma4e2b
+        try makeRepo(
+            ["config.json": 10], writeRef: false, repoID: try XCTUnwrap(spec.repoID),
+            commit: try XCTUnwrap(spec.revision))
+        let config = GemmaBackend.localFirstConfiguration(spec: spec, store: store)
+        let spy = SpyDownloader()
+        _ = try await resolve(configuration: config, from: spy, useLatest: false) { _ in }
+        XCTAssertEqual(spy.calls.map(\.revision), [spec.revision])
+    }
+
+    func testCustomPathIgnoresALocalSnapshot() throws {
+        let spec = CleanupModelCatalog.gemma3
+        try makeRepo(
+            ["config.json": 10, "model.safetensors": 1000], writeRef: false,
+            repoID: try XCTUnwrap(spec.repoID), commit: try XCTUnwrap(spec.revision))
+        let config = GemmaBackend.localFirstConfiguration(spec: spec, customPath: "/tmp/my-model", store: store)
+        XCTAssertEqual(config.id, .directory(URL(fileURLWithPath: "/tmp/my-model")))
+        XCTAssertTrue(config.extraEOSTokens.isEmpty)
     }
 }
