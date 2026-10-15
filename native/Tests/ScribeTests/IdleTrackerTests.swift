@@ -29,4 +29,15 @@ final class IdleTrackerTests: XCTestCase {
         XCTAssertFalse(t.due(now: 20 * 60.0))
         XCTAssertTrue(t.due(now: 25 * 60.0))
     }
+
+    func testRuntimeSetterEnablesAndDisables() {
+        let t = IdleTracker(unloadAfterMinutes: 0)
+        XCTAssertFalse(t.enabled)
+        t.setUnloadAfterMinutes(1)
+        XCTAssertTrue(t.enabled)
+        t.touch(now: 0.0)
+        XCTAssertTrue(t.due(now: 61.0))
+        t.setUnloadAfterMinutes(0)
+        XCTAssertFalse(t.due(now: 61.0))
+    }
 }

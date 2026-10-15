@@ -2,7 +2,7 @@ import Foundation
 
 /// Idle tracking for on-demand model unloading.
 final class IdleTracker {
-    private let timeoutSeconds: Double
+    private var timeoutSeconds: Double
     private var lastActivity: Double?
 
     init(unloadAfterMinutes: Double) {
@@ -15,6 +15,11 @@ final class IdleTracker {
 
     func touch(now: Double) {
         lastActivity = now
+    }
+
+    /// Settings change at runtime; 0 disables unloading until the next change.
+    func setUnloadAfterMinutes(_ minutes: Double) {
+        timeoutSeconds = minutes * 60
     }
 
     /// Never due without a touch: callers that preload must seed one, or the preload never unloads.
