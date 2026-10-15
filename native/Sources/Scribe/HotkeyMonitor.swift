@@ -104,6 +104,10 @@ final class HotkeyMonitor {
             if let tap = monitor.tap {
                 CGEvent.tapEnable(tap: tap, enable: true)
             }
+            // A release during the gap is gone; end the hold rather than record until the next tap.
+            if monitor.machine.reset() {
+                monitor.onUp()
+            }
             return nil
         }
 

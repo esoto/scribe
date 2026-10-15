@@ -1,8 +1,11 @@
 import XCTest
 
 final class KeyStateMachineTests: XCTestCase {
-    private let cmd: UInt64 = 0x100000
-    private let opt: UInt64 = 0x80000
+    // Device-side bits (IOLLEvent.h NX_DEVICERCMDKEYMASK / NX_DEVICERALTKEYMASK), not the generic ⌘/⌥ bits.
+    private let cmd: UInt64 = 0x10
+    private let opt: UInt64 = 0x40
+    private let genericOpt: UInt64 = 0x80000
+    private let leftOpt: UInt64 = 0x20
 
     func testKeycodeTable() {
         XCTAssertEqual(HotKey.rightCommand.keycode, 54)
@@ -58,5 +61,34 @@ final class KeyStateMachineTests: XCTestCase {
     func testModifierKeyIgnoresKeyDownEvents() {
         let m = KeyStateMachine(key: .rightCommand)
         XCTAssertNil(m.handle(eventType: 10, keycode: 54, flags: cmd))
+    }
+
+    func testRightOptionReleaseWhileLeftOptionHeld() {
+        let m = KeyStateMachine(key: .rightOption)
+        // Real flags from scribe.log: Right ⌥ down = 0x80140. With Left ⌥ still held, the release
+        // event keeps the generic 0x80000 bit — only the device bit 0x40 drops.
+        XCTAssertEqual(m.handle(eventType: 12, keycode: 61, flags: 0x80140), .down)
+        XCTAssertEqual(m.handle(eventType: 12, keycode: 61, flags: genericOpt | leftOpt | 0x100), .up)
+    }
+
+    func testRightCommandReleaseWhileLeftCommandHeld() {
+        let m = KeyStateMachine(key: .rightCommand)
+        // Real flags from scribe.log: Right ⌘ down = 0x100110; released while Left ⌘ held = 0x100108.
+        XCTAssertEqual(m.handle(eventType: 12, keycode: 54, flags: 0x100110), .down)
+        XCTAssertEqual(m.handle(eventType: 12, keycode: 54, flags: 0x100108), .up)
+    }
+
+    func testRightOptionEventWithoutDeviceBitNeverArms() {
+        let m = KeyStateMachine(key: .rightOption)
+        XCTAssertNil(m.handle(eventType: 12, keycode: 61, flags: genericOpt | leftOpt))
+    }
+
+    func testResetReportsAndClearsHeldKey() {
+        let m = KeyStateMachine(key: .rightOption)
+        XCTAssertFalse(m.reset())
+        XCTAssertEqual(m.handle(eventType: 12, keycode: 61, flags: opt), .down)
+        XCTAssertTrue(m.reset())
+        XCTAssertNil(m.handle(eventType: 12, keycode: 61, flags: 0))
+        XCTAssertEqual(m.handle(eventType: 12, keycode: 61, flags: opt), .down)
     }
 }
