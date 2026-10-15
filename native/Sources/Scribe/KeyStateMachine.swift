@@ -14,10 +14,13 @@ enum HotKey: String, CaseIterable {
         }
     }
 
+    /// Device-side bits from IOLLEvent.h (NX_DEVICERCMDKEYMASK, NX_DEVICERALTKEYMASK). The generic ⌘/⌥ bits
+    /// (0x100000, 0x80000) stay set while the other-side key is held, so releasing Right ⌥ with Left ⌥ down
+    /// never produced .up and left the mic recording.
     var modifierMask: UInt64? {
         switch self {
-        case .rightCommand: return 0x100000
-        case .rightOption: return 0x80000
+        case .rightCommand: return 0x10
+        case .rightOption: return 0x40
         case .f13: return nil
         }
     }
@@ -74,5 +77,11 @@ final class KeyStateMachine {
             return .up
         }
         return nil
+    }
+
+    /// Forgets a held key and reports whether one was held. For tap re-enable, when the release may have been missed.
+    func reset() -> Bool {
+        defer { isDown = false }
+        return isDown
     }
 }
