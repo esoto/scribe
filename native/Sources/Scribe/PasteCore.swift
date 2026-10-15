@@ -11,6 +11,9 @@ final class Paster {
     private let postCmdV: () throws -> Void
     private let schedule: (Double, @escaping () -> Void) -> Void
     private let restoreDelay: Double
+    /// The user's clipboard and the changeCount of our last set. While the clipboard still shows our own
+    /// paste, a new dictation must not snapshot it in place of the user's content.
+    private var pending: (items: [PasteboardItemData], setCount: Int)?
 
     init(
         pasteboard: PasteboardLike,
@@ -25,9 +28,15 @@ final class Paster {
     }
 
     func paste(_ text: String) throws {
-        let saved = pasteboard.get()
-        pasteboard.set(text)
+        let saved: [PasteboardItemData]?
+        if let pending, pasteboard.changeCount() == pending.setCount {
+            saved = pending.items
+        } else {
+            saved = pasteboard.snapshot()
+        }
+        pasteboard.setTransient(text)
         let setCount = pasteboard.changeCount()
+        pending = saved.map { ($0, setCount) }
 
         do {
             try postCmdV()
@@ -35,16 +44,16 @@ final class Paster {
             throw PasteError(message: String(describing: error))
         }
 
-        if saved != nil {
+        if let saved {
             schedule(restoreDelay) { [weak self] in
-                self?.restore(saved: saved!, setCount: setCount)
+                self?.restore(saved: saved, setCount: setCount)
             }
         }
     }
 
-    private func restore(saved: String, setCount: Int) {
-        if pasteboard.changeCount() == setCount {
-            pasteboard.set(saved)
-        }
+    private func restore(saved: [PasteboardItemData], setCount: Int) {
+        guard pasteboard.changeCount() == setCount else { return }
+        pasteboard.restore(saved)
+        pending = nil
     }
 }
