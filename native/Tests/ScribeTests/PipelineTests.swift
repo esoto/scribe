@@ -1,5 +1,27 @@
 import XCTest
 
+/// Blocks the calling thread until the async work completes; a semaphore bridges the Task, no sleep polling.
+private func runBlocking(_ work: @escaping () async -> Void) {
+    let sema = DispatchSemaphore(value: 0)
+    Task {
+        await work()
+        sema.signal()
+    }
+    sema.wait()
+}
+
+/// Queues work instead of running it, so a test can interleave keyDown/keyUp with processing.
+private final class ManualRunner {
+    private var queue: [() async -> Void] = []
+    func run(_ work: @escaping () async -> Void) { queue.append(work) }
+    /// Runs every queued job to completion, in order.
+    func drain() {
+        let jobs = queue
+        queue.removeAll()
+        for work in jobs { runBlocking(work) }
+    }
+}
+
 final class PipelineTests: XCTestCase {
     private struct Harness {
         let pipeline: DictationPipeline
@@ -11,16 +33,8 @@ final class PipelineTests: XCTestCase {
         let logs: Box<String>
     }
 
-    /// Blocks the calling thread until the async work completes; a semaphore bridges the Task, no sleep polling.
     private func makeSyncRunner() -> (@escaping () async -> Void) -> Void {
-        return { work in
-            let sema = DispatchSemaphore(value: 0)
-            Task {
-                await work()
-                sema.signal()
-            }
-            sema.wait()
-        }
+        return { work in runBlocking(work) }
     }
 
     private func make(
@@ -30,7 +44,8 @@ final class PipelineTests: XCTestCase {
         paster: Pasting = FakePaster(),
         history: History = History(maxLen: 10),
         config: PipelineConfig = PipelineConfig(),
-        pairs: [ReplacementPair] = []
+        pairs: [ReplacementPair] = [],
+        runner: ((@escaping () async -> Void) -> Void)? = nil
     ) -> Harness {
         let clock = FakeClock()
         let states = Box<PipelineState>()
@@ -46,7 +61,7 @@ final class PipelineTests: XCTestCase {
             history: history,
             config: config,
             clock: { clock.t },
-            runner: makeSyncRunner(),
+            runner: runner ?? makeSyncRunner(),
             onState: { states.append($0) },
             onNotice: { notices.append($0) },
             saveFailedAudio: { saved.append($0) },
@@ -154,7 +169,85 @@ final class PipelineTests: XCTestCase {
         XCTAssertEqual(paster.pasted, [])
         XCTAssertEqual(h.saved.value.count, 1)
         XCTAssertFalse(h.notices.value.isEmpty)
-        XCTAssertTrue(h.states.value.contains(.error))
+        XCTAssertEqual(h.states.value.last, .error)
+    }
+
+    func testSttErrorIsTheTerminalStateForThatDictation() {
+        let h = make(stt: FakeStt(err: SttError(message: "boom")))
+        dictate(h)
+        XCTAssertEqual(h.states.value, [.recording, .processing, .error])
+    }
+
+    func testNonSttErrorStillEndsIdle() {
+        let h = make(stt: FakeStt(err: TestError(message: "boom")))
+        dictate(h)
+        XCTAssertEqual(h.states.value, [.recording, .processing, .idle])
+    }
+
+    func testNothingTranscribedStillEndsIdle() {
+        let h = make(stt: FakeStt(text: "  "))
+        dictate(h)
+        XCTAssertEqual(h.states.value, [.recording, .processing, .idle])
+    }
+
+    func testSilentCaptureStillEndsIdle() {
+        let h = make(recorder: FakeRecorder(pcm: SILENT))
+        dictate(h)
+        XCTAssertEqual(h.states.value, [.recording, .processing, .idle])
+    }
+
+    func testShortHoldStillEmitsIdleFromKeyUp() {
+        let h = make()
+        dictate(h, hold: 0.1)
+        XCTAssertEqual(h.states.value, [.recording, .idle])
+    }
+
+    func testNextKeyDownAfterAnErrorStartsRecording() {
+        let h = make(stt: FakeStt(err: SttError(message: "boom")))
+        dictate(h)
+        h.pipeline.keyDown()
+        XCTAssertEqual(h.states.value, [.recording, .processing, .error, .recording])
+    }
+
+    func testTrailingIdleNeverOverwritesANewerRecording() {
+        let runner = ManualRunner()
+        let h = make(runner: runner.run)
+        dictate(h)                      // job 1 queued, not yet run
+        h.pipeline.keyDown()            // job 2 is now recording
+        runner.drain()                  // job 1 finishes while job 2 is held
+        XCTAssertEqual(h.states.value, [.recording, .recording])
+    }
+
+    func testStaleSttErrorKeepsNoticeAndAudioButNotTheGlyph() {
+        let runner = ManualRunner()
+        let h = make(stt: FakeStt(err: SttError(message: "boom")), runner: runner.run)
+        dictate(h)
+        h.pipeline.keyDown()
+        runner.drain()
+        XCTAssertEqual(h.states.value.last, .recording)
+        XCTAssertFalse(h.states.value.contains(.error))
+        XCTAssertEqual(h.saved.value.count, 1)
+        XCTAssertFalse(h.notices.value.isEmpty)
+    }
+
+    func testTheNewestJobStillEmitsItsTrailingIdle() {
+        let runner = ManualRunner()
+        let h = make(runner: runner.run)
+        dictate(h)
+        h.pipeline.keyDown()
+        h.clock.t += 1.0
+        h.pipeline.keyUp()              // job 2 queued behind job 1
+        runner.drain()
+        XCTAssertEqual(h.states.value, [.recording, .recording, .processing, .idle])
+    }
+
+    func testShortTapDuringProcessingKeepsTheErrorGlyph() {
+        let runner = ManualRunner()
+        let h = make(stt: FakeStt(err: SttError(message: "boom")), runner: runner.run)
+        dictate(h)                      // job 1 queued, not yet run
+        dictate(h, hold: 0.1)           // a discarded tap must not orphan job 1's failure
+        runner.drain()
+        XCTAssertEqual(h.states.value, [.recording, .recording, .idle, .processing, .error])
     }
 
     func testSttEmptyDiscardsWithNotice() {

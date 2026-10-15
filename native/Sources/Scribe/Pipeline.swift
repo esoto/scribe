@@ -1,6 +1,6 @@
 import Foundation
 
-/// Thrown by SttEngine.transcribe; the only error that gets flash ERROR + save audio + notify.
+/// Thrown by SttEngine.transcribe; the only error that gets the ⚠ state + save audio + notify.
 struct SttError: Error {
     let message: String
 }
@@ -58,6 +58,13 @@ final class DictationPipeline {
 
     private var downAt: Double?
     private var isArmed = false
+    /// A job only touches the glyph while no hold is in progress and no newer job is queued, else its
+    /// .processing/.idle would blank the ● of the dictation in progress. A discarded short tap starts a hold
+    /// but no job, so it must not orphan the in-flight job's glyph. The lock orders a job's emission against
+    /// key events; process() reads this from the runner's thread.
+    private let stateLock = NSLock()
+    private var holding = false
+    private var latestJob = 0
 
     init(
         recorder: RecorderLike,
@@ -105,7 +112,10 @@ final class DictationPipeline {
         }
         isArmed = true
         downAt = clock()
-        onState(.recording)
+        stateLock.withLock {
+            holding = true
+            onState(.recording)
+        }
     }
 
     func keyUp() {
@@ -114,12 +124,20 @@ final class DictationPipeline {
         let pcm = recorder.disarm()
         let held = clock() - (downAt ?? 0.0)
         guard held >= config.holdThreshold else {
-            onState(.idle)
+            stateLock.withLock {
+                holding = false
+                onState(.idle)
+            }
             return
+        }
+        let job = stateLock.withLock {
+            holding = false
+            latestJob += 1
+            return latestJob
         }
         runner { [weak self] in
             guard let self else { return }
-            await self.process(pcm)
+            await self.process(pcm, job: job)
         }
     }
 
@@ -135,9 +153,13 @@ final class DictationPipeline {
 
     // MARK: - Processing (runs on the injected runner)
 
-    private func process(_ pcm: [Float]) async {
-        onState(.processing)
-        defer { onState(.idle) }
+    private func process(_ pcm: [Float], job: Int) async {
+        func emit(_ state: PipelineState) {
+            stateLock.withLock { if !holding, latestJob == job { onState(state) } }
+        }
+        emit(.processing)
+        var terminal = false   // .error is terminal: no trailing .idle, so the ⚠ stays visible
+        defer { if !terminal { emit(.idle) } }
 
         guard Gates.passesEnergyGate(pcm, threshold: config.energyGate) else {
             // Near-silent capture (likely missing Microphone TCC grant); no notice, expected from accidental taps.
@@ -152,7 +174,8 @@ final class DictationPipeline {
         } catch let sttError as SttError {
             saveFailedAudio(pcm)
             onNotice("Transcription failed: \(sttError.message)")
-            onState(.error)
+            terminal = true
+            emit(.error)
             return
         } catch {
             // Non-SttError failures have no defined contract here.
