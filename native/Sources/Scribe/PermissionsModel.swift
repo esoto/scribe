@@ -57,7 +57,7 @@ struct LiveNotificationAuthorizer: NotificationAuthorizing {
     }
 }
 
-/// The three TCC grants as the menu bar and Setup window see them. A false→true flip of the microphone or
+/// The three TCC grants, plus the optional notification authorization, as the menu bar and Setup window see them. A false→true flip of the microphone or
 /// Input Monitoring is reported through the init closures, so the owner reacts without a restart.
 @MainActor
 final class PermissionsModel: ObservableObject {
