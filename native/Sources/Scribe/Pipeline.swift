@@ -58,6 +58,11 @@ final class DictationPipeline {
 
     private var downAt: Double?
     private var isArmed = false
+    /// Bumped on every key-down. A job only touches the glyph while no newer hold has started, else its
+    /// .processing/.idle would blank the ● of the dictation in progress. The lock orders a job's emission
+    /// against the next key-down's .recording; process() reads this from the runner's thread.
+    private let stateLock = NSLock()
+    private var generation = 0
 
     init(
         recorder: RecorderLike,
@@ -105,7 +110,10 @@ final class DictationPipeline {
         }
         isArmed = true
         downAt = clock()
-        onState(.recording)
+        stateLock.withLock {
+            generation += 1
+            onState(.recording)
+        }
     }
 
     func keyUp() {
@@ -117,9 +125,10 @@ final class DictationPipeline {
             onState(.idle)
             return
         }
+        let gen = stateLock.withLock { generation }
         runner { [weak self] in
             guard let self else { return }
-            await self.process(pcm)
+            await self.process(pcm, generation: gen)
         }
     }
 
@@ -135,9 +144,13 @@ final class DictationPipeline {
 
     // MARK: - Processing (runs on the injected runner)
 
-    private func process(_ pcm: [Float]) async {
-        onState(.processing)
-        defer { onState(.idle) }
+    private func process(_ pcm: [Float], generation gen: Int) async {
+        func emit(_ state: PipelineState) {
+            stateLock.withLock { if generation == gen { onState(state) } }
+        }
+        emit(.processing)
+        var terminal = false   // .error is terminal: no trailing .idle, so the ⚠ stays visible
+        defer { if !terminal { emit(.idle) } }
 
         guard Gates.passesEnergyGate(pcm, threshold: config.energyGate) else {
             // Near-silent capture (likely missing Microphone TCC grant); no notice, expected from accidental taps.
@@ -152,7 +165,8 @@ final class DictationPipeline {
         } catch let sttError as SttError {
             saveFailedAudio(pcm)
             onNotice("Transcription failed: \(sttError.message)")
-            onState(.error)
+            terminal = true
+            emit(.error)
             return
         } catch {
             // Non-SttError failures have no defined contract here.
