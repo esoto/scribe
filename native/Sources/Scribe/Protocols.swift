@@ -10,7 +10,7 @@ protocol CleanupBackend {
     func clean(_ text: String) async throws -> String
 }
 
-/// One pasteboard item: UTI -> bytes.
+/// One pasteboard item: UTI → bytes.
 typealias PasteboardItemData = [String: Data]
 
 protocol PasteboardLike {

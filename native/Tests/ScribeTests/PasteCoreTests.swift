@@ -187,21 +187,17 @@ final class PasteCoreTests: XCTestCase {
         XCTAssertNil(pb.items.first?["org.nspasteboard.TransientType"])
     }
 
-    func test_clipboard_is_snapshotted_afresh_after_a_restore() throws {
-        let first = [[text: Data("one".utf8)]]
-        let second = [[text: Data("two".utf8)]]
-        let pb = FakePasteboard(items: first)
+    func test_a_copy_made_between_two_dictations_is_what_gets_restored() throws {
+        let copied = [[text: Data("theirs".utf8)]]
+        let pb = FakePasteboard(items: [[text: Data("mine".utf8)]])
         let sched = FakeScheduler()
         let paster = Paster(pasteboard: pb, postCmdV: {}, schedule: sched.schedule, restoreDelay: 2.0)
 
-        try paster.paste("dictation 1")
-        sched.fire()
-        XCTAssertEqual(pb.items, first)
+        try paster.paste("first")
+        pb.userCopies(copied)
+        try paster.paste("second")
+        sched.fireAll()
 
-        // pending was cleared by the restore: a new copy must be what the next paste restores.
-        pb.userCopies(second)
-        try paster.paste("dictation 2")
-        sched.fire()
-        XCTAssertEqual(pb.items, second)
+        XCTAssertEqual(pb.items, copied)
     }
 }

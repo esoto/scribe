@@ -14,6 +14,8 @@ final class Paster {
     /// The user's clipboard and the changeCount of our last set. While the clipboard still shows our own
     /// paste, a new dictation must not snapshot it in place of the user's content.
     private var pending: (items: [PasteboardItemData], setCount: Int)?
+    // paste() runs on the pipeline worker, restore() on main.
+    private let lock = NSLock()
 
     init(
         pasteboard: PasteboardLike,
@@ -28,15 +30,18 @@ final class Paster {
     }
 
     func paste(_ text: String) throws {
-        let saved: [PasteboardItemData]?
-        if let pending, pasteboard.changeCount() == pending.setCount {
-            saved = pending.items
-        } else {
-            saved = pasteboard.snapshot()
+        let (saved, setCount) = lock.withLock {
+            let saved: [PasteboardItemData]?
+            if let pending, pasteboard.changeCount() == pending.setCount {
+                saved = pending.items
+            } else {
+                saved = pasteboard.snapshot()
+            }
+            pasteboard.setTransient(text)
+            let setCount = pasteboard.changeCount()
+            pending = saved.map { ($0, setCount) }
+            return (saved, setCount)
         }
-        pasteboard.setTransient(text)
-        let setCount = pasteboard.changeCount()
-        pending = saved.map { ($0, setCount) }
 
         do {
             try postCmdV()
@@ -52,8 +57,11 @@ final class Paster {
     }
 
     private func restore(saved: [PasteboardItemData], setCount: Int) {
-        guard pasteboard.changeCount() == setCount else { return }
-        pasteboard.restore(saved)
-        pending = nil
+        lock.withLock {
+            // Also frees a snapshot (up to 32 MiB) when the user copied meanwhile.
+            if pending?.setCount == setCount { pending = nil }
+            guard pasteboard.changeCount() == setCount else { return }
+            pasteboard.restore(saved)
+        }
     }
 }
