@@ -138,4 +138,150 @@ final class OnboardingStateTests: XCTestCase {
         XCTAssertFalse(change.microphoneNewlyGranted)
         XCTAssertFalse(change.inputMonitoringNewlyGranted)
     }
+
+    func testActionsGrantedOffersNothing() {
+        let statuses: [TCCStatus?] = [nil, .notDetermined, .denied, .authorized]
+        for grant in Grant.allCases {
+            for status in statuses {
+                XCTAssertEqual(OnboardingState.actions(for: grant, granted: true, microphoneStatus: status), [])
+            }
+        }
+    }
+
+    func testActionsMicrophoneNotDeterminedOffersOnlyRequest() {
+        let result = OnboardingState.actions(for: .microphone, granted: false, microphoneStatus: .notDetermined)
+        XCTAssertEqual(result, [.request])
+    }
+
+    func testActionsMicrophoneDeniedOffersOnlyOpenSystemSettings() {
+        let result = OnboardingState.actions(for: .microphone, granted: false, microphoneStatus: .denied)
+        XCTAssertEqual(result, [.openSystemSettings])
+    }
+
+    func testActionsMicrophoneAuthorizedButNotGrantedOffersNothing() {
+        let result = OnboardingState.actions(for: .microphone, granted: false, microphoneStatus: .authorized)
+        XCTAssertEqual(result, [])
+    }
+
+    func testActionsMicrophoneWithoutProbeOffersBoth() {
+        let result = OnboardingState.actions(for: .microphone, granted: false, microphoneStatus: nil)
+        XCTAssertEqual(result, [.request, .openSystemSettings])
+    }
+
+    func testActionsAccessibilityNotGrantedOffersBoth() {
+        let result = OnboardingState.actions(for: .accessibility, granted: false, microphoneStatus: nil)
+        XCTAssertEqual(result, [.request, .openSystemSettings])
+    }
+
+    func testActionsInputMonitoringNotGrantedOffersBoth() {
+        let result = OnboardingState.actions(for: .inputMonitoring, granted: false, microphoneStatus: nil)
+        XCTAssertEqual(result, [.request, .openSystemSettings])
+    }
+
+    func testActionsIgnoreMicrophoneStatusForOtherGrants() {
+        let statuses: [TCCStatus?] = [.notDetermined, .denied, .authorized]
+        for grant in [Grant.accessibility, .inputMonitoring] {
+            for status in statuses {
+                XCTAssertEqual(
+                    OnboardingState.actions(for: grant, granted: false, microphoneStatus: status),
+                    [.request, .openSystemSettings])
+            }
+        }
+    }
+
+    func testButtonTitleRequest() {
+        XCTAssertEqual(OnboardingState.buttonTitle(.request), "Request")
+    }
+
+    func testButtonTitleOpenSystemSettings() {
+        XCTAssertEqual(OnboardingState.buttonTitle(.openSystemSettings), "Open System Settings")
+    }
+
+    func testAccessibilityLabelRequestNamesGrant() {
+        XCTAssertEqual(OnboardingState.accessibilityLabel(.request, for: .microphone), "Request Microphone access")
+    }
+
+    func testAccessibilityLabelOpenSettingsNamesGrant() {
+        XCTAssertEqual(
+            OnboardingState.accessibilityLabel(.openSystemSettings, for: .inputMonitoring),
+            "Open Input Monitoring settings")
+    }
+
+    func testModelsRowSttDownloadTakesPrecedence() {
+        let row = OnboardingState.modelsRow(sttDownload: "Downloading speech model", cleanupStatus: "Loading cleanup")
+        XCTAssertEqual(row.detail, "Downloading speech model")
+        XCTAssertFalse(row.ready)
+    }
+
+    func testModelsRowCleanupStatusWhenNoDownload() {
+        let row = OnboardingState.modelsRow(sttDownload: nil, cleanupStatus: "Loading cleanup")
+        XCTAssertEqual(row.detail, "Loading cleanup")
+        XCTAssertFalse(row.ready)
+    }
+
+    func testModelsRowReadyWhenNothingInProgress() {
+        let row = OnboardingState.modelsRow(sttDownload: nil, cleanupStatus: nil)
+        XCTAssertEqual(row.detail, "Ready")
+        XCTAssertTrue(row.ready)
+    }
+
+    func testNotificationsDetailNotDetermined() {
+        XCTAssertEqual(
+            OnboardingState.notificationsDetail(.notDetermined),
+            "Needed to tell you when a dictation fails.")
+    }
+
+    func testNotificationsDetailDenied() {
+        XCTAssertEqual(
+            OnboardingState.notificationsDetail(.denied),
+            "Off — scribe can't tell you when a dictation fails.")
+    }
+
+    func testNotificationsDetailAuthorized() {
+        XCTAssertEqual(
+            OnboardingState.notificationsDetail(.authorized),
+            "On — scribe tells you when a dictation fails.")
+    }
+
+    func testNotificationsActionsNotDetermined() {
+        XCTAssertEqual(OnboardingState.notificationsActions(.notDetermined), [.request])
+    }
+
+    func testNotificationsActionsDenied() {
+        XCTAssertEqual(OnboardingState.notificationsActions(.denied), [.openSystemSettings])
+    }
+
+    func testNotificationsActionsAuthorized() {
+        XCTAssertEqual(OnboardingState.notificationsActions(.authorized), [])
+    }
+
+    func testGlyphRecordingValue() {
+        XCTAssertEqual(glyphAccessibilityValue(.recording, progress: nil, needsAttention: false), "recording")
+    }
+
+    func testGlyphProcessingValue() {
+        XCTAssertEqual(glyphAccessibilityValue(.processing, progress: nil, needsAttention: false), "transcribing")
+    }
+
+    func testGlyphErrorValue() {
+        XCTAssertEqual(glyphAccessibilityValue(.error, progress: nil, needsAttention: false), "error")
+    }
+
+    func testGlyphIdleValue() {
+        XCTAssertEqual(glyphAccessibilityValue(.idle, progress: nil, needsAttention: false), "idle")
+    }
+
+    func testGlyphIdleNeedsAttentionValue() {
+        XCTAssertEqual(glyphAccessibilityValue(.idle, progress: nil, needsAttention: true), "needs attention")
+    }
+
+    func testGlyphIdleDownloadingValueRoundsDownPercent() {
+        XCTAssertEqual(
+            glyphAccessibilityValue(.idle, progress: 0.42, needsAttention: false),
+            "downloading, 42 percent")
+    }
+
+    func testGlyphIdleFinishedDownloadIsIdle() {
+        XCTAssertEqual(glyphAccessibilityValue(.idle, progress: 1.0, needsAttention: false), "idle")
+    }
 }
