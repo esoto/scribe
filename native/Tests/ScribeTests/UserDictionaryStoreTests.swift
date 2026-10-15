@@ -232,7 +232,7 @@ final class UserDictionaryStoreTests: XCTestCase {
         store.addPair(original: "Headstar", replacement: "hetzner")
         XCTAssertEqual(store.unmatchedHeardWords, [])
         XCTAssertEqual(
-            TermReplacer.apply(store.snapshot.pairs, to: "deploy to Headstar tonight"),
+            TermReplacer.apply(store.allPairs, to: "deploy to Headstar tonight"),
             "deploy to hetzner tonight")
     }
 
@@ -255,7 +255,9 @@ final class UserDictionaryStoreTests: XCTestCase {
         XCTAssertEqual(store.unmatchedHeardWords.map(\.term), ["Headstar"])
         XCTAssertEqual(store.snapshot.glossary, [], "never injected while learning is off")
         store.learningEnabled = true
-        store.observe(cleanedText: "one more Headstar mention")
+        for _ in 0..<2 { store.observe(cleanedText: "one more Headstar mention") }
+        XCTAssertEqual(store.snapshot.glossary, [], "off-period sightings do not count")
+        store.observe(cleanedText: "a third Headstar mention")
         XCTAssertEqual(store.snapshot.glossary, ["Headstar"], "injected once enabled")
     }
 
@@ -337,5 +339,160 @@ final class UserDictionaryStoreTests: XCTestCase {
         XCTAssertTrue(text.contains("\"version\""))
         XCTAssertTrue(text.contains("camel"))
         XCTAssertFalse(text.contains("transcript"))
+    }
+
+    func testAddPairDedupesCaseInsensitivelyAndNormalisesWhitespace() {
+        let store = makeStore()
+        store.addPair(original: "Camel", replacement: "kamal")
+        store.addPair(original: "  camel ", replacement: "Kamal")
+        XCTAssertEqual(store.allPairs.count, 1)
+        XCTAssertEqual(store.allPairs.first?.original, "camel")
+        XCTAssertEqual(store.allPairs.first?.replacement, "Kamal")
+
+        store.addPair(original: " Memory \t  Service ", replacement: "memory_service")
+        XCTAssertEqual(store.allPairs.map(\.original).last, "Memory Service")
+    }
+
+    func testAllPairsReturnsEveryStoredPairNotJustTheSnapshotCap() {
+        let store = makeStore()
+        for i in 0..<30 { store.addPair(original: "word\(i)", replacement: "w\(i)") }
+        XCTAssertEqual(store.allPairs.count, 30)
+        XCTAssertEqual(store.snapshot.pairs.count, 20)
+    }
+
+    func testCandidatesAreNotPersistedWhileLearningIsOff() {
+        let store = makeStore()
+        store.learningEnabled = false
+        store.observe(cleanedText: "deploy to Headstar tonight")
+        XCTAssertFalse(store.unmatchedHeardWords.isEmpty, "in-session suggestions still work")
+        _ = store.snapshot  // flush before reopening
+
+        XCTAssertTrue(makeStore().unmatchedHeardWords.isEmpty, "nothing reached disk")
+    }
+
+    func testCandidatesPersistWhileLearningIsOn() {
+        let store = makeStore()
+        store.learningEnabled = true
+        store.observe(cleanedText: "deploy to Headstar tonight")
+        _ = store.snapshot
+
+        XCTAssertEqual(makeStore().unmatchedHeardWords.map(\.term), ["Headstar"])
+    }
+
+    func testTurningLearningOffPurgesPersistedCandidates() {
+        let store = makeStore()
+        store.observe(cleanedText: "deploy to Headstar tonight")
+        _ = store.snapshot
+        XCTAssertFalse(makeStore().unmatchedHeardWords.isEmpty, "precondition: on disk")
+
+        store.learningEnabled = false
+        XCTAssertTrue(store.unmatchedHeardWords.isEmpty)
+        XCTAssertTrue(makeStore().unmatchedHeardWords.isEmpty, "purged on disk too")
+    }
+
+    func testPairsAndGlossarySurviveThePurgeWhenLearningIsOff() {
+        let store = makeStore()
+        store.addPair(original: "camel", replacement: "kamal")
+        for _ in 0..<3 { store.observe(cleanedText: "warm the KVCache first") }
+        store.observe(cleanedText: "deploy to Headstar tonight")
+        store.learningEnabled = false
+        let reopened = makeStore()
+        XCTAssertEqual(reopened.allPairs.map(\.original), ["camel"])
+        XCTAssertEqual(reopened.allGlossaryEntries.map(\.term), ["KVCache"])
+        XCTAssertTrue(reopened.unmatchedHeardWords.isEmpty)
+    }
+
+    func testRelaunchWithLearningOffPurgesCandidatesLeftOnDisk() {
+        let store = makeStore()
+        store.observe(cleanedText: "deploy to Headstar tonight")
+        _ = store.snapshot
+        XCTAssertFalse(makeStore().unmatchedHeardWords.isEmpty, "precondition: on disk")
+
+        let relaunched = makeStore()
+        relaunched.learningEnabled = false  // what AppModel does at launch
+        _ = relaunched.snapshot
+        XCTAssertTrue(makeStore().unmatchedHeardWords.isEmpty)
+    }
+
+    func testWordsHeardWhileOffNeverReachDiskWhenLearningTurnsOn() {
+        let store = makeStore()
+        store.learningEnabled = false
+        store.observe(cleanedText: "deploy to Headstar tonight")
+        store.learningEnabled = true
+        store.addPair(original: "camel", replacement: "kamal")  // any persist
+        _ = store.snapshot
+        XCTAssertTrue(store.unmatchedHeardWords.isEmpty)
+        XCTAssertTrue(makeStore().unmatchedHeardWords.isEmpty)
+    }
+
+    private func promoteKamal(_ store: UserDictionaryStore) -> GlossaryEntry? {
+        for _ in 0..<3 { store.observe(cleanedText: "ship with Kamal now") }
+        return store.allGlossaryEntries.first
+    }
+
+    func testGlossaryIsFrozenOnDiskWhileLearningIsOff() {
+        let store = makeStore()
+        let promoted = promoteKamal(store)
+        XCTAssertEqual(promoted?.count, 3)
+
+        store.learningEnabled = false
+        clock.advance(days: 2)
+        store.observe(cleanedText: "ship with Kamal now")
+        _ = store.snapshot
+
+        let onDisk = makeStore().allGlossaryEntries.first
+        XCTAssertEqual(onDisk?.count, 3)
+        XCTAssertEqual(onDisk?.lastSeen, promoted?.lastSeen)
+        XCTAssertTrue(store.unmatchedHeardWords.isEmpty, "a learned term is not a new suggestion")
+    }
+
+    func testGlossaryDoesNotDecayWhileLearningIsOff() {
+        let store = makeStore()
+        _ = promoteKamal(store)
+        store.learningEnabled = false
+        clock.advance(days: 61)
+        store.observe(cleanedText: "something else with MLX inside")
+        XCTAssertEqual(store.allGlossaryEntries.map(\.term), ["Kamal"])
+        XCTAssertEqual(makeStore().allGlossaryEntries.map(\.term), ["Kamal"])
+    }
+
+    func testRelaunchWithLearningOffDoesNotDecayTheGlossary() throws {
+        let store = makeStore()
+        _ = promoteKamal(store)
+        _ = store.snapshot
+        clock.advance(days: 61)
+
+        let relaunched = makeStore()
+        relaunched.learningEnabled = false  // what AppModel does at launch
+        _ = relaunched.snapshot
+        XCTAssertEqual(relaunched.allGlossaryEntries.map(\.term), ["Kamal"])
+        let text = String(decoding: try Data(contentsOf: fileURL), as: UTF8.self)
+        XCTAssertTrue(text.contains("Kamal"), "the rewrite at launch must not drop learned terms")
+    }
+
+    func testReEnablingAfterALongOffPeriodKeepsLearnedTermsAndTheirDates() {
+        let store = makeStore()
+        let promoted = promoteKamal(store)
+        store.learningEnabled = false
+        clock.advance(days: 90)
+        store.learningEnabled = true
+        XCTAssertEqual(store.allGlossaryEntries.map(\.term), ["Kamal"])
+        XCTAssertEqual(store.allGlossaryEntries.first?.lastSeen, promoted?.lastSeen, "dates stay true")
+
+        let relaunched = makeStore()
+        relaunched.learningEnabled = true  // fails if the floor never reached disk
+        XCTAssertEqual(relaunched.allGlossaryEntries.map(\.term), ["Kamal"])
+
+        clock.advance(days: 61)
+        relaunched.observe(cleanedText: "something else with MLX inside")
+        XCTAssertTrue(relaunched.allGlossaryEntries.isEmpty, "terms still age out once learning resumes")
+    }
+
+    func testGlossaryStillDecaysWhileLearningIsOn() {
+        let store = makeStore()
+        _ = promoteKamal(store)
+        clock.advance(days: 61)
+        store.observe(cleanedText: "something else with MLX inside")
+        XCTAssertTrue(store.allGlossaryEntries.isEmpty)
     }
 }

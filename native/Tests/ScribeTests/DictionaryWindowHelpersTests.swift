@@ -24,6 +24,12 @@ final class DictionaryWindowHelpersTests: XCTestCase {
         XCTAssertTrue(canAddPair(original: "quote", replacement: "\""))
     }
 
+    func testAtPairCap() {
+        XCTAssertFalse(atPairCap(0))
+        XCTAssertFalse(atPairCap(UserDictionaryStore.maxStoredPairs - 1))
+        XCTAssertTrue(atPairCap(UserDictionaryStore.maxStoredPairs))
+    }
+
     func testMenuGlossaryTermsExcludesSeededAndRanksByUse() {
         let now = Date(timeIntervalSince1970: 1_000_000)
         let entries = [

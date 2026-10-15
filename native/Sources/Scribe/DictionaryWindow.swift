@@ -20,6 +20,8 @@ func canAddPair(original: String, replacement: String) -> Bool {
     }
 }
 
+func atPairCap(_ count: Int) -> Bool { count >= UserDictionaryStore.maxStoredPairs }
+
 func distinctReplacementTargets(_ pairs: [ReplacementPair]) -> [String] {
     var seen = Set<String>()
     var targets: [String] = []
@@ -83,8 +85,15 @@ struct DictionaryWindow: View {
                             newOriginal = ""
                             newReplacement = ""
                         }
-                        .disabled(!canAddPair(original: newOriginal, replacement: newReplacement))
+                        .disabled(
+                            !canAddPair(original: newOriginal, replacement: newReplacement)
+                                || atPairCap(model.replacementPairs.count))
                     }
+                    Text(atPairCap(model.replacementPairs.count)
+                        ? "Remove one to add another."
+                        : "\(model.replacementPairs.count) of \(UserDictionaryStore.maxStoredPairs) replacements")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
                 .padding(4)
             }
@@ -113,6 +122,7 @@ struct DictionaryWindow: View {
                                                 }
                                             }
                                             .frame(width: 110)
+                                            .disabled(atPairCap(model.replacementPairs.count))
                                         }
                                         Button {
                                             model.ignoreHeardWord(entry.term)

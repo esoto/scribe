@@ -58,4 +58,35 @@ final class TermReplacerTests: XCTestCase {
         XCTAssertEqual(
             TermReplacer.apply([pair("  ", "x")], to: "deploy with camel"), "deploy with camel")
     }
+
+    func testMultiWordOriginalMatchesAsAPhrase() {
+        let p = [pair("memory service", "memory_service")]
+        XCTAssertEqual(
+            TermReplacer.apply(p, to: "deploy the memory service tonight"),
+            "deploy the memory_service tonight")
+        XCTAssertEqual(TermReplacer.apply(p, to: "Memory Service!"), "memory_service!")
+    }
+
+    func testLongestMatchWins() {
+        let p = [pair("memory", "RAM"), pair("memory service", "memory_service")]
+        XCTAssertEqual(
+            TermReplacer.apply(p, to: "the memory service uses memory"),
+            "the memory_service uses RAM")
+    }
+
+    func testPhraseKeepsEdgePunctuationOnly() {
+        let p = [pair("cuber netties", "Kubernetes")]
+        XCTAssertEqual(TermReplacer.apply(p, to: "(cuber netties)"), "(Kubernetes)")
+        XCTAssertEqual(TermReplacer.apply(p, to: "cuber, netties"), "cuber, netties")
+    }
+
+    func testOriginalWhitespaceIsNormalised() {
+        let p = [pair("  cuber   netties ", "Kubernetes")]
+        XCTAssertEqual(TermReplacer.apply(p, to: "run cuber netties now"), "run Kubernetes now")
+    }
+
+    func testSpanishAccentsMatchCaseInsensitively() {
+        let p = [pair("méxico city", "Ciudad de México")]
+        XCTAssertEqual(TermReplacer.apply(p, to: "fly to México City"), "fly to Ciudad de México")
+    }
 }

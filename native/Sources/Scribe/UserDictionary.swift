@@ -27,6 +27,8 @@ private struct DictionaryFile: Codable {
     var pairs: [ReplacementPair]
     var glossary: [GlossaryEntry]
     var candidates: [GlossaryEntry]
+    // Optional so files written before this field still decode.
+    var learningResumedAt: Date?
 }
 
 /// Owns manual replacement pairs and the auto-learned glossary. Persists words only, never transcripts.
@@ -41,7 +43,7 @@ final class UserDictionaryStore: @unchecked Sendable {
     private static let glossaryDecayDays = 60.0
     private static let maxStoredCandidates = 200
     private static let maxStoredGlossary = 200
-    private static let maxStoredPairs = 50
+    static let maxStoredPairs = 50
     private static let snapshotPairCap = 20
     private static let snapshotGlossaryCap = 30
 
@@ -53,6 +55,7 @@ final class UserDictionaryStore: @unchecked Sendable {
     private var glossary: [GlossaryEntry] = []
     private var candidates: [GlossaryEntry] = []
     private var enabled = true
+    private var learningResumedAt: Date?
     private var lastSnapshot = DictionarySnapshot.empty
     private var lastStructure = Structure.empty
     private var changeHandler: ((DictionarySnapshot) -> Void)?
@@ -70,7 +73,8 @@ final class UserDictionaryStore: @unchecked Sendable {
         try? FileManager.default.createDirectory(
             at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         loadLocked()
-        decayLocked()
+        // The learning flag isn't set yet; its setter ages the glossary once it is.
+        decayLocked(includingGlossary: false)
         capLocked()
         lastSnapshot = computeSnapshotLocked()
         lastStructure = computeStructureLocked()
@@ -82,13 +86,27 @@ final class UserDictionaryStore: @unchecked Sendable {
         set { queue.sync { changeHandler = newValue } }
     }
 
-    /// Runtime learning switch; when off, `observe` is a no-op.
+    /// Runtime learning switch; when off, nothing learned is written to disk, the glossary is frozen, and no candidate is promoted.
     var learningEnabled: Bool {
         get { queue.sync { enabled } }
         set {
             queue.sync {
+                let wasEnabled = enabled
                 enabled = newValue
-                notifyIfChangedLocked()
+                if newValue {
+                    if !wasEnabled {
+                        // Words heard while off must neither reach disk nor count toward promotion.
+                        candidates.removeAll()
+                        learningResumedAt = now()
+                    }
+                    decayLocked()
+                    // Persisted so the floor survives a quit before the next write.
+                    persistAndNotifyLocked()
+                } else {
+                    // Persisting rewrites the file without candidates, purging any left by an earlier run.
+                    candidates.removeAll()
+                    persistAndNotifyLocked()
+                }
             }
         }
     }
@@ -121,7 +139,7 @@ final class UserDictionaryStore: @unchecked Sendable {
 
     func observe(cleanedText: String) {
         queue.async {
-            // Collection is not gated by `enabled`: it is local, words-only, and powers the "heard but unmatched" suggestions. `enabled` gates only handing learned terms to the model.
+            // Collection runs with learning off too — it powers the "heard but unmatched" suggestions — but is held in memory only; persistence and promotion are gated by `enabled`.
             let terms = GlossaryHarvester.candidates(in: cleanedText)
             guard !terms.isEmpty else { return }
             // Sweep before counting so a stale candidate isn't resurrected by the sighting.
@@ -129,6 +147,8 @@ final class UserDictionaryStore: @unchecked Sendable {
             let t = self.now()
             for term in terms {
                 if let i = self.glossary.firstIndex(where: { $0.term == term }) {
+                    // Use-counts and recency are learning too, so they freeze with it.
+                    guard self.enabled else { continue }
                     self.glossary[i].count += 1
                     self.glossary[i].lastSeen = t
                 } else if let i = self.candidates.firstIndex(where: { $0.term == term }) {
@@ -149,11 +169,14 @@ final class UserDictionaryStore: @unchecked Sendable {
     }
 
     func addPair(original: String, replacement: String) {
-        let o = original.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Single-spaced like the matcher sees it; case is kept for display only.
+        let o = original.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
         let r = replacement.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !o.isEmpty, !r.isEmpty else { return }
+        let key = TermReplacer.words(o)
         queue.async {
-            self.pairs.removeAll { $0.original == o }
+            // Matching ignores case, so "Camel" and "camel" must not coexist.
+            self.pairs.removeAll { TermReplacer.words($0.original) == key }
             self.pairs.append(ReplacementPair(original: o, replacement: r, addedAt: self.now()))
             self.capLocked()
             self.persistAndNotifyLocked()
@@ -193,14 +216,17 @@ final class UserDictionaryStore: @unchecked Sendable {
         pairs = file.pairs
         glossary = file.glossary
         candidates = file.candidates
+        learningResumedAt = file.learningResumedAt
     }
 
     private func persistAndNotifyLocked() {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         encoder.dateEncodingStrategy = .iso8601
+        // Unpromoted words stay in memory while learning is off; the README promises nothing new reaches disk.
         let file = DictionaryFile(
-            version: Self.fileVersion, pairs: pairs, glossary: glossary, candidates: candidates)
+            version: Self.fileVersion, pairs: pairs, glossary: glossary,
+            candidates: enabled ? candidates : [], learningResumedAt: learningResumedAt)
         if let data = try? encoder.encode(file) {
             try? data.write(to: fileURL, options: .atomic)
         }
@@ -224,13 +250,19 @@ final class UserDictionaryStore: @unchecked Sendable {
             pairs: pairs.map { "\($0.original)=>\($0.replacement)" }.sorted())
     }
 
-    private func decayLocked() {
+    /// Candidates always age out. The glossary is skipped while learning is off, so switching it off never erodes learned terms.
+    private func decayLocked(includingGlossary: Bool = true) {
         let t = now()
-        func stale(_ entry: GlossaryEntry, days: Double) -> Bool {
-            t.timeIntervalSince(entry.lastSeen) > days * 86_400
+        func stale(_ entry: GlossaryEntry, days: Double, floor: Date = .distantPast) -> Bool {
+            t.timeIntervalSince(max(entry.lastSeen, floor)) > days * 86_400
         }
         candidates.removeAll { stale($0, days: Self.candidateDecayDays) }
-        glossary.removeAll { stale($0, days: Self.glossaryDecayDays) }
+        if includingGlossary, enabled {
+            // The off period must not count against learned terms; lastSeen stays true for the editor.
+            glossary.removeAll {
+                stale($0, days: Self.glossaryDecayDays, floor: learningResumedAt ?? .distantPast)
+            }
+        }
     }
 
     private func capLocked() {
