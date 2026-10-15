@@ -235,8 +235,8 @@ final class CleanupModelController: ObservableObject {
     /// D1: the dictation that hit this already pasted raw (clean() threw);
     /// move off Apple Intelligence so the next one is cleaned again.
     func handleAppleIntelligenceLost() {
-        appleIntelligenceAvailable = false
-        appleIntelligenceUnavailableReason = readAppleIntelligenceUnavailableReason()
+        if appleIntelligenceAvailable { appleIntelligenceAvailable = false }
+        refreshUnavailableReason()
         // pending == nil: refresh runs on every key-down, so without this a
         // fallback switch already in flight would re-notify each dictation.
         // didFallback…: set once, even if the fallback load FAILS — a failed
@@ -253,10 +253,17 @@ final class CleanupModelController: ObservableObject {
         switchCleanupModel(to: target)
     }
 
+    /// `@Published` publishes on every assignment and this runs on every key-down; an unchanged reason must not
+    /// rebuild the menu, the Models pane or the Dictionary window.
+    private func refreshUnavailableReason() {
+        let reason = readAppleIntelligenceUnavailableReason()
+        if reason != appleIntelligenceUnavailableReason { appleIntelligenceUnavailableReason = reason }
+    }
+
     func refreshAppleIntelligenceAvailability() {
         let available = isAppleIntelligenceAvailable()
         if available != appleIntelligenceAvailable { appleIntelligenceAvailable = available }
-        appleIntelligenceUnavailableReason = readAppleIntelligenceUnavailableReason()
+        refreshUnavailableReason()
         if available { didFallbackFromAppleIntelligence = false }
         if !available { handleAppleIntelligenceLost() }
     }

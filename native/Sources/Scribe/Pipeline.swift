@@ -61,7 +61,9 @@ final class DictationPipeline {
     private(set) var cleanupModelName: String = ""
     private let paster: Pasting
     private let history: History
-    private var config: PipelineConfig
+    private let config: PipelineConfig
+    /// Main-only (Settings writes, `keyUp` reads); kept out of `config`, which the runner reads off-main.
+    private var holdThreshold: Double
     private let clock: () -> Double
     private let runner: (@escaping () async -> Void) -> Void
     private let frontmost: () -> pid_t?
@@ -120,6 +122,7 @@ final class DictationPipeline {
         self.paster = paster
         self.history = history
         self.config = config
+        self.holdThreshold = config.holdThreshold
         self.clock = clock
         self.runner = runner ?? DictationPipeline.makeSerialRunner()
         self.frontmost = frontmost
@@ -157,7 +160,7 @@ final class DictationPipeline {
         isArmed = false
         let pcm = recorder.disarm()
         let held = clock() - (downAt ?? 0.0)
-        guard held >= config.holdThreshold else {
+        guard held >= holdThreshold else {
             endHoldIdle()
             return
         }
@@ -204,7 +207,7 @@ final class DictationPipeline {
 
     /// Read at each key release, so a change applies from the next hold.
     func setHoldThreshold(_ seconds: Double) {
-        config.holdThreshold = seconds
+        holdThreshold = seconds
     }
 
     func setCleaner(_ cleaner: CleanupBackend?, name: String) {
