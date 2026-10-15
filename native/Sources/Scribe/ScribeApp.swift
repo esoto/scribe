@@ -42,6 +42,7 @@ final class AppModel: ObservableObject {
     private var pendingEngineName: String?
 
     @Published private(set) var state: PipelineState = .idle
+    private var errorRevert: Task<Void, Never>?
     // Seeded from TCC probes in start(); refreshGrants() keeps it current.
     @Published private(set) var grants: GrantStatus = GrantStatus(microphone: false, accessibility: false, inputMonitoring: false)
     @Published private(set) var activeEngineName: String
@@ -357,6 +358,15 @@ final class AppModel: ObservableObject {
 
     private func applyState(_ newState: PipelineState) {
         state = newState
+        errorRevert?.cancel()
+        if newState == .error {
+            // Sticky for 5 s so the ⚠ glyph and status line can be seen; the next state clears it earlier.
+            errorRevert = Task { @MainActor [weak self] in
+                try? await Task.sleep(nanoseconds: 5_000_000_000)
+                guard !Task.isCancelled, let self, self.state == .error else { return }
+                self.state = .idle
+            }
+        }
         guard settings.sounds else { return }
         if newState == .recording {
             Sounds.play("Pop")
