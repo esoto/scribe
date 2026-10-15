@@ -177,18 +177,20 @@ final class CleanupModelController: ObservableObject {
                     return
                 }
                 self.cleanupLoadInFlight = false
-                guard await newCleaner.isLoaded else {
+                let loaded = await newCleaner.isLoaded
+                // Second cancellation check: the `isLoaded` await is a suspension point a revert or newer switch can
+                // land in. It sits before the failure branch so a stale failure can't clear the newer switch's state.
+                if Task.isCancelled {
+                    await newCleaner.unload()
+                    return
+                }
+                guard loaded else {
                     self.pendingCleanupModel = nil
                     self.cleanupModelStatus = "Couldn't load \(spec.label) — still using \(previousLabel)"
                     self.cleanupModelProgress = nil
                     log("cleanup model switch to \(name) failed to load")
                     self.scheduleFailureClear()
                     self.refreshDownloadedModels()
-                    return
-                }
-                // Second cancellation check: `await newCleaner.isLoaded` above is a suspension point a revert or newer switch can land in.
-                if Task.isCancelled {
-                    await newCleaner.unload()
                     return
                 }
                 self.cleaner = newCleaner

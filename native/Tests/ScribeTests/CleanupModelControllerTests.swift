@@ -445,6 +445,29 @@ final class CleanupModelControllerTests: XCTestCase {
         XCTAssertEqual(h.settings.cleanupModel, "gemma3")
     }
 
+    func testASwitchSupersededWhileCheckingIsLoadedThatEndsNotLoadedDoesNotClobberTheNewerSwitch() async {
+        // Same suspension point, failed load: the stale failure must not clear the newer switch's pending model,
+        // overwrite its status, or arm a clear over it.
+        h.failureStickySeconds = 0.05
+        let c = h.makeController()
+        let (taskA, backendA) = beginSwitch(c, to: .gemma4)
+        backendA.onIsLoaded = { c.switchCleanupModel(to: .gemma4e2b) }
+
+        backendA.releasePreload(loaded: false)
+        await taskA.value
+
+        XCTAssertEqual(c.pendingCleanupModel, "gemma4e2b")
+        XCTAssertEqual(c.cleanupModelStatus, "Loading Gemma 4 E2B…")
+        XCTAssertFalse(h.logs.value.contains("cleanup model switch to gemma4 failed to load"))
+        XCTAssertTrue(h.committed.isEmpty)
+        try? await Task.sleep(nanoseconds: 200_000_000)
+        XCTAssertEqual(c.cleanupModelStatus, "Loading Gemma 4 E2B…", "no stale failure clear over the newer switch")
+
+        h.backends.last!.releasePreload(loaded: true)
+        await c.cleanupSwitchTask?.value
+        XCTAssertEqual(c.activeCleanupModel, "gemma4e2b")
+    }
+
     // MARK: - 7. download notification
 
     func testDownloadProgressDuringASwitchUpdatesStatusAndAnnouncesCompletion() async {
