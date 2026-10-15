@@ -31,6 +31,8 @@ final class PipelineTests: XCTestCase {
         let saved: Box<[Float]>
         let cleanedTexts: Box<String>
         let logs: Box<String>
+        /// "pasted" and "hint: <text>" in the order the sinks fired.
+        let cues: Box<String>
     }
 
     private func makeSyncRunner() -> (@escaping () async -> Void) -> Void {
@@ -54,6 +56,7 @@ final class PipelineTests: XCTestCase {
         let saved = Box<[Float]>()
         let cleanedTexts = Box<String>()
         let logs = Box<String>()
+        let cues = Box<String>()
         let pipeline = DictationPipeline(
             recorder: recorder,
             stt: stt,
@@ -69,11 +72,13 @@ final class PipelineTests: XCTestCase {
             saveFailedAudio: { saved.append($0) },
             onLog: { logs.append($0) },
             onCleaned: { cleanedTexts.append($0) },
-            replacementPairs: { pairs }
+            replacementPairs: { pairs },
+            onHint: { cues.append("hint: \($0)") },
+            onPasted: { cues.append("pasted") }
         )
         return Harness(
             pipeline: pipeline, clock: clock, states: states, notices: notices, saved: saved,
-            cleanedTexts: cleanedTexts, logs: logs)
+            cleanedTexts: cleanedTexts, logs: logs, cues: cues)
     }
 
     private func dictate(_ h: Harness, hold: Double = 1.0) {
@@ -174,6 +179,95 @@ final class PipelineTests: XCTestCase {
         let h = make(cleaner: nil, paster: paster)
         dictate(h)
         XCTAssertEqual(paster.pasted, ["so um hello there world"])
+    }
+
+    // MARK: - Hints and the paste cue
+
+    func testSilentCaptureHintsNoSpeechHeardWithoutANotice() {
+        let h = make(recorder: FakeRecorder(pcm: SILENT))
+        dictate(h)
+        XCTAssertEqual(h.cues.value, ["hint: No speech heard"])
+        XCTAssertEqual(h.notices.value, [])
+        XCTAssertEqual(h.states.value.last, .idle)
+    }
+
+    func testShortTapNeverHints() {
+        let h = make(recorder: FakeRecorder(pcm: SILENT))
+        dictate(h, hold: 0.1)
+        XCTAssertEqual(h.cues.value, [])
+    }
+
+    func testCleanupTimeoutPastesRawThenHintsWhy() {
+        let h = make(cleaner: FakeCleaner(hang: true), config: PipelineConfig(cleanupTimeout: 0.05))
+        dictate(h)
+        XCTAssertEqual(h.cues.value, ["pasted", "hint: Pasted raw — cleanup timed out"])
+    }
+
+    func testEveryCleanupSkipHintsItsOwnReason() {
+        let cases: [(cleaner: FakeCleaner, stt: FakeStt, hint: String)] = [
+            (FakeCleaner(err: TestError(message: "boom")), FakeStt(), "Pasted raw — cleanup failed"),
+            (FakeCleaner(out: ""), FakeStt(), "Pasted raw — cleanup output rejected"),
+            (FakeCleaner(out: "a much longer rewrite than anything the speaker said"), FakeStt(),
+                "Pasted raw — cleanup output rejected"),
+            (FakeCleaner(out: "el perro es de la mesa con los"), FakeStt(text: "the dog is on the table with you"),
+                "Pasted raw — cleanup output rejected"),
+        ]
+        for (cleaner, stt, hint) in cases {
+            let h = make(stt: stt, cleaner: cleaner)
+            dictate(h)
+            XCTAssertEqual(h.cues.value, ["pasted", "hint: \(hint)"])
+        }
+    }
+
+    func testSuccessfulCleanupCuesThePasteWithoutAHint() {
+        let h = make()
+        dictate(h)
+        XCTAssertEqual(h.cues.value, ["pasted"])
+    }
+
+    func testCleanupDisabledPastesWithoutAHint() {
+        let h = make()
+        h.pipeline.cleanupEnabled = false
+        dictate(h)
+        XCTAssertEqual(h.cues.value, ["pasted"])
+    }
+
+    func testTooShortToCleanPastesWithoutAHint() {
+        let h = make(stt: FakeStt(text: "just three words"))
+        dictate(h)
+        XCTAssertEqual(h.cues.value, ["pasted"])
+    }
+
+    func testNoCleanerPastesWithoutAHint() {
+        let h = make(cleaner: nil)
+        dictate(h)
+        XCTAssertEqual(h.cues.value, ["pasted"])
+    }
+
+    func testAFailedPasteCuesNothingEvenWhenCleanupWasSkipped() {
+        let h = make(
+            cleaner: FakeCleaner(err: TestError(message: "boom")),
+            paster: FakePaster(err: PasteError(message: "secure input")))
+        dictate(h)
+        XCTAssertEqual(h.cues.value, [])
+    }
+
+    func testAGuardedPasteThatOnlyCopiedCuesNothing() {
+        let h = make(
+            cleaner: FakeCleaner(err: TestError(message: "boom")),
+            paster: FakePaster(err: PasteGuardError(notice: "Focus changed — text copied, press ⌘V")))
+        dictate(h)
+        XCTAssertEqual(h.cues.value, [])
+    }
+
+    func testTranscriptionFailureAndEmptyTranscriptCueNothing() {
+        let failed = make(stt: FakeStt(err: SttError(message: "model missing")))
+        dictate(failed)
+        XCTAssertEqual(failed.cues.value, [])
+
+        let empty = make(stt: FakeStt(text: ""))
+        dictate(empty)
+        XCTAssertEqual(empty.cues.value, [])
     }
 
     func testSttErrorSavesAudioAndNotifies() {

@@ -137,7 +137,9 @@ final class AppModel: ObservableObject {
                     onLog: log,
                     // Store is thread-safe and observe() is fire-and-forget: no main-actor hop.
                     onCleaned: { [dictionary] text in dictionary.observe(cleanedText: text) },
-                    replacementPairs: { [dictionary] in dictionary.allPairs }
+                    replacementPairs: { [dictionary] in dictionary.allPairs },
+                    onHint: sinks.onHint,
+                    onPasted: sinks.onPasted
                 )
                 pipeline.setCleaner(cleanupModels.cleaner, name: cleanupModels.activeCleanupModel)
                 return pipeline
