@@ -26,6 +26,7 @@ final class CleanupModelControllerTests: XCTestCase {
         var afmReason: String?
         var snapshot = DictionarySnapshot(pairs: [], glossary: [])
         var initialBackendLoaded = false
+        var failureStickySeconds: Double = 10
         let statuses = Locked<[CleanupModelID: CleanupModelStore.Status]>([.gemma3: .downloaded(bytes: 100)])
         let statusComputations = Locked(0)
         let deletedRepos = Locked<[String]>([])
@@ -78,6 +79,7 @@ final class CleanupModelControllerTests: XCTestCase {
                 },
                 notify: { self.notifications.append($0) },
                 touchIdle: { self.touchIdleCalls += 1 },
+                failureStickySeconds: failureStickySeconds,
                 log: { line in logs.mutate { $0.append(line) } })
         }
     }
@@ -276,6 +278,44 @@ final class CleanupModelControllerTests: XCTestCase {
         XCTAssertTrue(h.logs.value.contains("cleanup model switch to gemma4 failed to load"))
         let refreshed = await eventually { h.statusComputations.value == 2 }
         XCTAssertTrue(refreshed)
+    }
+
+    func testFailureStatusClearsAfterTheStickyWindow() async {
+        h.failureStickySeconds = 0.05
+        let c = h.makeController()
+        let (task, backend) = beginSwitch(c, to: .gemma4)
+        backend.releasePreload(loaded: false)
+        await task.value
+        XCTAssertNotNil(c.cleanupModelStatus)
+
+        let cleared = await eventually { c.cleanupModelStatus == nil }
+
+        XCTAssertTrue(cleared)
+    }
+
+    func testFailureStatusSticksUntilTheWindowEnds() async {
+        let c = h.makeController()
+        let (task, backend) = beginSwitch(c, to: .gemma4)
+        backend.releasePreload(loaded: false)
+        await task.value
+
+        try? await Task.sleep(nanoseconds: 100_000_000)
+
+        XCTAssertEqual(c.cleanupModelStatus, "Couldn't load Gemma 4 E4B — still using Gemma 3 4B")
+    }
+
+    func testANewSwitchReplacesTheFailureAndTheOldWindowDoesNotClearIt() async {
+        h.failureStickySeconds = 0.05
+        let c = h.makeController()
+        let (failed, failedBackend) = beginSwitch(c, to: .gemma4)
+        failedBackend.releasePreload(loaded: false)
+        await failed.value
+
+        _ = beginSwitch(c, to: .gemma4e2b)
+        XCTAssertEqual(c.cleanupModelStatus, "Loading Gemma 4 E2B…")
+        try? await Task.sleep(nanoseconds: 200_000_000)
+
+        XCTAssertEqual(c.cleanupModelStatus, "Loading Gemma 4 E2B…", "the failure's clear must not wipe a newer status")
     }
 
     // MARK: - 4. revert

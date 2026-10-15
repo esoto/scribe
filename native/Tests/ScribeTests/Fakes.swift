@@ -229,6 +229,79 @@ final class FakeCleanupModelBackend: CleanupModelBackend, @unchecked Sendable {
     func clean(_ text: String) async throws -> String { text }
 }
 
+/// An `UnloadableEngine` whose `preload()` can be held open, so a test drives the cancel/supersede/commit
+/// orderings of an engine switch deterministically. Unlike the cleanup backend, one engine instance is shared by
+/// every switch to it, so several held preloads can wait on the same gate (as `LazyModel` coalesces them).
+final class FakeUnloadableEngine: UnloadableEngine, @unchecked Sendable {
+    let name: String
+    private let lock = NSLock()
+    private var _loaded: Bool
+    private var _preloadCalls = 0
+    private var _unloadCalls = 0
+    private var _onIsLoaded: (@MainActor () -> Void)?
+    private var gates: [CheckedContinuation<Void, Never>] = []
+    private var gateReleased = false
+
+    init(name: String, loaded: Bool = false) {
+        self.name = name
+        _loaded = loaded
+    }
+
+    var loaded: Bool {
+        get { lock.withLock { _loaded } }
+        set { lock.withLock { _loaded = newValue } }
+    }
+    var preloadCalls: Int { lock.withLock { _preloadCalls } }
+    var unloadCalls: Int { lock.withLock { _unloadCalls } }
+
+    /// Runs on the main actor inside `isLoaded`, i.e. at the suspension point a controller awaits: lets a test
+    /// land a revert or a newer switch there.
+    var onIsLoaded: (@MainActor () -> Void)? {
+        get { lock.withLock { _onIsLoaded } }
+        set { lock.withLock { _onIsLoaded = newValue } }
+    }
+
+    var isLoaded: Bool {
+        get async {
+            if let hook = onIsLoaded { await MainActor.run { hook() } }
+            return lock.withLock { _loaded }
+        }
+    }
+
+    func preload() async {
+        lock.withLock { _preloadCalls += 1 }
+        // Ignores cancellation, like a real model load.
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            let resumeNow = lock.withLock { () -> Bool in
+                if gateReleased { return true }
+                gates.append(continuation)
+                return false
+            }
+            if resumeNow { continuation.resume() }
+        }
+    }
+
+    /// Lets every held `preload()` return, optionally deciding whether the model ends up loaded.
+    func releasePreload(loaded: Bool? = nil) {
+        let waiting = lock.withLock { () -> [CheckedContinuation<Void, Never>] in
+            if let loaded { _loaded = loaded }
+            gateReleased = true
+            defer { gates = [] }
+            return gates
+        }
+        for continuation in waiting { continuation.resume() }
+    }
+
+    func unload() async {
+        lock.withLock {
+            _unloadCalls += 1
+            _loaded = false
+        }
+    }
+
+    func transcribe(_ pcm: [Float]) async throws -> String { "fake transcript" }
+}
+
 /// Polls main-actor state in 1 ms steps (bounded at ~1 s) so a test waits on a condition, never a fixed delay.
 @MainActor
 func eventually(_ condition: () -> Bool) async -> Bool {
