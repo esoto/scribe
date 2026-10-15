@@ -89,7 +89,7 @@ final class ParakeetEngine: UnloadableEngine {
     enum BiasOutcome: Equatable { case disabled, noCtcModel, noTimings, unmodified, applied, failed }
     private(set) var lastBiasOutcomeForTesting: BiasOutcome = .disabled
 
-    /// Milliseconds the last transcribe spent biasing; written and read only on the serial dictation path.
+    /// Milliseconds the last transcribe spent biasing. Written by each transcribe; after an STT timeout the orphaned call can overwrite it, so bias= is approximate for the next dictation.
     private(set) var lastBiasMs: Int = 0
 
     /// Similarity floor for accepting a rescoring replacement. The library default (0.50-0.60) replaces ordinary words with loose vocab matches; 0.75 trades recall for precision.

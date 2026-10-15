@@ -91,4 +91,80 @@ final class DeadlineTests: XCTestCase {
         for await _ in finished { break }
         try? await Task.sleep(nanoseconds: 100_000_000)
     }
+
+    /// Waits up to a second for the stream's first element; false on timeout, so a regression fails instead of hanging.
+    private func arrived(_ stream: AsyncStream<Void>) async -> Bool {
+        let probe = Task { () -> Bool in
+            for await _ in stream { return true }
+            return false
+        }
+        let timer = Task {
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            probe.cancel()
+        }
+        let result = await probe.value
+        timer.cancel()
+        return result
+    }
+
+    func test_deadline_cancels_a_cooperative_operation() async {
+        let (cancelled, signal) = AsyncStream<Void>.makeStream()
+        do {
+            _ = try await withDeadline(0.05) { () async throws -> Int in
+                do {
+                    try await Task.sleep(nanoseconds: 5_000_000_000)
+                } catch is CancellationError {
+                    signal.yield()
+                    throw CancellationError()
+                }
+                return 0
+            }
+            XCTFail("expected DeadlineExceeded")
+        } catch is DeadlineExceeded {
+        } catch {
+            XCTFail("unexpected error \(error)")
+        }
+        let observed = await arrived(cancelled)
+        XCTAssertTrue(observed, "the operation never observed cancellation after the deadline")
+    }
+
+    func test_caller_cancellation_cancels_a_cooperative_operation() async {
+        let (cancelled, signal) = AsyncStream<Void>.makeStream()
+        let (started, startedSignal) = AsyncStream<Void>.makeStream()
+        let task = Task { () async throws -> Int in
+            try await withDeadline(5.0) { () async throws -> Int in
+                startedSignal.yield()
+                do {
+                    try await Task.sleep(nanoseconds: 5_000_000_000)
+                } catch is CancellationError {
+                    signal.yield()
+                    throw CancellationError()
+                }
+                return 0
+            }
+        }
+        for await _ in started { break }
+        task.cancel()
+        do {
+            _ = try await task.value
+            XCTFail("expected CancellationError")
+        } catch is CancellationError {
+        } catch {
+            XCTFail("unexpected error \(error)")
+        }
+        let observed = await arrived(cancelled)
+        XCTAssertTrue(observed, "the operation never observed the caller's cancellation")
+    }
+
+    func test_a_cancel_that_arrives_before_the_operation_is_tracked_cancels_it_on_track() async {
+        let gate = ResumeOnce<Int>()
+        gate.cancelOperation()
+        let (cancelled, signal) = AsyncStream<Void>.makeStream()
+        let work = Task {
+            do { try await Task.sleep(nanoseconds: 5_000_000_000) } catch { signal.yield() }
+        }
+        gate.track(work)
+        let observed = await arrived(cancelled)
+        XCTAssertTrue(observed, "track ignored a cancel that arrived before it")
+    }
 }

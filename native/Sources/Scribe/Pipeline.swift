@@ -297,14 +297,11 @@ final class DictationPipeline {
 
     /// The failure case is any gate/error that means "use raw", with the reason it was hit.
     private func tryClean(_ raw: String, cleaner: CleanupBackend) async -> Result<String, CleanupSkip> {
-        // withDeadline abandons a late call without cancelling it; cancel explicitly so a cooperative backend
-        // (Gemma's token loop) stops and frees the model, while an uncancellable cold load carries on for the next call.
-        let work = Task { try await cleaner.clean(raw) }
         let out: String
         do {
-            out = Gates.normalize(try await withDeadline(config.cleanupTimeout) { try await work.value })
+            // withDeadline also cancels the call when the deadline fires, so Gemma's token loop frees the model.
+            out = Gates.normalize(try await withDeadline(config.cleanupTimeout) { try await cleaner.clean(raw) })
         } catch {
-            work.cancel()
             return .failure(error is DeadlineExceeded ? .timeout : .error)
         }
         guard !out.isEmpty else { return .failure(.empty) }
