@@ -153,6 +153,8 @@ final class PermissionsModel: ObservableObject {
     /// Grants change in System Settings, which scribe can't observe, so re-probe on a timer and on return to the app.
     /// Without this a revoked permission only shows while the Setup window is open.
     func startWatching() {
+        // Seeded once so the Setup window never shows Request for a frame to a user who already allowed notifications.
+        Task { [weak self] in await self?.refreshNotifications() }
         Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 5_000_000_000)

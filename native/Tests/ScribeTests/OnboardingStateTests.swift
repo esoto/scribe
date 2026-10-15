@@ -195,6 +195,18 @@ final class OnboardingStateTests: XCTestCase {
             OnboardingState.notificationsAccessibilityLabel(.openSystemSettings), "Open Notifications settings")
     }
 
+    func testTitleNamesEachGrant() {
+        XCTAssertEqual(OnboardingState.title(.microphone), "Microphone")
+        XCTAssertEqual(OnboardingState.title(.accessibility), "Accessibility")
+        XCTAssertEqual(OnboardingState.title(.inputMonitoring), "Input Monitoring")
+    }
+
+    func testNotificationsSettingsUrl() {
+        XCTAssertEqual(
+            OnboardingState.notificationsSettingsUrl.absoluteString,
+            "x-apple.systempreferences:com.apple.Notifications-Settings.extension")
+    }
+
     func testButtonTitleRequest() {
         XCTAssertEqual(OnboardingState.buttonTitle(.request), "Request")
     }
@@ -300,6 +312,14 @@ final class OnboardingStateTests: XCTestCase {
         XCTAssertEqual(
             glyphAccessibilityValue(.idle, progress: 0.42, needsAttention: false),
             "downloading, 42 percent")
+    }
+
+    func testGlyphValueNeedsAttentionBeatsDownload() {
+        XCTAssertEqual(glyphAccessibilityValue(.idle, progress: 0.42, needsAttention: true), "needs attention")
+    }
+
+    func testGlyphValueActiveStateBeatsNeedsAttention() {
+        XCTAssertEqual(glyphAccessibilityValue(.recording, progress: 0.42, needsAttention: true), "recording")
     }
 
     func testGlyphIdleFinishedDownloadIsIdle() {
