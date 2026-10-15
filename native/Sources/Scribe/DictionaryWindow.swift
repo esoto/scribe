@@ -37,9 +37,9 @@ func glossaryRowDetail(count: Int, lastSeen: Date, now: Date = Date()) -> String
     return "seen \(count)× · \(when)"
 }
 
-/// Mutations go through `AppModel`, which forwards to `UserDictionaryStore`.
+/// Mutations go through `DictionaryModel`, which forwards to `UserDictionaryStore`.
 struct DictionaryWindow: View {
-    @ObservedObject var model: AppModel
+    @ObservedObject var model: DictionaryModel
     @State private var newOriginal = ""
     @State private var newReplacement = ""
 

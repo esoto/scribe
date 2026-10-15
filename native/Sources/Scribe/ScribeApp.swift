@@ -30,6 +30,8 @@ final class AppModel: ObservableObject {
     private let appleIntelligenceLost: AppleIntelligenceLostHandoff
     let idleTracker: IdleTracker
     let dictionary: UserDictionaryStore
+    /// Set at the end of init's phase 2: its closures read `cleaner`, which needs a fully initialized self.
+    private(set) var dictionaryModel: DictionaryModel!
     nonisolated let logger: FileLogger
 
     private(set) var pipeline: DictationPipeline!
@@ -52,13 +54,6 @@ final class AppModel: ObservableObject {
     // and broke click registration on the submenu.
     @Published private(set) var microphones: [AudioInputDevice] = []
     @Published private(set) var launchAtLoginEnabled: Bool = LoginItem.isEnabled
-    // Mirrors dictionary state for the menu and editor; counts/lastSeen can drift without a snapshot change.
-    @Published private(set) var dictionarySnapshot: DictionarySnapshot = .empty
-    @Published private(set) var dictionaryLearningEnabled: Bool
-    @Published private(set) var vocabularyBiasingEnabled: Bool
-    @Published private(set) var glossaryEntries: [GlossaryEntry] = []
-    @Published private(set) var replacementPairs: [ReplacementPair] = []
-    @Published private(set) var unmatchedHeardWords: [GlossaryEntry] = []
     @Published private(set) var activeCleanupModel: String
     @Published private(set) var pendingCleanupModel: String?
     @Published private(set) var cleanupModelStatus: String?
@@ -133,19 +128,7 @@ final class AppModel: ObservableObject {
         self.idleTracker = IdleTracker(unloadAfterMinutes: settings.idleUnloadMinutes)
 
         let dictionary = UserDictionaryStore()
-        dictionary.learningEnabled = settings.dictionaryLearningEnabled
         self.dictionary = dictionary
-        self.dictionaryLearningEnabled = settings.dictionaryLearningEnabled
-        self.vocabularyBiasingEnabled = settings.vocabularyBiasingEnabled
-        self.dictionarySnapshot = dictionary.snapshot
-        self.glossaryEntries = dictionary.allGlossaryEntries
-        self.replacementPairs = dictionary.allPairs
-        self.unmatchedHeardWords = dictionary.unmatchedHeardWords
-        // Before any preload, so the first warm-up uses the dictionary-augmented prompt.
-        self.cleaner.setDictionary(CleanupModelCatalog.promptSnapshot(dictionary.snapshot, for: selection))
-        // Bias vocab uses the full views, not the 30-term capped snapshot.
-        (engines["parakeet"] as? ParakeetEngine)?.setBiasVocabulary(
-            AppModel.biasVocabulary(from: dictionary, settings: settings))
 
         let startingEngine = engines[settings.engine] != nil ? settings.engine : "parakeet"
         self.activeEngineName = startingEngine
@@ -162,6 +145,15 @@ final class AppModel: ObservableObject {
         )
 
         // All stored properties are initialized, so self can be captured by callbacks arriving off the main actor.
+        let parakeet = self.engines["parakeet"] as? ParakeetEngine
+        self.dictionaryModel = DictionaryModel(
+            store: dictionary, settings: settings,
+            setBiasVocabulary: { parakeet?.setBiasVocabulary($0) },
+            currentCleaner: { [unowned self] in self.cleaner },
+            currentSelection: { [unowned self] in self.activeSelection },
+            log: log)
+        // Before any preload, so the first warm-up uses the dictionary-augmented prompt.
+        self.cleaner.setDictionary(CleanupModelCatalog.promptSnapshot(dictionary.snapshot, for: selection))
         let engine = self.engines[startingEngine]!
         let recorder = Recorder(sampleRate: pipelineConfig.sampleRate, engineControl: AVEngineControl(onLog: log))
         recorder.setPreferredInput(uid: settings.microphoneUID)
@@ -201,13 +193,6 @@ final class AppModel: ObservableObject {
             replacementPairs: { [dictionary] in dictionary.allPairs }
         )
         pipeline.setCleaner(self.cleaner, name: selection.storageID)
-
-        dictionary.onChange = { [weak self] snapshot in
-            // Fires on the store's queue; hop to the main actor.
-            Task { @MainActor in
-                self?.applyDictionaryChange(snapshot)
-            }
-        }
 
         progressRelay.set { [weak self] label, fraction in
             Task { @MainActor in
@@ -686,91 +671,6 @@ final class AppModel: ObservableObject {
         settings.cleanupEnabled = on
     }
 
-    // MARK: - User dictionary
-
-    /// Applies a changed snapshot. Rebuilds the warm prefix only if the model is resident;
-    /// a bare preload() would force-load ~2.5 GB.
-    private func applyDictionaryChange(_ snapshot: DictionarySnapshot) {
-        // Store also notifies for sub-cap changes that move these lists without moving the snapshot.
-        glossaryEntries = dictionary.allGlossaryEntries
-        replacementPairs = dictionary.allPairs
-        unmatchedHeardWords = dictionary.unmatchedHeardWords
-
-        // Refresh bias vocab on any change: it reads the full views and the setter is cheap and load-free.
-        (engines["parakeet"] as? ParakeetEngine)?.setBiasVocabulary(
-            AppModel.biasVocabulary(from: dictionary, settings: settings))
-
-        // Warm-prefix rebuild is costly; only do it when the prompt itself changes.
-        guard snapshot != dictionarySnapshot else { return }
-        dictionarySnapshot = snapshot
-        cleaner.setDictionary(CleanupModelCatalog.promptSnapshot(snapshot, for: activeSelection))
-        logger.log(
-            "dictionary updated: \(snapshot.glossary.count) learned terms, \(snapshot.pairs.count) pairs"
-        )
-        Task { [weak self, cleaner] in
-            if await cleaner.isLoaded, self?.cleaner === cleaner {
-                await cleaner.preload()
-            }
-        }
-    }
-
-    /// Re-reads state whose drift doesn't fire onChange (counts, lastSeen).
-    func refreshDictionaryState() {
-        glossaryEntries = dictionary.allGlossaryEntries
-        replacementPairs = dictionary.allPairs
-        unmatchedHeardWords = dictionary.unmatchedHeardWords
-    }
-
-    /// Parakeet bias vocabulary from the full dictionary views plus the curated pack (when enabled).
-    static func biasVocabulary(from dictionary: UserDictionaryStore, settings: AppSettings)
-        -> [BiasTerm]
-    {
-        guard settings.vocabularyBiasingEnabled else { return [] }
-        return BiasVocabularyBuilder.build(
-            pairs: dictionary.allPairs,
-            glossary: dictionary.allGlossaryEntries,
-            includeCuratedPack: true)
-    }
-
-    /// Binds a heard mangling to an existing correction as an exact-match pair.
-    func bindHeardWord(_ heard: String, toReplacement replacement: String) {
-        dictionary.addPair(original: heard, replacement: replacement)
-    }
-
-    func ignoreHeardWord(_ heard: String) {
-        dictionary.ignoreHeardWord(heard)
-    }
-
-    func setDictionaryLearning(_ on: Bool) {
-        dictionaryLearningEnabled = on
-        dictionary.learningEnabled = on
-        settings.dictionaryLearningEnabled = on
-    }
-
-    /// Toggles Parakeet vocabulary biasing and re-pushes the vocabulary (empty when off, so the CTC pass is skipped).
-    func setVocabularyBiasing(_ on: Bool) {
-        vocabularyBiasingEnabled = on
-        settings.vocabularyBiasingEnabled = on
-        (engines["parakeet"] as? ParakeetEngine)?.setBiasVocabulary(
-            AppModel.biasVocabulary(from: dictionary, settings: settings))
-    }
-
-    func clearLearnedTerms() {
-        dictionary.clearLearned()
-    }
-
-    func addReplacementPair(original: String, replacement: String) {
-        dictionary.addPair(original: original, replacement: replacement)
-    }
-
-    func removeReplacementPair(_ original: String) {
-        dictionary.removePair(original: original)
-    }
-
-    func removeGlossaryTerm(_ term: String) {
-        dictionary.removeGlossaryTerm(term)
-    }
-
     func setLaunchAtLogin(_ on: Bool) {
         do {
             if on {
@@ -864,7 +764,7 @@ struct ScribeApp: App {
         }
 
         Window("scribe dictionary", id: dictionaryWindowID) {
-            DictionaryWindow(model: model)
+            DictionaryWindow(model: model.dictionaryModel)
         }
 
         Window("scribe models", id: modelsWindowID) {

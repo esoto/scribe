@@ -70,7 +70,13 @@ private let engineOptions: [(id: String, label: String)] = [
 
 struct MenuBarView: View {
     @ObservedObject var model: AppModel
+    @ObservedObject var dictionaryModel: DictionaryModel
     @Environment(\.openWindow) private var openWindow
+
+    init(model: AppModel) {
+        self.model = model
+        self.dictionaryModel = model.dictionaryModel
+    }
 
     private var statusText: String? {
         menuStatusText(
@@ -163,19 +169,19 @@ struct MenuBarView: View {
             Toggle(
                 "Correct Speech (bias recognizer)",
                 isOn: Binding(
-                    get: { model.vocabularyBiasingEnabled },
-                    set: { model.setVocabularyBiasing($0) }
+                    get: { dictionaryModel.vocabularyBiasingEnabled },
+                    set: { dictionaryModel.setVocabularyBiasing($0) }
                 )
             )
             Toggle(
                 "Learn New Terms",
                 isOn: Binding(
-                    get: { model.dictionaryLearningEnabled },
-                    set: { model.setDictionaryLearning($0) }
+                    get: { dictionaryModel.dictionaryLearningEnabled },
+                    set: { dictionaryModel.setDictionaryLearning($0) }
                 )
             )
             if let note = learningNote(
-                fidelitySafe: model.activeCleanupFidelitySafe, learningOn: model.dictionaryLearningEnabled)
+                fidelitySafe: model.activeCleanupFidelitySafe, learningOn: dictionaryModel.dictionaryLearningEnabled)
             {
                 Text(note)
             }
@@ -183,20 +189,20 @@ struct MenuBarView: View {
                 openDictionaryWindow(openWindow)
             }
             Divider()
-            let learned = menuGlossaryTerms(model.glossaryEntries)
+            let learned = menuGlossaryTerms(dictionaryModel.glossaryEntries)
             if learned.isEmpty {
                 Text("(no learned terms)")
             } else {
                 ForEach(learned, id: \.self) { term in
                     Menu(truncateLabel(term)) {
                         Button("Remove") {
-                            model.removeGlossaryTerm(term)
+                            dictionaryModel.removeGlossaryTerm(term)
                         }
                     }
                 }
                 Divider()
                 Button("Clear Learned Terms") {
-                    model.clearLearnedTerms()
+                    dictionaryModel.clearLearnedTerms()
                 }
             }
         }

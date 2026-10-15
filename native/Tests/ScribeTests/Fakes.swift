@@ -122,3 +122,92 @@ final class Box<T> {
     private(set) var value: [T] = []
     func append(_ v: T) { value.append(v) }
 }
+
+/// A `CleanupModelBackend` whose `preload()` can be held open, so a test drives the cancel/supersede/commit
+/// orderings of a model switch deterministically instead of racing real timing.
+final class FakeCleanupModelBackend: CleanupModelBackend, @unchecked Sendable {
+    private let lock = NSLock()
+    private var _loaded: Bool
+    private var _holdsMemory: Bool
+    private var _preloadCalls = 0
+    private var _unloadCalls = 0
+    private var _dictionaries: [DictionarySnapshot] = []
+    private var _events: [String] = []
+    private var gate: CheckedContinuation<Void, Never>?
+    private var gateReleased = false
+    private let gated: Bool
+
+    init(loaded: Bool = false, gatedPreload: Bool = false, holdsMemory: Bool = true) {
+        _loaded = loaded
+        gated = gatedPreload
+        _holdsMemory = holdsMemory
+    }
+
+    var loaded: Bool {
+        get { lock.withLock { _loaded } }
+        set { lock.withLock { _loaded = newValue } }
+    }
+    var preloadCalls: Int { lock.withLock { _preloadCalls } }
+    var unloadCalls: Int { lock.withLock { _unloadCalls } }
+    var dictionaries: [DictionarySnapshot] { lock.withLock { _dictionaries } }
+    /// "setDictionary", "preload", "unload" in call order.
+    var events: [String] { lock.withLock { _events } }
+    var holdsMemory: Bool { lock.withLock { _holdsMemory } }
+
+    var isLoaded: Bool { get async { lock.withLock { _loaded } } }
+
+    func setDictionary(_ snapshot: DictionarySnapshot) {
+        lock.withLock {
+            _dictionaries.append(snapshot)
+            _events.append("setDictionary")
+        }
+    }
+
+    func preload() async {
+        lock.withLock {
+            _preloadCalls += 1
+            _events.append("preload")
+        }
+        guard gated else { return }
+        // Ignores cancellation, like a real model load.
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            let resumeNow = lock.withLock { () -> Bool in
+                if gateReleased { return true }
+                gate = continuation
+                return false
+            }
+            if resumeNow { continuation.resume() }
+        }
+    }
+
+    /// Lets a held `preload()` return, optionally deciding whether the model ends up loaded.
+    func releasePreload(loaded: Bool? = nil) {
+        let continuation = lock.withLock { () -> CheckedContinuation<Void, Never>? in
+            if let loaded { _loaded = loaded }
+            gateReleased = true
+            defer { gate = nil }
+            return gate
+        }
+        continuation?.resume()
+    }
+
+    func unload() async {
+        lock.withLock {
+            _unloadCalls += 1
+            _loaded = false
+            _events.append("unload")
+        }
+    }
+
+    func clean(_ text: String) async throws -> String { text }
+}
+
+/// Polls main-actor state in 1 ms steps (bounded at ~1 s) so a test waits on a condition, never a fixed delay.
+@MainActor
+func eventually(_ condition: () -> Bool) async -> Bool {
+    for _ in 0..<1000 {
+        if condition() { return true }
+        try? await Task.sleep(nanoseconds: 1_000_000)
+    }
+    return condition()
+}
