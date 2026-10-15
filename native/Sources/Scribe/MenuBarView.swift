@@ -124,6 +124,17 @@ struct MenuBarView: View {
             )
         )
 
+        Toggle(
+            "Enhance Audio (experimental)",
+            isOn: Binding(
+                get: { model.enhanceAudioEnabled },
+                set: { model.setEnhanceAudio($0) }
+            )
+        )
+        .help(
+            "Runs LocalVQE noise suppression before transcription. Measured to lower accuracy on synthetic noise; try it against your own background noise."
+        )
+
         Menu("History") {
             let items = model.history.items()
             if items.isEmpty {
