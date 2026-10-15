@@ -4,7 +4,7 @@ import AppKit
 import CoreGraphics
 import SwiftUI
 
-/// Thin TCC wrappers; excluded from unit tests. Verify manually. The logic consuming them is in `OnboardingState`.
+/// Thin TCC wrappers; excluded from unit tests. Verify manually. The logic consuming them is in `OnboardingState` and `PermissionsModel`.
 enum TCC {
     static func microphoneGranted() -> Bool {
         AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
@@ -37,11 +37,12 @@ enum TCC {
 
 /// First-run and Doctor permission window. Polls `TCC` every 2 s while open.
 struct OnboardingWindow: View {
-    @ObservedObject var model: AppModel
+    @ObservedObject var permissions: PermissionsModel
+    let settings: AppSettings
     @State private var testText: String = ""
 
     private var highlighted: Grant? {
-        if case .request(let grant) = OnboardingState.nextStep(model.grants) {
+        if case .request(let grant) = OnboardingState.nextStep(permissions.grants) {
             return grant
         }
         return nil
@@ -74,10 +75,10 @@ struct OnboardingWindow: View {
                 )
             }
 
-            if model.grantsOk {
+            if permissions.grantsOk {
                 Divider()
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Hold \(model.settings.hotkey.displayName) and speak")
+                    Text("Hold \(settings.hotkey.displayName) and speak")
                         .font(.headline)
                     TextField("Try dictating here…", text: $testText)
                         .textFieldStyle(.roundedBorder)
@@ -86,7 +87,7 @@ struct OnboardingWindow: View {
 
             Divider()
             HStack {
-                Text(OnboardingState.summary(model.grants))
+                Text(OnboardingState.summary(permissions.grants))
                     .foregroundStyle(.secondary)
                 Spacer()
                 // "Error — check log" names this file; this is the one place in the app that opens it.
@@ -139,7 +140,7 @@ struct OnboardingWindow: View {
             Spacer()
 
             if !granted {
-                Button("Request") { request(grant) }
+                Button("Request") { Task { await permissions.request(grant) } }
                 Button("Open Settings") { openSettings(grant) }
             }
         }
@@ -152,23 +153,9 @@ struct OnboardingWindow: View {
 
     private func isGranted(_ grant: Grant) -> Bool {
         switch grant {
-        case .microphone: return model.grants.microphone
-        case .accessibility: return model.grants.accessibility
-        case .inputMonitoring: return model.grants.inputMonitoring
-        }
-    }
-
-    private func request(_ grant: Grant) {
-        switch grant {
-        case .microphone:
-            Task {
-                _ = await TCC.requestMicrophone()
-                model.refreshGrants()
-            }
-        case .accessibility:
-            TCC.requestAccessibility()
-        case .inputMonitoring:
-            TCC.requestInputMonitoring()
+        case .microphone: return permissions.grants.microphone
+        case .accessibility: return permissions.grants.accessibility
+        case .inputMonitoring: return permissions.grants.inputMonitoring
         }
     }
 
@@ -179,7 +166,7 @@ struct OnboardingWindow: View {
     /// SwiftUI cancels the `.task` when the window closes, which stops this loop.
     private func pollLoop() async {
         while !Task.isCancelled {
-            model.refreshGrants()
+            permissions.refreshGrants()
             // Stays at 2 s even when all green, so revocations are still noticed.
             try? await Task.sleep(nanoseconds: 2_000_000_000)
         }

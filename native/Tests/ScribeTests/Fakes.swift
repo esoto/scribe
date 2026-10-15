@@ -211,3 +211,39 @@ func eventually(_ condition: () -> Bool) async -> Bool {
     }
     return condition()
 }
+
+/// Scripted TCC answers; `requestMicrophone` can flip the answer the way the user's click does.
+final class FakeTCCProbe: TCCProbing {
+    var microphone = false
+    var accessibility = false
+    var inputMonitoring = false
+    /// What the mic prompt does to the mic grant when it resolves.
+    var microphoneGrantedByRequest = false
+    private(set) var events: [String] = []
+
+    func resetEvents() { events.removeAll() }
+
+    func microphoneGranted() -> Bool {
+        events.append("probe-microphone")
+        return microphone
+    }
+
+    func accessibilityGranted() -> Bool {
+        events.append("probe-accessibility")
+        return accessibility
+    }
+
+    func inputMonitoringGranted() -> Bool {
+        events.append("probe-inputMonitoring")
+        return inputMonitoring
+    }
+
+    func requestMicrophone() async -> Bool {
+        events.append("request-microphone")
+        microphone = microphoneGrantedByRequest
+        return microphoneGrantedByRequest
+    }
+
+    func requestAccessibility() { events.append("request-accessibility") }
+    func requestInputMonitoring() { events.append("request-inputMonitoring") }
+}

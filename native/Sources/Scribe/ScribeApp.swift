@@ -32,6 +32,8 @@ final class AppModel: ObservableObject {
     let dictionary: UserDictionaryStore
     /// Set at the end of init's phase 2: its closures read `cleaner`, which needs a fully initialized self.
     private(set) var dictionaryModel: DictionaryModel!
+    /// Same phase-2 construction as `dictionaryModel`: its reactions call back into this model.
+    private(set) var permissions: PermissionsModel!
     nonisolated let logger: FileLogger
 
     private(set) var pipeline: DictationPipeline!
@@ -45,8 +47,6 @@ final class AppModel: ObservableObject {
     @Published private(set) var state: PipelineState = .idle
     private var errorRevert: Task<Void, Never>?
     private var holdWatchdog: Task<Void, Never>?
-    // Seeded from TCC probes in start(); refreshGrants() keeps it current.
-    @Published private(set) var grants: GrantStatus = GrantStatus(microphone: false, accessibility: false, inputMonitoring: false)
     @Published private(set) var activeEngineName: String
     @Published private(set) var cleanupEnabled: Bool
     @Published private(set) var microphoneUID: String?
@@ -68,9 +68,6 @@ final class AppModel: ObservableObject {
     var activeCleanupFidelitySafe: Bool { activeSelection.fidelitySafe }
 
     private let pipelineConfig: PipelineConfig
-
-    var glyph: String { menuBarGlyph(state, progress: cleanupModelProgress, needsAttention: !grantsOk) }
-    var grantsOk: Bool { grants.microphone && grants.accessibility && grants.inputMonitoring }
 
     init() {
         let defaults = UserDefaults.standard
@@ -154,6 +151,10 @@ final class AppModel: ObservableObject {
             log: log)
         // Before any preload, so the first warm-up uses the dictionary-augmented prompt.
         self.cleaner.setDictionary(CleanupModelCatalog.promptSnapshot(dictionary.snapshot, for: selection))
+        self.permissions = PermissionsModel(
+            probe: LiveTCCProbe(),
+            onMicrophoneGranted: { [unowned self] in self.prewarmRecorderIfGranted() },
+            onInputMonitoringGranted: { [unowned self] in self.activateHotkeyIfNeeded() })
         let engine = self.engines[startingEngine]!
         let recorder = Recorder(sampleRate: pipelineConfig.sampleRate, engineControl: AVEngineControl(onLog: log))
         recorder.setPreferredInput(uid: settings.microphoneUID)
@@ -226,20 +227,17 @@ final class AppModel: ObservableObject {
     private func start() {
         // last_failed.wav is for debugging a recent failure, not for keeping audio around.
         FileLogger.expireFailedAudio()
-        // Cached TCC reads (no prompt), seeded early so the launch auto-open decision is correct.
-        grants.microphone = TCC.microphoneGranted()
-        grants.accessibility = TCC.accessibilityGranted()
         // Only prewarms if already granted; the prompt comes only from the onboarding Request button.
         prewarmRecorderIfGranted()
 
         hotkeyMonitor.onModifierEvent = { [logger] line in logger.log("tap: \(line)") }
         do {
             try hotkeyMonitor.install()
-            grants.inputMonitoring = true
+            permissions.setInputMonitoring(true)
             logger.log("hotkey installed (key=\(settings.hotkey.rawValue))")
         } catch {
             logger.log("hotkey install failed: \(error)")
-            grants.inputMonitoring = false
+            permissions.setInputMonitoring(false)
         }
 
         // Sleep mid-hold can swallow the key-up; the buffered audio must not paste into whatever has focus on wake.
@@ -276,7 +274,7 @@ final class AppModel: ObservableObject {
         // Seed the idle tracker: due() requires a touch, so without this an unused launch pins ~3 GB forever.
         idleTracker.touch(now: ProcessInfo.processInfo.systemUptime)
         startIdleUnloadLoop()
-        startGrantWatch()
+        permissions.startWatching()
     }
 
     private func preloadAtStartup() {
@@ -336,23 +334,6 @@ final class AppModel: ObservableObject {
                     await self.unloadIdleModels()
                 }
             }
-        }
-    }
-
-    /// Grants change in System Settings, which scribe can't observe, so re-probe on a timer and on return to the app.
-    /// Without this a revoked permission only shows while the Setup window is open.
-    private func startGrantWatch() {
-        Task { [weak self] in
-            while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 5_000_000_000)
-                guard !Task.isCancelled, let self else { return }
-                self.refreshGrants()
-            }
-        }
-        NotificationCenter.default.addObserver(
-            forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main
-        ) { [weak self] _ in
-            Task { @MainActor in self?.refreshGrants() }
         }
     }
 
@@ -424,7 +405,7 @@ final class AppModel: ObservableObject {
         idleTracker.touch(now: ProcessInfo.processInfo.systemUptime)
         refreshAppleIntelligenceAvailability()
         // Deferred: a flip can reinstall the event tap, which must not happen inside the tap's own callback.
-        Task { [weak self] in self?.refreshGrants() }
+        Task { [weak self] in self?.permissions.refreshGrants() }
 
         if let engine = engines[activeEngineName] {
             let cleaner = self.cleaner
@@ -690,42 +671,21 @@ final class AppModel: ObservableObject {
 
     // MARK: - Onboarding
 
-    /// Re-reads all probes. A false→true flip on mic or Input Monitoring reacts without a restart.
-    func refreshGrants() {
-        let fresh = GrantStatus(
-            microphone: TCC.microphoneGranted(),
-            accessibility: TCC.accessibilityGranted(),
-            inputMonitoring: TCC.inputMonitoringGranted())
-        let change = GrantChange(from: grants, to: fresh)
-
-        // Publish only on change: each write rebuilds the menu bar and closes any open submenu.
-        if change.publish {
-            grants = fresh
-        }
-        if change.microphoneNewlyGranted {
-            prewarmRecorderIfGranted()
-        }
-        if change.inputMonitoringNewlyGranted {
-            // Reinstalls the tap; on failure it flips grants.inputMonitoring back to false itself.
-            activateHotkeyIfNeeded()
-        }
-    }
-
     /// Live-activates the hotkey tap after Input Monitoring is granted. Must run on main.
     func activateHotkeyIfNeeded() {
         do {
             try hotkeyMonitor.reinstall()
-            grants.inputMonitoring = true
+            permissions.setInputMonitoring(true)
         } catch {
             logger.log("hotkey reinstall failed: \(error)")
-            grants.inputMonitoring = false
+            permissions.setInputMonitoring(false)
         }
     }
 
     /// Best-effort prewarm of the recorder's audio engine without starting capture. Guarded on the
     /// current grant so it never triggers the mic prompt; failure is non-fatal.
     func prewarmRecorderIfGranted() {
-        guard grants.microphone else { return }
+        guard permissions.grants.microphone else { return }
         do {
             try recorder.prewarm()
             logger.log("recorder prewarmed")
@@ -760,7 +720,7 @@ struct ScribeApp: App {
         .menuBarExtraStyle(.menu)
 
         Window("scribe setup", id: onboardingWindowID) {
-            OnboardingWindow(model: model)
+            OnboardingWindow(permissions: model.permissions, settings: model.settings)
         }
 
         Window("scribe dictionary", id: dictionaryWindowID) {
@@ -776,15 +736,21 @@ struct ScribeApp: App {
 /// Menu bar glyph label; also the launch-time auto-open trigger for onboarding.
 private struct MenuBarLabel: View {
     @ObservedObject var model: AppModel
+    @ObservedObject var permissions: PermissionsModel
     @Environment(\.openWindow) private var openWindow
     @State private var didAutoOpen = false
 
+    init(model: AppModel) {
+        self.model = model
+        self.permissions = model.permissions
+    }
+
     var body: some View {
-        Text(model.glyph)
+        Text(menuBarGlyph(model.state, progress: model.cleanupModelProgress, needsAttention: !permissions.grantsOk))
             .onAppear {
                 guard !didAutoOpen else { return }
                 didAutoOpen = true
-                guard !OnboardingState.missing(model.grants).isEmpty else { return }
+                guard !OnboardingState.missing(permissions.grants).isEmpty else { return }
                 openOnboarding(openWindow)
             }
     }
