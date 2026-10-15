@@ -35,18 +35,39 @@ func attentionText(for grants: GrantStatus) -> String? {
     return "\(name) is off — open Setup / Doctor…"
 }
 
-/// Menu status line. While idle a missing permission wins, since dictation is broken until it's fixed.
-/// An STT model download wins while transcribing: a dictation made during the
-/// upgrade download waits on it, and "Transcribing…" alone would look like a hang.
+/// Menu status line. While idle: a missing permission wins (dictation is broken until it's fixed), then an STT
+/// download, then an engine switch in progress or failed, then a transient hint from the last dictation, then a
+/// cleanup-model status. An STT model download wins while transcribing: a dictation made during the upgrade
+/// download waits on it, and "Transcribing…" alone would look like a hang.
 func menuStatusText(
-    _ state: PipelineState, sttDownload: String?, cleanupStatus: String?, attention: String?
+    _ state: PipelineState, sttDownload: String?, engineStatus: String? = nil, hint: String? = nil,
+    cleanupStatus: String?, attention: String?
 ) -> String? {
     switch state {
-    case .idle: return attention ?? sttDownload ?? cleanupStatus
+    case .idle: return attention ?? sttDownload ?? engineStatus ?? hint ?? cleanupStatus
     case .recording: return "Recording…"
     case .processing: return sttDownload ?? "Transcribing…"
     case .error: return "Error — check log"
     }
+}
+
+/// The idle status line when nothing needs attention: what the next dictation will use.
+func nowLine(engine: String, cleanupModel: String, cleanupEnabled: Bool) -> String {
+    cleanupEnabled ? "\(engine) · \(cleanupModel)" : "\(engine) · cleanup off"
+}
+
+/// Shown for a few seconds after a dictation pasted the raw transcript, so raw and cleaned stop looking alike.
+func pastedRawHint(_ skip: CleanupSkip) -> String {
+    switch skip {
+    case .timeout: return "Pasted raw — cleanup timed out"
+    case .error: return "Pasted raw — cleanup failed"
+    case .empty, .length, .language: return "Pasted raw — cleanup output rejected"
+    }
+}
+
+/// History row: the text, plus a marker when cleanup did not run so the user can tell the two apart.
+func historyRowLabel(_ record: DictationRecord) -> String {
+    record.cleaned ? truncateLabel(record.final) : truncateLabel(record.final) + " · raw"
 }
 
 func truncateLabel(_ text: String, n: Int = 40) -> String {
