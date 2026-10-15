@@ -154,9 +154,11 @@ final class DictionaryModelTests: XCTestCase {
 
         model.applyDictionaryChange(DictionarySnapshot(pairs: [pair("a", "b")], glossary: []))
         // The switch commits before the re-warm task resumes: the captured cleaner is stale.
+        let stale = cleaner!
         cleaner = replacement
         await model.rewarmTask?.value
 
+        XCTAssertEqual(stale.preloadCalls, 0, "re-warming a replaced cleaner would resurrect an orphan")
         XCTAssertEqual(replacement.preloadCalls, 0)
     }
 
