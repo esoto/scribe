@@ -119,6 +119,20 @@ final class PipelineTests: XCTestCase {
         XCTAssertEqual(stt.calls, 0)
     }
 
+    func testSetHoldThresholdChangesWhatCountsAsATap() {
+        let stt = FakeStt()
+        let h = make(stt: stt)
+
+        h.pipeline.setHoldThreshold(1.0)
+        dictate(h, hold: 0.5)
+        XCTAssertEqual(stt.calls, 0)
+        XCTAssertEqual(h.states.value.last, .idle)
+
+        h.pipeline.setHoldThreshold(0.3)
+        dictate(h, hold: 0.5)
+        XCTAssertEqual(stt.calls, 1)
+    }
+
     func testEnergyGateDiscardsSilence() {
         let stt = FakeStt()
         let h = make(recorder: FakeRecorder(pcm: SILENT), stt: stt)

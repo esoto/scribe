@@ -17,6 +17,7 @@ final class AppModel: ObservableObject {
     let dictionaryModel: DictionaryModel
     let permissions: PermissionsModel
     let dictation: DictationCoordinator
+    let settingsModel: SettingsModel
     let cleanupModels: CleanupModelController
     let engineController: EngineController
     nonisolated let logger: FileLogger
@@ -144,8 +145,8 @@ final class AppModel: ObservableObject {
                 pipeline.setCleaner(cleanupModels.cleaner, name: cleanupModels.activeCleanupModel)
                 return pipeline
             },
-            makeHotkeyMonitor: { onDown, onUp in
-                HotkeyMonitor(key: settings.hotkey, onDown: onDown, onUp: onUp)
+            makeHotkeyMonitor: { key, onDown, onUp in
+                HotkeyMonitor(key: key, onDown: onDown, onUp: onUp)
             },
             notifier: UserNotifier(),
             playSound: { Sounds.play($0) },
@@ -156,6 +157,12 @@ final class AppModel: ObservableObject {
         lateDictation = dictation
         self.permissions = permissions
         self.dictation = dictation
+        self.settingsModel = SettingsModel(
+            settings: settings,
+            onHotkeyChanged: { dictation.setHotkey($0) },
+            onHoldThresholdChanged: { dictation.pipeline.setHoldThreshold($0) },
+            onIdleMinutesChanged: { idleTracker.setUnloadAfterMinutes($0) },
+            onHistorySizeChanged: { history.setMaxLen($0) })
 
         let parakeet = engines["parakeet"] as? ParakeetEngine
         self.dictionaryModel = DictionaryModel(
@@ -233,8 +240,9 @@ final class AppModel: ObservableObject {
         return "models not ready after \(took)s — \(failed.joined(separator: " and ")) failed to load"
     }
 
+    /// Runs even while unloading is off: `due` answers false then, and a later Settings change takes effect
+    /// without a relaunch.
     private func startIdleUnloadLoop() {
-        guard idleTracker.enabled else { return }
         Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 60_000_000_000)
@@ -343,15 +351,15 @@ struct ScribeApp: App {
         .menuBarExtraStyle(.menu)
 
         Window("scribe setup", id: onboardingWindowID) {
-            OnboardingWindow(permissions: model.permissions, settings: model.settings)
+            OnboardingWindow(permissions: model.permissions, settingsModel: model.settingsModel)
         }
 
         Window("scribe dictionary", id: dictionaryWindowID) {
             DictionaryWindow(model: model.dictionaryModel)
         }
 
-        Window("scribe models", id: modelsWindowID) {
-            ModelsWindow(model: model.cleanupModels)
+        Window("scribe settings", id: settingsWindowID) {
+            SettingsWindow(model: model)
         }
     }
 }

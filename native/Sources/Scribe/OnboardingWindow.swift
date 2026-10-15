@@ -38,7 +38,7 @@ enum TCC {
 /// First-run and Doctor permission window. Polls `TCC` every 2 s while open.
 struct OnboardingWindow: View {
     @ObservedObject var permissions: PermissionsModel
-    let settings: AppSettings
+    @ObservedObject var settingsModel: SettingsModel
     @State private var testText: String = ""
 
     private var highlighted: Grant? {
@@ -78,7 +78,7 @@ struct OnboardingWindow: View {
             if permissions.grantsOk {
                 Divider()
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Hold \(settings.hotkey.displayName) and speak")
+                    Text("Hold \(settingsModel.hotkey.displayName) and speak")
                         .font(.headline)
                     TextField("Try dictating here…", text: $testText)
                         .textFieldStyle(.roundedBorder)
@@ -106,14 +106,11 @@ struct OnboardingWindow: View {
         .task {
             await pollLoop()
         }
-        // LSUIElement has no ⌘Tab entry, so promote to a regular app while this window is open.
         .onAppear {
-            NSApp.setActivationPolicy(.regular)
+            WindowActivation.shared.windowAppeared()
             NSApp.activate(ignoringOtherApps: true)
         }
-        .onDisappear {
-            NSApp.setActivationPolicy(.accessory)
-        }
+        .onDisappear { WindowActivation.shared.windowDisappeared() }
     }
 
     @ViewBuilder

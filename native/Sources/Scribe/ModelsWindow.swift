@@ -1,15 +1,6 @@
 import AppKit
 import SwiftUI
 
-/// Scene id for the cleanup-models window, shared by the menu's
-/// "Manage Models…" item and the scene in `ScribeApp`.
-let modelsWindowID = "models"
-
-func openModelsWindow(_ openWindow: OpenWindowAction) {
-    NSApp.activate(ignoringOtherApps: true)
-    openWindow(id: modelsWindowID)
-}
-
 struct ModelRow: Identifiable, Equatable {
     let id: CleanupModelID
     let label: String
@@ -79,9 +70,9 @@ func deleteConfirmationTitle(_ row: ModelRow?) -> String {
     return "Delete \(row.label) (\(formatBytes(row.bytesOnDisk)))?"
 }
 
-/// Lists every cleanup model with its disk state: use one, or delete a
+/// Settings › Models: every cleanup model with its disk state. Use one, cancel a switch in flight, or delete a
 /// downloaded one you're done trying. The model in use can't be deleted.
-struct ModelsWindow: View {
+struct ModelsPane: View {
     @ObservedObject var model: CleanupModelController
     @State private var pendingDelete: ModelRow?
 
@@ -94,7 +85,6 @@ struct ModelsWindow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Cleanup Models").font(.title2.bold())
             if model.activeCleanupModel == "custom" {
                 Text("A custom model is set via `defaults write dev.esoto.scribe cleanupModelPath`; it overrides this list.")
                     .font(.caption).foregroundStyle(.secondary)
@@ -120,7 +110,15 @@ struct ModelsWindow: View {
                                 Text(row.detail).font(.caption).foregroundStyle(.secondary)
                             }
                             Spacer()
-                            Button("Use") { model.switchCleanupModel(to: row.id) }
+                            if row.canCancel {
+                                // Selecting the model already in use is the revert path.
+                                Button("Cancel") {
+                                    if let active = CleanupModelID(rawValue: model.activeCleanupModel) {
+                                        model.switchCleanupModel(to: active)
+                                    }
+                                }
+                            }
+                            Button(row.useLabel) { model.switchCleanupModel(to: row.id) }
                                 .disabled(!row.canUse || model.activeCleanupModel == "custom")
                             Button {
                                 pendingDelete = row
@@ -135,11 +133,16 @@ struct ModelsWindow: View {
                 }
                 .padding(4)
             }
-            Text("On disk: \(formatBytes(rows.map(\.bytesOnDisk).reduce(0, +)))")
-                .font(.caption).foregroundStyle(.secondary)
+            HStack {
+                Text("On disk: \(formatBytes(rows.map(\.bytesOnDisk).reduce(0, +)))")
+                    .font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                Button("Show in Finder") {
+                    NSWorkspace.shared.activateFileViewerSelecting([ModelStore.baseDirectory])
+                }
+            }
         }
-        .padding(20)
-        .frame(width: 480)
+        .padding(16)
         .onAppear {
             model.refreshDownloadedModels()
             model.refreshAppleIntelligenceAvailability()

@@ -61,7 +61,7 @@ final class DictationPipeline {
     private(set) var cleanupModelName: String = ""
     private let paster: Pasting
     private let history: History
-    private let config: PipelineConfig
+    private var config: PipelineConfig
     private let clock: () -> Double
     private let runner: (@escaping () async -> Void) -> Void
     private let frontmost: () -> pid_t?
@@ -200,6 +200,11 @@ final class DictationPipeline {
     func setEngine(_ engine: SttEngine, name: String) {
         self.stt = engine
         self.engineName = name
+    }
+
+    /// Read at each key release, so a change applies from the next hold.
+    func setHoldThreshold(_ seconds: Double) {
+        config.holdThreshold = seconds
     }
 
     func setCleaner(_ cleaner: CleanupBackend?, name: String) {

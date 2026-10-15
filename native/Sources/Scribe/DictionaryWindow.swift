@@ -190,6 +190,10 @@ struct DictionaryWindow: View {
         }
         .padding(20)
         .frame(width: 480)
-        .onAppear { model.refreshDictionaryState() }
+        .onAppear {
+            model.refreshDictionaryState()
+            WindowActivation.shared.windowAppeared()
+        }
+        .onDisappear { WindowActivation.shared.windowDisappeared() }
     }
 }

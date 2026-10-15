@@ -369,13 +369,23 @@ final class FakeHotkeyMonitor: HotkeyMonitoring {
     var onModifierEvent: ((String) -> Void)?
     var installError: Error?
     var reinstallError: Error?
+    /// Shared by every monitor a test builds, so the order of install and uninstall calls across swaps is assertable.
+    var journal: Box<String>?
+    var name = "monitor"
     private(set) var installCalls = 0
     private(set) var reinstallCalls = 0
+    private(set) var uninstallCalls = 0
     private(set) var forgetCalls = 0
 
     func install() throws {
         installCalls += 1
+        journal?.append("\(name):install")
         if let installError { throw installError }
+    }
+
+    func uninstall() {
+        uninstallCalls += 1
+        journal?.append("\(name):uninstall")
     }
 
     func reinstall() throws {
