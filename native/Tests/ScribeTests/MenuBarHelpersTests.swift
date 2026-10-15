@@ -135,4 +135,9 @@ final class MenuBarHelpersTests: XCTestCase {
         XCTAssertEqual(engineLabel("whisper"), "Whisper (best Spanish)")
         XCTAssertEqual(engineLabel("unknown"), "unknown")
     }
+
+    func testCleanupModelLabelNamesTheCatalogModelOrCustom() {
+        XCTAssertEqual(cleanupModelLabel("gemma3"), "Gemma 3 4B")
+        XCTAssertEqual(cleanupModelLabel("custom"), "Custom model")
+    }
 }

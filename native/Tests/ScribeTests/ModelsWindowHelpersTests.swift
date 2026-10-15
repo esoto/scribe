@@ -55,12 +55,6 @@ final class ModelsWindowHelpersTests: XCTestCase {
         XCTAssertFalse(rows[3].canUse)
     }
 
-    func testPickerLabel() {
-        XCTAssertEqual(pickerLabel(CleanupModelCatalog.gemma3, status: .downloaded(bytes: 1)), "Gemma 3 4B")
-        XCTAssertEqual(pickerLabel(CleanupModelCatalog.gemma4, status: .notDownloaded), "Gemma 4 E4B — 4.9 GB download")
-        XCTAssertEqual(pickerLabel(CleanupModelCatalog.appleIntelligence, status: .notDownloaded), "Apple Intelligence (fastest, less accurate)")
-    }
-
     func testLearningNote() {
         XCTAssertNil(learningNote(fidelitySafe: true, learningOn: true))
         XCTAssertNil(learningNote(fidelitySafe: false, learningOn: false))

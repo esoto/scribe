@@ -53,13 +53,7 @@ func modelRows(
     }
 }
 
-/// Menu label: download size until it's on disk; AFM labelled honestly.
-func pickerLabel(_ spec: CleanupModelSpec, status: CleanupModelStore.Status) -> String {
-    guard let bytes = spec.approxDownloadBytes else { return "\(spec.label) (fastest, less accurate)" }
-    return status.isDownloaded ? spec.label : "\(spec.label) — \(formatBytes(bytes)) download"
-}
-
-/// Shown under "Learn New Terms" when the active model is gated off.
+/// Shown under the Dictionary window's "Learn new terms" toggle when the active model is gated off.
 func learningNote(fidelitySafe: Bool, learningOn: Bool) -> String? {
     guard learningOn, !fidelitySafe else { return nil }
     return "Learned terms aren't sent to this model — it can drop words"
