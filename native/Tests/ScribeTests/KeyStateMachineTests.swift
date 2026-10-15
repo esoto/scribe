@@ -71,6 +71,13 @@ final class KeyStateMachineTests: XCTestCase {
         XCTAssertEqual(m.handle(eventType: 12, keycode: 61, flags: genericOpt | leftOpt | 0x100), .up)
     }
 
+    func testRightCommandReleaseWhileLeftCommandHeld() {
+        let m = KeyStateMachine(key: .rightCommand)
+        // Real flags from scribe.log: Right ⌘ down = 0x100110; released while Left ⌘ held = 0x100108.
+        XCTAssertEqual(m.handle(eventType: 12, keycode: 54, flags: 0x100110), .down)
+        XCTAssertEqual(m.handle(eventType: 12, keycode: 54, flags: 0x100108), .up)
+    }
+
     func testRightOptionEventWithoutDeviceBitNeverArms() {
         let m = KeyStateMachine(key: .rightOption)
         XCTAssertNil(m.handle(eventType: 12, keycode: 61, flags: genericOpt | leftOpt))
