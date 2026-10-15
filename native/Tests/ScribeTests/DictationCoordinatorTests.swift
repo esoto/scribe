@@ -288,14 +288,16 @@ final class DictationCoordinatorTests: XCTestCase {
     }
 
     func testASecondKeyDownReplacesTheWatchdog() async {
-        let c = make(config: PipelineConfig(maxHold: 0.05))
+        let c = make(config: PipelineConfig(maxHold: 60))
         c.handleKeyDown()
         let first = c.holdWatchdog
 
         c.handleKeyDown()
         await first?.value
 
+        XCTAssertEqual(first?.isCancelled, true)
         XCTAssertEqual(monitor.forgetCalls, 0, "the replaced watchdog must not fire")
+        c.handleKeyUp()
     }
 
     func testSleepCancelsTheHoldAndForgetsTheKey() async {
