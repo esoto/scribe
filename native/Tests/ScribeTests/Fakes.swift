@@ -145,7 +145,7 @@ final class FakeCleanupModelBackend: CleanupModelBackend, @unchecked Sendable {
     private var _unloadCalls = 0
     private var _dictionaries: [DictionarySnapshot] = []
     private var _events: [String] = []
-    private var _onIsLoaded: (() -> Void)?
+    private var _onIsLoaded: (@MainActor () -> Void)?
     private var gate: CheckedContinuation<Void, Never>?
     private var gateReleased = false
     private let gated: Bool
@@ -170,15 +170,16 @@ final class FakeCleanupModelBackend: CleanupModelBackend, @unchecked Sendable {
         set { lock.withLock { _holdsMemory = newValue } }
     }
 
-    /// Runs inside `isLoaded`, i.e. at the suspension point a caller awaits: lets a test land a cancellation there.
-    var onIsLoaded: (() -> Void)? {
+    /// Runs on the main actor inside `isLoaded`, i.e. at the suspension point a caller awaits: lets a test land a
+    /// cancellation, a revert or a newer switch there.
+    var onIsLoaded: (@MainActor () -> Void)? {
         get { lock.withLock { _onIsLoaded } }
         set { lock.withLock { _onIsLoaded = newValue } }
     }
 
     var isLoaded: Bool {
         get async {
-            onIsLoaded?()
+            if let hook = onIsLoaded { await MainActor.run { hook() } }
             return lock.withLock { _loaded }
         }
     }
