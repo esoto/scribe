@@ -90,16 +90,21 @@ struct CleanupModelStore {
         }
     }
 
-    /// Complete = the snapshot holds config.json plus a
+    /// Complete = the snapshot holds config.json, tokenizer.json and a
     /// loadable weight set: every shard the index names, or the single-file
     /// `model.safetensors` the loader falls back to. Some repos publish a
     /// stale index beside a single-file model (gemma-3-4b-it-qat-4bit names
     /// two shards that were never uploaded), and an index alone must not
     /// report a working model as half-downloaded. `fileExists` follows
-    /// symlinks, so a link whose blob never finished counts as missing.
+    /// symlinks, so a link whose blob never finished counts as missing. The
+    /// tokenizer is required because a directory load, unlike a load by id,
+    /// cannot fetch a file an interrupted download never wrote.
     private func isComplete(_ snapshot: URL) -> Bool {
         let fm = FileManager.default
-        guard fm.fileExists(atPath: snapshot.appendingPathComponent("config.json").path) else { return false }
+        for required in ["config.json", "tokenizer.json"]
+        where !fm.fileExists(atPath: snapshot.appendingPathComponent(required).path) {
+            return false
+        }
         let index = snapshot.appendingPathComponent("model.safetensors.index.json")
         if let data = try? Data(contentsOf: index),
             let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],

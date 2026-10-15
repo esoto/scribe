@@ -26,9 +26,11 @@ final class CleanupModelStoreTests: XCTestCase {
     /// `.metadata/` or `.locks/` sidecars in the real cache.
     private func makeRepo(
         _ files: [String: Int], shards: [String]? = nil, writeRef: Bool = true,
-        repoID: String? = nil, commit: String = "abc123"
+        repoID: String? = nil, commit: String = "abc123", tokenizer: Bool = true
     ) throws {
         let fm = FileManager.default
+        var files = files
+        if tokenizer && files["tokenizer.json"] == nil { files["tokenizer.json"] = 0 }
         let dir = store.repoDirectory(repoID ?? repo)
         let blobs = dir.appendingPathComponent("blobs", isDirectory: true)
         let snap = dir.appendingPathComponent("snapshots/\(commit)", isDirectory: true)
@@ -166,6 +168,15 @@ final class CleanupModelStoreTests: XCTestCase {
         XCTAssertTrue(
             FileManager.default.fileExists(
                 atPath: store.repoDirectory(repo).appendingPathComponent("snapshots/\(otherCommit)").path))
+    }
+
+    /// A directory load cannot fetch what an interrupted download never wrote,
+    /// so a snapshot without its tokenizer must not take the local-first path.
+    func testSnapshotWithoutTokenizerIsIncomplete() throws {
+        try makeRepo(
+            ["config.json": 10, "model.safetensors": 1000], writeRef: false, commit: pinned, tokenizer: false)
+        XCTAssertNil(store.snapshotDirectory(repoID: repo, revision: pinned))
+        XCTAssertEqual(store.status(repo, revision: pinned), .partial(bytes: 1010))
     }
 
     func testPinnedSnapshotWithoutWeightsIsIncomplete() throws {
