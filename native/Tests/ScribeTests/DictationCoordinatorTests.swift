@@ -39,6 +39,7 @@ final class DictationCoordinatorTests: XCTestCase {
     private func make(
         config: PipelineConfig = PipelineConfig(),
         errorStickySeconds: Double = 5,
+        hintSeconds: Double = 4,
         failedAudioURL: URL? = nil
     ) -> DictationCoordinator {
         let recorder = self.recorder!
@@ -53,7 +54,8 @@ final class DictationCoordinatorTests: XCTestCase {
                     recorder: recorder, stt: FakeStt(), cleaner: FakeCleaner(), paster: FakePaster(),
                     history: History(maxLen: 10), config: config, clock: { clock.t },
                     runner: { _ in },  // jobs are not under test here: a held key is discarded or force-stopped
-                    onState: sinks.onState, onNotice: sinks.onNotice, saveFailedAudio: sinks.saveFailedAudio)
+                    onState: sinks.onState, onNotice: sinks.onNotice, saveFailedAudio: sinks.saveFailedAudio,
+                    onHint: sinks.onHint, onPasted: sinks.onPasted)
             },
             makeHotkeyMonitor: { [unowned self] down, up in
                 self.monitorDown = down
@@ -66,6 +68,7 @@ final class DictationCoordinatorTests: XCTestCase {
             microphoneGranted: { [unowned self] in microphoneGranted },
             reportInputMonitoring: { [unowned self] in inputMonitoring.append($0) },
             errorStickySeconds: errorStickySeconds,
+            hintSeconds: hintSeconds,
             failedAudioURL: failedAudioURL ?? directory.appendingPathComponent("last_failed.wav"),
             log: { [logs] in logs!.append($0) })
     }
@@ -123,6 +126,101 @@ final class DictationCoordinatorTests: XCTestCase {
         let recording = await eventually { c.state == .recording }
         XCTAssertTrue(recording)
         XCTAssertEqual(sounds.value, ["Pop"])
+    }
+
+    // MARK: - Hints and the paste cue
+
+    func testHintReachesThePublishedStateThenClearsAfterHintSeconds() async {
+        let c = make(hintSeconds: 0.05)
+
+        sinks.onHint("Pasted raw — cleanup timed out")
+
+        let shown = await eventually { c.hint == "Pasted raw — cleanup timed out" }
+        XCTAssertTrue(shown)
+        let cleared = await eventually { c.hint == nil }
+        XCTAssertTrue(cleared)
+    }
+
+    func testHintStaysUntilItsWindowEnds() async {
+        let c = make(hintSeconds: 30)
+
+        c.showHint("Pasted raw — cleanup failed")
+        try? await Task.sleep(nanoseconds: 100_000_000)
+
+        XCTAssertEqual(c.hint, "Pasted raw — cleanup failed")
+    }
+
+    func testANewerHintReplacesTheOldOneAndCancelsItsClear() async {
+        let c = make(hintSeconds: 0.05)
+        c.showHint("first")
+        let firstClear = c.hintClear
+
+        c.showHint("second")
+        await firstClear?.value
+
+        XCTAssertEqual(c.hint, "second")
+    }
+
+    func testKeyDownClearsTheHint() {
+        let c = make()
+        c.showHint("Pasted raw — cleanup failed")
+        let clear = c.hintClear
+
+        c.handleKeyDown()
+
+        XCTAssertNil(c.hint)
+        XCTAssertEqual(clear?.isCancelled, true)
+    }
+
+    func testNoSpeechHeardWithTheMicrophoneGrantedShowsTheHint() {
+        let c = make()
+
+        c.showHint("No speech heard")
+
+        XCTAssertEqual(c.hint, "No speech heard")
+        XCTAssertEqual(notifier.delivered.count, 0)
+    }
+
+    func testNoSpeechHeardWithoutTheMicrophoneNotifiesInsteadOfHinting() async {
+        microphoneGranted = false
+        let c = make()
+
+        sinks.onHint("No speech heard")
+
+        let delivered = await eventually { !notifier.delivered.isEmpty }
+        XCTAssertTrue(delivered)
+        XCTAssertEqual(notifier.delivered.first?.title, "scribe")
+        XCTAssertEqual(notifier.delivered.first?.body, "Microphone is off — open Setup / Doctor…")
+        XCTAssertNil(c.hint)
+    }
+
+    func testOtherHintsStillShowWithoutTheMicrophone() {
+        microphoneGranted = false
+        let c = make()
+
+        c.showHint("Pasted raw — cleanup timed out")
+
+        XCTAssertEqual(c.hint, "Pasted raw — cleanup timed out")
+        XCTAssertEqual(notifier.delivered.count, 0)
+    }
+
+    func testPasteCuePlaysTinkWhenSoundsAreOn() async {
+        let c = make()
+        _ = c
+
+        sinks.onPasted()
+
+        let played = await eventually { sounds.value == ["Tink"] }
+        XCTAssertTrue(played)
+    }
+
+    func testPasteCueIsSilentWhenSoundsAreOff() {
+        soundsEnabled = false
+        let c = make()
+
+        c.playPasteCue()
+
+        XCTAssertEqual(sounds.value, [])
     }
 
     // MARK: - Notifications

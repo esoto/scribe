@@ -110,7 +110,8 @@ struct MenuBarView: View {
     private var statusText: String? {
         menuStatusText(
             dictation.state, sttDownload: model.sttDownloadStatus, engineStatus: engineController.engineStatus,
-            cleanupStatus: cleanupModels.cleanupModelStatus, attention: attentionText(for: permissions.grants))
+            hint: dictation.hint, cleanupStatus: cleanupModels.cleanupModelStatus,
+            attention: attentionText(for: permissions.grants))
     }
 
     var body: some View {
