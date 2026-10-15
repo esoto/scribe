@@ -66,8 +66,9 @@ Upgrading from a v3 install downloads Ultra on first launch (progress shows in t
   Spanish-heavy dictation; loads on first switch).
 - **Settings…** (⌘,) has three tabs. **General** holds the hotkey, hold delay, sounds, Launch at Login, idle unload, and history size. **Audio** picks the microphone. **Models** downloads, switches, and deletes the cleanup model.
 - **Cleanup** toggle: off = verbatim transcription pasted raw.
-- **History**: last 10 dictations (in memory only, never persisted); click
-  one to copy it back to the clipboard.
+- **History**: the last 10 dictations by default (Settings › General), in
+  memory only, never persisted; "· raw" marks one pasted without cleanup.
+  Click one to copy it back to the clipboard.
 - **Dictionary**: your vocabulary and corrections, fed to the cleanup pass
   so names and jargon come out spelled right — see below.
 - If cleanup ever misbehaves (timeout, length/language sanity gates), the
@@ -172,16 +173,16 @@ nothing, since the model never sees it.
 
 Settings live in `UserDefaults` under `dev.esoto.scribe` (a legacy
 `~/.config/scribe/config.toml` is imported once, first launch only).
-Change via `defaults write dev.esoto.scribe <key> <value>` and relaunch:
+Change via `defaults write dev.esoto.scribe <key> <value>` and relaunch, or use the control named in the table:
 
-Most of these have a control in **Settings…** (⌘,) and apply immediately; the rest are advanced keys that still need a relaunch.
+Most of these have a control in **Settings…** (⌘,), the menu, or the Dictionary window and apply immediately; the rest are advanced keys that still need a relaunch.
 
 | Key | Default | Meaning |
 |---|---|---|
 | `hotkey` | `right_option` | `right_command` \| `right_option` \| `f13` (Settings) |
 | `holdThreshold` | 0.3 | seconds the key must be held (Settings) |
-| `engine` | `parakeet` | `parakeet` \| `whisper` (Settings) |
-| `cleanupEnabled` | true | Gemma cleanup pass on/off (Settings) |
+| `engine` | `parakeet` | `parakeet` \| `whisper` (menu) |
+| `cleanupEnabled` | true | Gemma cleanup pass on/off (menu) |
 | `minWords` | 4 | utterances shorter than this skip cleanup |
 | `cleanupTimeout` | 6.0 | seconds before falling back to raw text |
 | `restoreDelay` | 2.0 | seconds before restoring the prior clipboard |
@@ -189,10 +190,10 @@ Most of these have a control in **Settings…** (⌘,) and apply immediately; th
 | `sounds` | true | start/error sounds (Settings) |
 | `historySize` | 10 | menu history length (Settings) |
 | `idleUnloadMinutes` | 15 | unload models after idle (0 = keep resident) (Settings) |
-| `dictionaryLearningEnabled` | false | auto-learn vocabulary (known to drop words — see Dictionary) |
+| `dictionaryLearningEnabled` | false | auto-learn vocabulary (known to drop words — see Dictionary) (Dictionary window) |
 | `cleanupModel` | resolved at first launch | `gemma3` \| `gemma4` \| `gemma4e2b` \| `appleIntelligence` (Settings) |
 | `cleanupModelPath` | _(unset)_ | local MLX model folder to use for cleanup instead of stock Gemma; when set, overrides `cleanupModel` and disables switching in **Settings › Models** |
-| `vocabularyBiasingEnabled` | false | acoustic vocabulary biasing for Parakeet (experimental) |
+| `vocabularyBiasingEnabled` | false | acoustic vocabulary biasing for Parakeet (experimental) (Dictionary window) |
 | `microphoneUID` | _(unset)_ | input device UID; unset follows the system default input (Settings) |
 
 **Custom cleanup model:** point `cleanupModelPath` at any local MLX model
