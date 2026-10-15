@@ -42,6 +42,7 @@ final class AppModel: ObservableObject {
 
     @Published private(set) var state: PipelineState = .idle
     private var errorRevert: Task<Void, Never>?
+    private var holdWatchdog: Task<Void, Never>?
     // Seeded from TCC probes in start(); the onboarding poll loop keeps it current.
     @Published var grants: GrantStatus = GrantStatus(microphone: false, accessibility: false, inputMonitoring: false)
     @Published private(set) var activeEngineName: String
@@ -218,7 +219,7 @@ final class AppModel: ObservableObject {
         self.hotkeyMonitor = HotkeyMonitor(
             key: settings.hotkey,
             onDown: { [weak self] in self?.handleKeyDown() },
-            onUp: { [weak self] in self?.pipeline.keyUp() }
+            onUp: { [weak self] in self?.handleKeyUp() }
         )
 
         start()
@@ -242,6 +243,16 @@ final class AppModel: ObservableObject {
         } catch {
             logger.log("hotkey install failed: \(error)")
             grants.inputMonitoring = false
+        }
+
+        // Sleep mid-hold can swallow the key-up; the buffered audio must not paste into whatever has focus on wake.
+        NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.willSleepNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.holdWatchdog?.cancel()
+                self?.pipeline.cancelHold()
+            }
         }
 
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { [logger] granted, error in
@@ -376,8 +387,8 @@ final class AppModel: ObservableObject {
 
     // MARK: - Hotkey wiring
 
-    /// Touches the idle tracker, pre-warms engine + cleaner if unloaded, and forwards to the pipeline.
-    /// Runs on main (CGEventTap callback).
+    /// Touches the idle tracker, pre-warms engine + cleaner if unloaded, arms the hold watchdog, and forwards
+    /// to the pipeline. Runs on main (CGEventTap callback).
     private func handleKeyDown() {
         idleTracker.touch(now: ProcessInfo.processInfo.systemUptime)
         refreshAppleIntelligenceAvailability()
@@ -398,7 +409,20 @@ final class AppModel: ObservableObject {
             }
         }
 
+        // A release the tap never reports must not leave the mic recording until the ring buffer overflows.
+        let maxHold = pipelineConfig.maxHold
+        holdWatchdog?.cancel()
+        holdWatchdog = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(maxHold * 1e9))
+            guard !Task.isCancelled else { return }
+            self?.pipeline.forceStop()
+        }
         pipeline.keyDown()
+    }
+
+    private func handleKeyUp() {
+        holdWatchdog?.cancel()
+        pipeline.keyUp()
     }
 
     // MARK: - Menu actions

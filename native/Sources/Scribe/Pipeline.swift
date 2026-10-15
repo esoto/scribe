@@ -14,6 +14,11 @@ struct PipelineConfig {
     var energyGate: Double = 0.0005
     var minWords: Int = 4
     var cleanupTimeout: Double = 6.0
+    var sttTimeout: Double = 20.0
+    /// A queued job older than this is dropped rather than pasted into whatever has focus by then.
+    var queueMaxAge: Double = 30.0
+    /// The ring buffer silently drops audio past 300 s, so a stuck key is cut off well before that.
+    var maxHold: Double = 120.0
     var lengthBand: (Double, Double) = (0.5, 1.3)
     var sampleRate: Double = 16000.0
 }
@@ -29,9 +34,6 @@ protocol Pasting {
 }
 
 extension Paster: Pasting {}
-
-/// Internal cleanup-race signal; always mapped to "use raw" by tryClean.
-private struct CleanupTimeoutError: Error {}
 
 /// Dictation orchestrator: state machine + degradation policy.
 final class DictationPipeline {
@@ -124,12 +126,10 @@ final class DictationPipeline {
         let pcm = recorder.disarm()
         let held = clock() - (downAt ?? 0.0)
         guard held >= config.holdThreshold else {
-            stateLock.withLock {
-                holding = false
-                onState(.idle)
-            }
+            endHoldIdle()
             return
         }
+        let enqueuedAt = clock()
         let job = stateLock.withLock {
             holding = false
             latestJob += 1
@@ -137,7 +137,30 @@ final class DictationPipeline {
         }
         runner { [weak self] in
             guard let self else { return }
-            await self.process(pcm, job: job)
+            await self.process(pcm, job: job, enqueuedAt: enqueuedAt)
+        }
+    }
+
+    /// Hold watchdog: a release the tap never reported must not record until the ring buffer overflows.
+    func forceStop() {
+        guard isArmed else { return }
+        onNotice("Stopped after \(Int(config.maxHold / 60)) min — release the key")
+        keyUp()
+    }
+
+    /// System sleep mid-hold: the release may never arrive, and pasting on wake into whatever has focus is wrong.
+    func cancelHold() {
+        guard isArmed else { return }
+        isArmed = false
+        _ = recorder.disarm()
+        endHoldIdle()
+    }
+
+    /// A hold that yields no job (discarded tap, cancelled hold) ends here.
+    private func endHoldIdle() {
+        stateLock.withLock {
+            holding = false
+            onState(.idle)
         }
     }
 
@@ -153,9 +176,16 @@ final class DictationPipeline {
 
     // MARK: - Processing (runs on the injected runner)
 
-    private func process(_ pcm: [Float], job: Int) async {
+    private func process(_ pcm: [Float], job: Int, enqueuedAt: Double) async {
         func emit(_ state: PipelineState) {
             stateLock.withLock { if !holding, latestJob == job { onState(state) } }
+        }
+        let age = clock() - enqueuedAt
+        if age > config.queueMaxAge {
+            // Pasting a dictation this stale into whatever has focus now is worse than dropping it.
+            onNotice("Dictation skipped — it waited \(Int(age)) s behind the previous one")
+            emit(.idle)
+            return
         }
         emit(.processing)
         var terminal = false   // .error is terminal: no trailing .idle, so the ⚠ stays visible
@@ -168,14 +198,21 @@ final class DictationPipeline {
 
         let t0 = clock()
         let sttStart = t0
-        let raw: String
-        do {
-            raw = Gates.normalize(try await stt.transcribe(pcm))
-        } catch let sttError as SttError {
+        func failTranscription(_ notice: String) {
             saveFailedAudio(pcm)
-            onNotice("Transcription failed: \(sttError.message)")
+            onNotice(notice)
             terminal = true
             emit(.error)
+        }
+        let raw: String
+        do {
+            let engine = stt
+            raw = Gates.normalize(try await withDeadline(config.sttTimeout) { try await engine.transcribe(pcm) })
+        } catch let sttError as SttError {
+            failTranscription("Transcription failed: \(sttError.message)")
+            return
+        } catch is DeadlineExceeded {
+            failTranscription("Transcription timed out after \(Int(config.sttTimeout)) s — audio saved")
             return
         } catch {
             // Non-SttError failures have no defined contract here.
@@ -235,10 +272,14 @@ final class DictationPipeline {
 
     /// Returns nil for any gate/error that means "use raw".
     private func tryClean(_ raw: String, cleaner: CleanupBackend) async -> String? {
+        // withDeadline abandons a late call without cancelling it; cancel explicitly so a cooperative backend
+        // (Gemma's token loop) stops and frees the model, while an uncancellable cold load carries on for the next call.
+        let work = Task { try await cleaner.clean(raw) }
         let out: String
         do {
-            out = Gates.normalize(try await cleanWithTimeout(raw: raw, cleaner: cleaner, timeout: config.cleanupTimeout))
+            out = Gates.normalize(try await withDeadline(config.cleanupTimeout) { try await work.value })
         } catch {
+            work.cancel()
             return nil
         }
         guard !out.isEmpty, Gates.lengthOk(raw: raw, cleaned: out, band: config.lengthBand) else {
@@ -248,23 +289,6 @@ final class DictationPipeline {
             return nil
         }
         return out
-    }
-
-    private func cleanWithTimeout(raw: String, cleaner: CleanupBackend, timeout: Double) async throws -> String {
-        try await withThrowingTaskGroup(of: String.self) { group in
-            group.addTask {
-                try await cleaner.clean(raw)
-            }
-            group.addTask {
-                try await Task.sleep(nanoseconds: UInt64(max(timeout, 0) * 1_000_000_000))
-                throw CleanupTimeoutError()
-            }
-            defer { group.cancelAll() }
-            guard let result = try await group.next() else {
-                throw CleanupTimeoutError()
-            }
-            return result
-        }
     }
 
     // MARK: - Default runner
