@@ -52,9 +52,12 @@ final class DictationPipeline {
     /// Read fresh each dictation; applied deterministically here, not via the cleanup prompt.
     private let replacementPairs: () -> [ReplacementPair]
     private let saveFailedAudio: ([Float]) -> Void
+    /// Runs before STT when `enhanceAudioEnabled`; nil leaves the captured audio untouched.
+    private let enhancer: AudioEnhancer?
 
     private(set) var engineName: String
     var cleanupEnabled: Bool
+    var enhanceAudioEnabled: Bool
 
     private var downAt: Double?
     private var isArmed = false
@@ -72,6 +75,8 @@ final class DictationPipeline {
         onNotice: @escaping (String) -> Void,
         saveFailedAudio: @escaping ([Float]) -> Void,
         cleanupEnabled: Bool = true,
+        enhancer: AudioEnhancer? = nil,
+        enhanceAudioEnabled: Bool = false,
         onLog: ((String) -> Void)? = nil,
         onCleaned: ((String) -> Void)? = nil,
         replacementPairs: @escaping () -> [ReplacementPair] = { [] }
@@ -89,6 +94,8 @@ final class DictationPipeline {
         self.onNotice = onNotice
         self.saveFailedAudio = saveFailedAudio
         self.cleanupEnabled = cleanupEnabled
+        self.enhancer = enhancer
+        self.enhanceAudioEnabled = enhanceAudioEnabled
         self.onLog = onLog
         self.onCleaned = onCleaned
         self.replacementPairs = replacementPairs
@@ -146,9 +153,18 @@ final class DictationPipeline {
 
         let t0 = clock()
         let sttStart = t0
+        // Enhancement is best-effort: a failed or slow denoise must not cost the dictation,
+        // so any error falls back to the raw capture.
+        var input = pcm
+        var enhanceMs = 0
+        if enhanceAudioEnabled, let enhancer {
+            let enhanceStart = clock()
+            input = (try? await enhancer.enhance(pcm)) ?? pcm
+            enhanceMs = Int((clock() - enhanceStart) * 1000)
+        }
         let raw: String
         do {
-            raw = Gates.normalize(try await stt.transcribe(pcm))
+            raw = Gates.normalize(try await stt.transcribe(input))
         } catch let sttError as SttError {
             saveFailedAudio(pcm)
             onNotice("Transcription failed: \(sttError.message)")
@@ -162,7 +178,7 @@ final class DictationPipeline {
         // STT time includes Parakeet vocab biasing; split it out so stt=/bias= are disjoint.
         let sttTotalMs = Int((clock() - sttStart) * 1000)
         let biasMs = (stt as? ParakeetEngine)?.lastBiasMs ?? 0
-        let sttMs = max(0, sttTotalMs - biasMs)
+        let sttMs = max(0, sttTotalMs - biasMs - enhanceMs)
 
         guard !raw.isEmpty else {
             onNotice("Nothing transcribed")
@@ -187,7 +203,7 @@ final class DictationPipeline {
             }
             cleanupMs = Int((clock() - cleanStart) * 1000)
         }
-        onLog?("dictation: engine=\(engineName) cleanupModel=\(cleanupModelName) stt=\(sttMs)ms bias=\(biasMs)ms cleanup=\(cleanupMs)ms cleaned=\(cleaned) chars=\(final.count)")
+        onLog?("dictation: engine=\(engineName) cleanupModel=\(cleanupModelName) stt=\(sttMs)ms bias=\(biasMs)ms enhance=\(enhanceMs)ms cleanup=\(cleanupMs)ms cleaned=\(cleaned) chars=\(final.count)")
 
         if cleaned {
             onCleaned?(final)

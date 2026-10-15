@@ -54,6 +54,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var dictionarySnapshot: DictionarySnapshot = .empty
     @Published private(set) var dictionaryLearningEnabled: Bool
     @Published private(set) var vocabularyBiasingEnabled: Bool
+    @Published private(set) var enhanceAudioEnabled: Bool
     @Published private(set) var glossaryEntries: [GlossaryEntry] = []
     @Published private(set) var replacementPairs: [ReplacementPair] = []
     @Published private(set) var unmatchedHeardWords: [GlossaryEntry] = []
@@ -130,6 +131,7 @@ final class AppModel: ObservableObject {
         self.dictionary = dictionary
         self.dictionaryLearningEnabled = settings.dictionaryLearningEnabled
         self.vocabularyBiasingEnabled = settings.vocabularyBiasingEnabled
+        self.enhanceAudioEnabled = settings.enhanceAudioEnabled
         self.dictionarySnapshot = dictionary.snapshot
         self.glossaryEntries = dictionary.allGlossaryEntries
         self.replacementPairs = dictionary.allPairs
@@ -183,6 +185,8 @@ final class AppModel: ObservableObject {
                 }
             },
             cleanupEnabled: settings.cleanupEnabled,
+            enhancer: LocalVQEEnhancer(),
+            enhanceAudioEnabled: settings.enhanceAudioEnabled,
             onLog: { [logger] line in logger.log(line) },
             // Store is thread-safe and observe() is fire-and-forget: no main-actor hop.
             onCleaned: { [dictionary] text in dictionary.observe(cleanedText: text) },
@@ -675,6 +679,13 @@ final class AppModel: ObservableObject {
         dictionary.clearLearned()
     }
 
+    /// Toggles LocalVQE speech enhancement before STT. Experimental and off by default;
+    /// see AudioEnhancer for the measurement that motivated that default.
+    func setEnhanceAudio(_ on: Bool) {
+        enhanceAudioEnabled = on
+        settings.enhanceAudioEnabled = on
+        pipeline.enhanceAudioEnabled = on
+    }
     func addReplacementPair(original: String, replacement: String) {
         dictionary.addPair(original: original, replacement: replacement)
     }
