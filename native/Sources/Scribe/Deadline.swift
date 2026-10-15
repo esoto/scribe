@@ -6,10 +6,10 @@ struct DeadlineExceeded: Error {}
 /// Resolves with the operation's result or throws `DeadlineExceeded` after `seconds` — even when the
 /// operation cannot be cancelled (CoreML and MLX model loads ignore cancellation, which is why a task-group
 /// race never bounded a cold load: the group waits for its children). The operation keeps running
-/// detached; a later caller gets its result through `LazyModel`. The continuation resumes at most once.
-func withDeadline<T>(
+/// in its own task; a later caller gets its result through `LazyModel`. The continuation resumes at most once.
+func withDeadline<T: Sendable>(
     _ seconds: Double,
-    _ operation: @escaping () async throws -> T
+    _ operation: @escaping @Sendable () async throws -> T
 ) async throws -> T {
     let gate = ResumeOnce<T>()
     return try await withTaskCancellationHandler {
@@ -38,7 +38,7 @@ func withDeadline<T>(
 }
 
 /// Resumes a continuation at most once, from whichever racing task finishes first.
-final class ResumeOnce<T>: @unchecked Sendable {
+final class ResumeOnce<T: Sendable>: @unchecked Sendable {
     private let lock = NSLock()
     private var continuation: CheckedContinuation<T, Error>?
 
