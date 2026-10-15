@@ -7,6 +7,8 @@ final class FileLogger: Sendable {
         FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Logs/scribe", isDirectory: true)
     }()
+    /// The file "Error — check log" refers to; also what Setup / Doctor's "Show Log in Finder" reveals.
+    static let logFileURL = logsDirectory.appendingPathComponent("scribe.log")
     /// 5 MB is weeks of normal use; the unrotated log reached 1.7 MB in three months with every modifier key logged.
     static let defaultMaxBytes = 5 * 1024 * 1024
 
@@ -15,7 +17,7 @@ final class FileLogger: Sendable {
     private let queue = DispatchQueue(label: "dev.esoto.scribe.filelogger")
 
     init(
-        fileURL: URL = FileLogger.logsDirectory.appendingPathComponent("scribe.log"),
+        fileURL: URL = FileLogger.logFileURL,
         maxBytes: Int = FileLogger.defaultMaxBytes
     ) {
         self.fileURL = fileURL

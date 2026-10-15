@@ -60,8 +60,8 @@ Upgrading from a v3 install downloads Ultra on first launch (progress shows in t
 ## Usage
 
 - Hold **Right ⌥** (≥ 0.3 s), speak, release. Text lands in the focused app.
-- Menu bar: ◦ idle · ● recording · ⋯ processing · ⚠ error, plus a live
-  status line while recording/transcribing.
+- Menu bar: ◦ idle · ● recording · ⋯ processing · ⚠ error or a missing
+  permission, plus a live status line while recording/transcribing.
 - **Engine** picker: Parakeet (fast, default) ↔ Whisper (better for
   Spanish-heavy dictation; loads on first switch).
 - **Cleanup Model** picker: Gemma 3 4B · Gemma 4 E4B · Gemma 4 E2B
@@ -223,6 +223,8 @@ outside scribe's process. scribe manages them on demand:
 ## Troubleshooting
 
 - **Nothing types, but the icon reacts** → Accessibility grant missing.
+  scribe copies the text instead and notifies "press ⌘V". It does the same
+  when you switch apps while it's transcribing.
 - **Hotkey does nothing** → Input Monitoring grant missing (common after
   replacing the app binary: re-toggle scribe in System Settings → Privacy &
   Security → Input Monitoring, or use the setup window's Request button).

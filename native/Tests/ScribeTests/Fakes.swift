@@ -98,14 +98,17 @@ final class FakeCleaner: CleanupBackend {
 final class FakePaster: Pasting {
     let err: Error?
     private(set) var pasted: [String] = []
+    /// The key-down app each paste was given, in call order.
+    private(set) var targets: [pid_t?] = []
 
     init(err: Error? = nil) {
         self.err = err
     }
 
-    func paste(_ text: String) throws {
+    func paste(_ text: String, target: pid_t?) throws {
         if let err { throw err }
         pasted.append(text)
+        targets.append(target)
     }
 }
 

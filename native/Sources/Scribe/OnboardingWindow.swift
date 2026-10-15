@@ -85,8 +85,20 @@ struct OnboardingWindow: View {
             }
 
             Divider()
-            Text(OnboardingState.summary(model.grants))
-                .foregroundStyle(.secondary)
+            HStack {
+                Text(OnboardingState.summary(model.grants))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                // "Error — check log" names this file; this is the one place in the app that opens it.
+                Button("Show Log in Finder") {
+                    if FileManager.default.fileExists(atPath: FileLogger.logFileURL.path) {
+                        NSWorkspace.shared.activateFileViewerSelecting([FileLogger.logFileURL])
+                    } else {
+                        // Deleted and not yet recreated by the next write: show the folder instead of doing nothing.
+                        NSWorkspace.shared.open(FileLogger.logsDirectory)
+                    }
+                }
+            }
         }
         .padding(24)
         .frame(width: 420)
@@ -151,7 +163,7 @@ struct OnboardingWindow: View {
         case .microphone:
             Task {
                 _ = await TCC.requestMicrophone()
-                refreshGrants()
+                model.refreshGrants()
             }
         case .accessibility:
             TCC.requestAccessibility()
@@ -167,33 +179,9 @@ struct OnboardingWindow: View {
     /// SwiftUI cancels the `.task` when the window closes, which stops this loop.
     private func pollLoop() async {
         while !Task.isCancelled {
-            refreshGrants()
+            model.refreshGrants()
             // Stays at 2 s even when all green, so revocations are still noticed.
             try? await Task.sleep(nanoseconds: 2_000_000_000)
-        }
-    }
-
-    /// Re-reads all probes. A false→true flip on mic or Input Monitoring calls into `AppModel` to react without a restart.
-    private func refreshGrants() {
-        let fresh = GrantStatus(
-            microphone: TCC.microphoneGranted(),
-            accessibility: TCC.accessibilityGranted(),
-            inputMonitoring: TCC.inputMonitoringGranted())
-
-        let microphoneNewlyGranted = fresh.microphone && !model.grants.microphone
-        let inputMonitoringNewlyGranted = fresh.inputMonitoring && !model.grants.inputMonitoring
-
-        // Publish only on change: each write rebuilds the menu bar and closes any open submenu.
-        if fresh != model.grants {
-            model.grants = fresh
-        }
-        if microphoneNewlyGranted {
-            model.prewarmRecorderIfGranted()
-        }
-        if inputMonitoringNewlyGranted {
-            // Reinstalls the tap; on failure it flips
-            // grants.inputMonitoring back to false itself.
-            model.activateHotkeyIfNeeded()
         }
     }
 }

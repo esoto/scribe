@@ -29,8 +29,9 @@ protocol RecorderLike {
 }
 
 /// Test seam over Paster.paste; Paster conforms retroactively below.
+/// `target` is the app that had focus when the dictation began; nil when unknown.
 protocol Pasting {
-    func paste(_ text: String) throws
+    func paste(_ text: String, target: pid_t?) throws
 }
 
 extension Paster: Pasting {}
@@ -46,6 +47,7 @@ final class DictationPipeline {
     private let config: PipelineConfig
     private let clock: () -> Double
     private let runner: (@escaping () async -> Void) -> Void
+    private let frontmost: () -> pid_t?
     private let onState: (PipelineState) -> Void
     private let onNotice: (String) -> Void
     private let onLog: ((String) -> Void)?
@@ -59,6 +61,8 @@ final class DictationPipeline {
     var cleanupEnabled: Bool
 
     private var downAt: Double?
+    /// Per hold, not per pipeline: queued jobs outlive later key-downs, which would otherwise retarget them.
+    private var downTarget: pid_t?
     private var isArmed = false
     /// A job only touches the glyph while no hold is in progress and no newer job is queued, else its
     /// .processing/.idle would blank the ● of the dictation in progress. A discarded short tap starts a hold
@@ -77,6 +81,7 @@ final class DictationPipeline {
         config: PipelineConfig,
         clock: @escaping () -> Double,
         runner: ((@escaping () async -> Void) -> Void)? = nil,
+        frontmost: @escaping () -> pid_t? = { nil },
         onState: @escaping (PipelineState) -> Void,
         onNotice: @escaping (String) -> Void,
         saveFailedAudio: @escaping ([Float]) -> Void,
@@ -94,6 +99,7 @@ final class DictationPipeline {
         self.config = config
         self.clock = clock
         self.runner = runner ?? DictationPipeline.makeSerialRunner()
+        self.frontmost = frontmost
         self.onState = onState
         self.onNotice = onNotice
         self.saveFailedAudio = saveFailedAudio
@@ -114,6 +120,7 @@ final class DictationPipeline {
         }
         isArmed = true
         downAt = clock()
+        downTarget = frontmost()
         stateLock.withLock {
             holding = true
             onState(.recording)
@@ -135,9 +142,10 @@ final class DictationPipeline {
             latestJob += 1
             return latestJob
         }
+        let target = downTarget
         runner { [weak self] in
             guard let self else { return }
-            await self.process(pcm, job: job, enqueuedAt: enqueuedAt)
+            await self.process(pcm, job: job, target: target, enqueuedAt: enqueuedAt)
         }
     }
 
@@ -176,7 +184,7 @@ final class DictationPipeline {
 
     // MARK: - Processing (runs on the injected runner)
 
-    private func process(_ pcm: [Float], job: Int, enqueuedAt: Double) async {
+    private func process(_ pcm: [Float], job: Int, target: pid_t?, enqueuedAt: Double) async {
         func emit(_ state: PipelineState) {
             stateLock.withLock { if !holding, latestJob == job { onState(state) } }
         }
@@ -254,7 +262,9 @@ final class DictationPipeline {
         }
 
         do {
-            try paster.paste(final)
+            try paster.paste(final, target: target)
+        } catch let guarded as PasteGuardError {
+            onNotice(guarded.notice)
         } catch {
             onNotice("Paste failed — press ⌘V to paste manually")
         }
