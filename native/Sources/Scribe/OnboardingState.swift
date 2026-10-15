@@ -134,6 +134,11 @@ extension OnboardingState {
         }
     }
 
+    /// Notifications aren't a `Grant`, so `accessibilityLabel(_:for:)` can't name them.
+    static func notificationsAccessibilityLabel(_ action: PermissionAction) -> String {
+        action == .request ? "Request Notifications access" : "Open Notifications settings"
+    }
+
     static func notificationsActions(_ status: NotificationAuthorization) -> [PermissionAction] {
         switch status {
         case .notDetermined: return [.request]

@@ -2,24 +2,14 @@ import AppKit
 import Foundation
 import UserNotifications
 
-/// Test seam over `UNUserNotificationCenter`.
+/// Test seam over `UNUserNotificationCenter` delivery. The authorization prompt belongs to the Setup window's
+/// Notifications row (`NotificationAuthorizing`), so a first run doesn't meet it unexplained.
 protocol Notifier {
-    func requestAuthorization(log: @escaping @Sendable (String) -> Void)
     func deliver(title: String, body: String, onError: @escaping @Sendable (Error) -> Void)
 }
 
 /// Live `Notifier`. Excluded from unit tests: the notification center needs a real app bundle.
 struct UserNotifier: Notifier {
-    func requestAuthorization(log: @escaping @Sendable (String) -> Void) {
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { granted, error in
-            if let error {
-                log("notification authorization failed: \(error)")
-            } else if !granted {
-                log("notification authorization denied")
-            }
-        }
-    }
-
     func deliver(title: String, body: String, onError: @escaping @Sendable (Error) -> Void) {
         let content = UNMutableNotificationContent()
         content.title = title
@@ -189,8 +179,6 @@ final class DictationCoordinator: ObservableObject {
                 self?.hotkeyMonitor.forgetHeldKey()
             }
         }
-
-        notifier.requestAuthorization(log: log)
     }
 
     /// Live-activates the hotkey tap after Input Monitoring is granted. Must run on main.

@@ -320,6 +320,8 @@ final class FakeTCCProbe: TCCProbing {
     var inputMonitoring = false
     /// What the mic prompt does to the mic grant when it resolves.
     var microphoneGrantedByRequest = false
+    /// The user has already answered "Don't Allow": the tri-state reads denied rather than notDetermined.
+    var microphoneDenied = false
     private(set) var events: [String] = []
 
     func resetEvents() { events.removeAll() }
@@ -327,6 +329,12 @@ final class FakeTCCProbe: TCCProbing {
     func microphoneGranted() -> Bool {
         events.append("probe-microphone")
         return microphone
+    }
+
+    func microphoneStatus() -> TCCStatus {
+        events.append("probe-microphoneStatus")
+        if microphone { return .authorized }
+        return microphoneDenied ? .denied : .notDetermined
     }
 
     func accessibilityGranted() -> Bool {
@@ -342,6 +350,8 @@ final class FakeTCCProbe: TCCProbing {
     func requestMicrophone() async -> Bool {
         events.append("request-microphone")
         microphone = microphoneGrantedByRequest
+        // macOS answers a declined prompt with denied, and never prompts again.
+        microphoneDenied = !microphoneGrantedByRequest
         return microphoneGrantedByRequest
     }
 
@@ -349,15 +359,29 @@ final class FakeTCCProbe: TCCProbing {
     func requestInputMonitoring() { events.append("request-inputMonitoring") }
 }
 
+/// Scripted notification authorization; `request` can flip the answer the way the user's click does.
+final class FakeNotificationAuthorizer: NotificationAuthorizing {
+    var current: NotificationAuthorization = .notDetermined
+    /// What the prompt does to `current` when it resolves.
+    var answerToRequest: NotificationAuthorization = .authorized
+    private(set) var events: [String] = []
+
+    func status() async -> NotificationAuthorization {
+        events.append("status")
+        return current
+    }
+
+    func request() async -> Bool {
+        events.append("request")
+        current = answerToRequest
+        return answerToRequest == .authorized
+    }
+}
+
 final class FakeNotifier: Notifier {
     private(set) var delivered: [(title: String, body: String)] = []
-    private(set) var authorizationRequests = 0
     /// When set, every delivery reports it through `onError`.
     var deliveryError: Error?
-
-    func requestAuthorization(log: @escaping @Sendable (String) -> Void) {
-        authorizationRequests += 1
-    }
 
     func deliver(title: String, body: String, onError: @escaping @Sendable (Error) -> Void) {
         delivered.append((title, body))

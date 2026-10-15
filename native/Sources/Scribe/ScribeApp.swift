@@ -111,6 +111,7 @@ final class AppModel: ObservableObject {
 
         let permissions = PermissionsModel(
             probe: LiveTCCProbe(),
+            notificationAuthorizer: LiveNotificationAuthorizer(log: log),
             onMicrophoneGranted: { lateDictation.prewarmRecorderIfGranted() },
             onInputMonitoringGranted: { lateDictation.activateHotkeyIfNeeded() })
         let dictation = DictationCoordinator(
@@ -351,7 +352,9 @@ struct ScribeApp: App {
         .menuBarExtraStyle(.menu)
 
         Window("scribe setup", id: onboardingWindowID) {
-            OnboardingWindow(permissions: model.permissions, settingsModel: model.settingsModel)
+            OnboardingWindow(
+                permissions: model.permissions, model: model, cleanupModels: model.cleanupModels,
+                settingsModel: model.settingsModel)
         }
 
         Window("scribe dictionary", id: dictionaryWindowID) {
@@ -395,13 +398,20 @@ private struct MenuBarLabel: View {
     var body: some View {
         Text(
             menuBarGlyph(
-                dictation.state, progress: cleanupModels.cleanupModelProgress, needsAttention: !permissions.grantsOk))
-            .onAppear {
-                guard !didAutoOpen else { return }
-                didAutoOpen = true
-                guard !OnboardingState.missing(permissions.grants).isEmpty else { return }
-                openOnboarding(openWindow)
-            }
+                dictation.state, progress: cleanupModels.cleanupModelProgress, needsAttention: !permissions.grantsOk)
+        )
+        // The glyph alone reads as "white bullet" or "warning sign"; the value says what it means.
+        .accessibilityLabel("scribe")
+        .accessibilityValue(
+            glyphAccessibilityValue(
+                dictation.state, progress: cleanupModels.cleanupModelProgress, needsAttention: !permissions.grantsOk)
+        )
+        .onAppear {
+            guard !didAutoOpen else { return }
+            didAutoOpen = true
+            guard !OnboardingState.missing(permissions.grants).isEmpty else { return }
+            openOnboarding(openWindow)
+        }
     }
 }
 

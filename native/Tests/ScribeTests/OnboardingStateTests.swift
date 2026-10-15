@@ -189,6 +189,12 @@ final class OnboardingStateTests: XCTestCase {
         }
     }
 
+    func testNotificationsAccessibilityLabelNamesNotifications() {
+        XCTAssertEqual(OnboardingState.notificationsAccessibilityLabel(.request), "Request Notifications access")
+        XCTAssertEqual(
+            OnboardingState.notificationsAccessibilityLabel(.openSystemSettings), "Open Notifications settings")
+    }
+
     func testButtonTitleRequest() {
         XCTAssertEqual(OnboardingState.buttonTitle(.request), "Request")
     }
