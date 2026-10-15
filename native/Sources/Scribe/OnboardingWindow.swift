@@ -91,7 +91,12 @@ struct OnboardingWindow: View {
                 Spacer()
                 // "Error — check log" names this file; this is the one place in the app that opens it.
                 Button("Show Log in Finder") {
-                    NSWorkspace.shared.activateFileViewerSelecting([FileLogger.logFileURL])
+                    if FileManager.default.fileExists(atPath: FileLogger.logFileURL.path) {
+                        NSWorkspace.shared.activateFileViewerSelecting([FileLogger.logFileURL])
+                    } else {
+                        // Deleted and not yet recreated by the next write: show the folder instead of doing nothing.
+                        NSWorkspace.shared.open(FileLogger.logsDirectory)
+                    }
                 }
             }
         }
