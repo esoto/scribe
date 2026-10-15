@@ -77,6 +77,12 @@ func engineLabel(_ id: String) -> String {
     engineOptions.first { $0.id == id }?.label ?? id
 }
 
+/// The cleanup model's name for the status line. A defaults-set custom path has no catalog entry.
+func cleanupModelLabel(_ activeCleanupModel: String) -> String {
+    guard let id = CleanupModelID(rawValue: activeCleanupModel) else { return "Custom model" }
+    return CleanupModelCatalog.spec(id).label
+}
+
 struct MenuBarView: View {
     @ObservedObject var model: AppModel
     @ObservedObject var permissions: PermissionsModel
@@ -100,17 +106,14 @@ struct MenuBarView: View {
             attention: attentionText(for: permissions.grants))
     }
 
-    private var cleanupLabel: String {
-        CleanupModelID(rawValue: cleanupModels.activeCleanupModel).map { CleanupModelCatalog.spec($0).label } ?? "Custom model"
-    }
-
     var body: some View {
         if let statusText {
             Text(statusText)
                 .foregroundStyle(dictation.state == .error ? Color.red : Color.secondary)
         } else {
             Text(nowLine(
-                engine: engineLabel(engineController.activeEngineName), cleanupModel: cleanupLabel,
+                engine: engineLabel(engineController.activeEngineName),
+                cleanupModel: cleanupModelLabel(cleanupModels.activeCleanupModel),
                 cleanupEnabled: model.cleanupEnabled)
             )
             .foregroundStyle(.secondary)

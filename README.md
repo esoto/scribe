@@ -6,7 +6,7 @@ Hold the hotkey (**Right ⌥** by default), speak, release:
 [Parakeet Ultra](https://huggingface.co/FluidInference/parakeet-ultra-coreml)
 transcribes (~0.2 s), [Gemma 3 4B](https://huggingface.co/mlx-community/gemma-3-4b-it-qat-4bit)
 strips fillers and resolves self-corrections — or pick Gemma 4 E4B, Gemma 4
-E2B or Apple Intelligence from the menu (see *Cleanup models*) — and the result
+E2B or Apple Intelligence in **Settings › Models** (see *Cleanup models*) — and the result
 is pasted into whatever app has focus. No cloud, no accounts. Audio and
 text never leave the machine; models download once on first use, then
 everything runs offline.
@@ -52,7 +52,7 @@ everything re-downloads on next use.
 | Parakeet Ultra (STT) | ~0.6 GB | `parakeet/` |
 | Whisper (optional STT) | ~1.5 GB | `whisper/` |
 
-Downloaded cleanup models can be deleted from **Manage Models…** (not
+Downloaded cleanup models can be deleted from **Settings › Models** (not
 the one in use).
 
 Upgrading from a v3 install downloads Ultra on first launch (progress shows in the menu); the old v3 model is kept as a fallback until Ultra loads, then removed.
@@ -64,7 +64,7 @@ Upgrading from a v3 install downloads Ultra on first launch (progress shows in t
   permission, plus a live status line while recording/transcribing.
 - **Engine** picker: Parakeet (fast, default) ↔ Whisper (better for
   Spanish-heavy dictation; loads on first switch).
-- **Settings…** (⌘,): hotkey, hold delay, sounds, Launch at Login, idle unload, history size, microphone, and the cleanup model (download, switch, delete).
+- **Settings…** (⌘,) has three tabs. **General** holds the hotkey, hold delay, sounds, Launch at Login, idle unload, and history size. **Audio** picks the microphone. **Models** downloads, switches, and deletes the cleanup model.
 - **Cleanup** toggle: off = verbatim transcription pasted raw.
 - **History**: last 10 dictations (in memory only, never persisted); click
   one to copy it back to the clipboard.
@@ -77,7 +77,7 @@ Upgrading from a v3 install downloads Ultra on first launch (progress shows in t
 
 ## Cleanup models
 
-The **Cleanup Model** picker offers four models; the default is
+The cleanup model is picked in **Settings › Models**, which offers four models; the default is
 **Gemma 3 4B**. The intent is that the default must pass golden + guard;
 today it has one known guard failure, documented below. Existing installs
 keep the model they already use.
@@ -103,7 +103,7 @@ not recorded as `known_failures`:
   injected instruction instead of cleaning the sentence (both E4B and
   E2B).
 
-Learned vocabulary (Dictionary → **Learn New Terms**) reaches only models
+Learned vocabulary (Dictionary window, **Learn new terms**) reaches only models
 proven by `DictionaryFidelityTests` to keep every word — currently
 **Gemma 4 E4B** and **Gemma 4 E2B**; Gemma 3 and Apple Intelligence do
 not receive learned terms. Apple Intelligence is built into macOS 26+;
@@ -113,8 +113,8 @@ and scribe switches to Gemma.
 ## Dictionary
 
 Cleanup knows generic English and Spanish, not *your* nouns. The dictionary
-teaches it — menu bar → **Dictionary**, or **Edit Dictionary…** for the
-full editor.
+teaches it. **Edit Dictionary…** in the menu opens the editor, whose top section holds the
+two toggles **Learn new terms** and **Prefer dictionary words (experimental)**.
 
 **Replacements (manual).** "Heard as → Replace with" pairs — this is the
 part that works, and the one to reach for. A word the STT mishears comes
@@ -148,7 +148,7 @@ session only (to offer bindings), learned terms are frozen, and nothing is
 promoted. The learned vocabulary
 only reaches models proven by `DictionaryFidelityTests` to keep every
 word — currently **Gemma 4 E4B** and **Gemma 4 E2B**. With other models the toggle still
-collects words, and the menu notes they aren't sent. The intent:
+collects words, and the Dictionary window notes they aren't sent. The intent:
 distinctive vocabulary in cleaned dictations (proper nouns, acronyms,
 `camelCase`, words with digits) is counted, and anything appearing in
 **3 separate dictations** gets its spelling locked in. Terms go stale
@@ -191,7 +191,7 @@ Most of these have a control in **Settings…** (⌘,) and apply immediately; th
 | `idleUnloadMinutes` | 15 | unload models after idle (0 = keep resident) (Settings) |
 | `dictionaryLearningEnabled` | false | auto-learn vocabulary (known to drop words — see Dictionary) |
 | `cleanupModel` | resolved at first launch | `gemma3` \| `gemma4` \| `gemma4e2b` \| `appleIntelligence` (Settings) |
-| `cleanupModelPath` | _(unset)_ | local MLX model folder to use for cleanup instead of stock Gemma; when set, overrides `cleanupModel` and disables the picker |
+| `cleanupModelPath` | _(unset)_ | local MLX model folder to use for cleanup instead of stock Gemma; when set, overrides `cleanupModel` and disables switching in **Settings › Models** |
 | `vocabularyBiasingEnabled` | false | acoustic vocabulary biasing for Parakeet (experimental) |
 | `microphoneUID` | _(unset)_ | input device UID; unset follows the system default input (Settings) |
 
