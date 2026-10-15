@@ -206,7 +206,7 @@ final class PipelineTests: XCTestCase {
         let h = make(stt: FakeStt(err: SttError(message: "boom")))
         dictate(h)
         h.pipeline.keyDown()
-        XCTAssertEqual(h.states.value.last, .recording)
+        XCTAssertEqual(h.states.value, [.recording, .processing, .error, .recording])
     }
 
     func testTrailingIdleNeverOverwritesANewerRecording() {
@@ -238,8 +238,16 @@ final class PipelineTests: XCTestCase {
         h.clock.t += 1.0
         h.pipeline.keyUp()              // job 2 queued behind job 1
         runner.drain()
-        XCTAssertEqual(h.states.value.last, .idle)
-        XCTAssertEqual(h.states.value.filter { $0 == .idle }.count, 1)
+        XCTAssertEqual(h.states.value, [.recording, .recording, .processing, .idle])
+    }
+
+    func testShortTapDuringProcessingKeepsTheErrorGlyph() {
+        let runner = ManualRunner()
+        let h = make(stt: FakeStt(err: SttError(message: "boom")), runner: runner.run)
+        dictate(h)                      // job 1 queued, not yet run
+        dictate(h, hold: 0.1)           // a discarded tap must not orphan job 1's failure
+        runner.drain()
+        XCTAssertEqual(h.states.value, [.recording, .recording, .idle, .processing, .error])
     }
 
     func testSttEmptyDiscardsWithNotice() {

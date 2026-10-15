@@ -1,6 +1,6 @@
 import Foundation
 
-/// Thrown by SttEngine.transcribe; the only error that gets flash ERROR + save audio + notify.
+/// Thrown by SttEngine.transcribe; the only error that gets the ⚠ state + save audio + notify.
 struct SttError: Error {
     let message: String
 }
@@ -58,11 +58,13 @@ final class DictationPipeline {
 
     private var downAt: Double?
     private var isArmed = false
-    /// Bumped on every key-down. A job only touches the glyph while no newer hold has started, else its
-    /// .processing/.idle would blank the ● of the dictation in progress. The lock orders a job's emission
-    /// against the next key-down's .recording; process() reads this from the runner's thread.
+    /// A job only touches the glyph while no hold is in progress and no newer job is queued, else its
+    /// .processing/.idle would blank the ● of the dictation in progress. A discarded short tap starts a hold
+    /// but no job, so it must not orphan the in-flight job's glyph. The lock orders a job's emission against
+    /// key events; process() reads this from the runner's thread.
     private let stateLock = NSLock()
-    private var generation = 0
+    private var holding = false
+    private var latestJob = 0
 
     init(
         recorder: RecorderLike,
@@ -111,7 +113,7 @@ final class DictationPipeline {
         isArmed = true
         downAt = clock()
         stateLock.withLock {
-            generation += 1
+            holding = true
             onState(.recording)
         }
     }
@@ -122,13 +124,20 @@ final class DictationPipeline {
         let pcm = recorder.disarm()
         let held = clock() - (downAt ?? 0.0)
         guard held >= config.holdThreshold else {
-            onState(.idle)
+            stateLock.withLock {
+                holding = false
+                onState(.idle)
+            }
             return
         }
-        let gen = stateLock.withLock { generation }
+        let job = stateLock.withLock {
+            holding = false
+            latestJob += 1
+            return latestJob
+        }
         runner { [weak self] in
             guard let self else { return }
-            await self.process(pcm, generation: gen)
+            await self.process(pcm, job: job)
         }
     }
 
@@ -144,9 +153,9 @@ final class DictationPipeline {
 
     // MARK: - Processing (runs on the injected runner)
 
-    private func process(_ pcm: [Float], generation gen: Int) async {
+    private func process(_ pcm: [Float], job: Int) async {
         func emit(_ state: PipelineState) {
-            stateLock.withLock { if generation == gen { onState(state) } }
+            stateLock.withLock { if !holding, latestJob == job { onState(state) } }
         }
         emit(.processing)
         var terminal = false   // .error is terminal: no trailing .idle, so the ⚠ stays visible
