@@ -338,4 +338,61 @@ final class UserDictionaryStoreTests: XCTestCase {
         XCTAssertTrue(text.contains("camel"))
         XCTAssertFalse(text.contains("transcript"))
     }
+
+    func testAddPairDedupesCaseInsensitivelyAndNormalisesWhitespace() {
+        let store = makeStore()
+        store.addPair(original: "Camel", replacement: "kamal")
+        store.addPair(original: "  camel ", replacement: "Kamal")
+        XCTAssertEqual(store.allPairs.count, 1)
+        XCTAssertEqual(store.allPairs.first?.original, "camel")
+        XCTAssertEqual(store.allPairs.first?.replacement, "Kamal")
+
+        store.addPair(original: " Memory \t  Service ", replacement: "memory_service")
+        XCTAssertEqual(store.allPairs.map(\.original).last, "Memory Service")
+    }
+
+    func testAllPairsReturnsEveryStoredPairNotJustTheSnapshotCap() {
+        let store = makeStore()
+        for i in 0..<30 { store.addPair(original: "word\(i)", replacement: "w\(i)") }
+        XCTAssertEqual(store.allPairs.count, 30)
+        XCTAssertEqual(store.snapshot.pairs.count, 20)
+    }
+
+    func testCandidatesAreNotPersistedWhileLearningIsOff() {
+        let store = makeStore()
+        store.learningEnabled = false
+        store.observe(cleanedText: "deploy to Headstar tonight")
+        XCTAssertFalse(store.unmatchedHeardWords.isEmpty, "in-session suggestions still work")
+        _ = store.snapshot  // flush before reopening
+
+        XCTAssertTrue(makeStore().unmatchedHeardWords.isEmpty, "nothing reached disk")
+    }
+
+    func testCandidatesPersistWhileLearningIsOn() {
+        let store = makeStore()
+        store.learningEnabled = true
+        store.observe(cleanedText: "deploy to Headstar tonight")
+        _ = store.snapshot
+
+        XCTAssertEqual(makeStore().unmatchedHeardWords.map(\.term), ["Headstar"])
+    }
+
+    func testTurningLearningOffPurgesPersistedCandidates() {
+        let store = makeStore()
+        store.observe(cleanedText: "deploy to Headstar tonight")
+        _ = store.snapshot
+        XCTAssertFalse(makeStore().unmatchedHeardWords.isEmpty, "precondition: on disk")
+
+        store.learningEnabled = false
+        XCTAssertTrue(store.unmatchedHeardWords.isEmpty)
+        XCTAssertTrue(makeStore().unmatchedHeardWords.isEmpty, "purged on disk too")
+    }
+
+    func testPairsSurviveThePurgeWhenLearningIsOff() {
+        let store = makeStore()
+        store.addPair(original: "camel", replacement: "kamal")
+        store.observe(cleanedText: "deploy to Headstar tonight")
+        store.learningEnabled = false
+        XCTAssertEqual(makeStore().allPairs.map(\.original), ["camel"])
+    }
 }

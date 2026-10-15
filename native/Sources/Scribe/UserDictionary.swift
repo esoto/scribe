@@ -41,7 +41,7 @@ final class UserDictionaryStore: @unchecked Sendable {
     private static let glossaryDecayDays = 60.0
     private static let maxStoredCandidates = 200
     private static let maxStoredGlossary = 200
-    private static let maxStoredPairs = 50
+    static let maxStoredPairs = 50
     private static let snapshotPairCap = 20
     private static let snapshotGlossaryCap = 30
 
@@ -82,13 +82,19 @@ final class UserDictionaryStore: @unchecked Sendable {
         set { queue.sync { changeHandler = newValue } }
     }
 
-    /// Runtime learning switch; when off, `observe` is a no-op.
+    /// Runtime learning switch; when off, no new words are written to disk and no candidate is promoted.
     var learningEnabled: Bool {
         get { queue.sync { enabled } }
         set {
             queue.sync {
                 enabled = newValue
-                notifyIfChangedLocked()
+                if newValue {
+                    notifyIfChangedLocked()
+                } else {
+                    // Persisting rewrites the file without candidates, purging any left by an earlier run.
+                    candidates.removeAll()
+                    persistAndNotifyLocked()
+                }
             }
         }
     }
@@ -121,7 +127,7 @@ final class UserDictionaryStore: @unchecked Sendable {
 
     func observe(cleanedText: String) {
         queue.async {
-            // Collection is not gated by `enabled`: it is local, words-only, and powers the "heard but unmatched" suggestions. `enabled` gates only handing learned terms to the model.
+            // Collection runs with learning off too — it powers the "heard but unmatched" suggestions — but is held in memory only; persistence and promotion are gated by `enabled`.
             let terms = GlossaryHarvester.candidates(in: cleanedText)
             guard !terms.isEmpty else { return }
             // Sweep before counting so a stale candidate isn't resurrected by the sighting.
@@ -149,11 +155,14 @@ final class UserDictionaryStore: @unchecked Sendable {
     }
 
     func addPair(original: String, replacement: String) {
-        let o = original.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Single-spaced like the matcher sees it; case is kept for display only.
+        let o = original.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
         let r = replacement.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !o.isEmpty, !r.isEmpty else { return }
+        let key = TermReplacer.words(o)
         queue.async {
-            self.pairs.removeAll { $0.original == o }
+            // Matching ignores case, so "Camel" and "camel" must not coexist.
+            self.pairs.removeAll { TermReplacer.words($0.original) == key }
             self.pairs.append(ReplacementPair(original: o, replacement: r, addedAt: self.now()))
             self.capLocked()
             self.persistAndNotifyLocked()
@@ -199,8 +208,10 @@ final class UserDictionaryStore: @unchecked Sendable {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         encoder.dateEncodingStrategy = .iso8601
+        // Unpromoted words stay in memory while learning is off; the README promises nothing new reaches disk.
         let file = DictionaryFile(
-            version: Self.fileVersion, pairs: pairs, glossary: glossary, candidates: candidates)
+            version: Self.fileVersion, pairs: pairs, glossary: glossary,
+            candidates: enabled ? candidates : [])
         if let data = try? encoder.encode(file) {
             try? data.write(to: fileURL, options: .atomic)
         }

@@ -146,7 +146,9 @@ against `headsner` — `Headstar` and `Hatsner` are 2 edits away, but so is
 is 2 edits — and so are **"camera"** and **"cancel"**. No threshold
 separates them, so a human confirms instead.
 
-**Learned terms (automatic) — off by default.** The learned vocabulary
+**Learned terms (automatic) — off by default.** With learning off, words
+scribe hears are kept in memory for the current session only — to offer
+bindings — and are never written to disk. The learned vocabulary
 only reaches models proven by `DictionaryFidelityTests` to keep every
 word — currently **Gemma 4 E4B** and **Gemma 4 E2B**. With other models the toggle still
 collects words, and the menu notes they aren't sent. The intent:
