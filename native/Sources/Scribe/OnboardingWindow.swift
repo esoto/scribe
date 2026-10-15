@@ -48,7 +48,7 @@ enum TCC {
 /// Polls the probes every 2 s while open.
 struct OnboardingWindow: View {
     @ObservedObject var permissions: PermissionsModel
-    /// Read for `sttDownloadStatus` only.
+    /// Read for `sttDownloadStatus` and `startupPreloadInFlight`.
     @ObservedObject var model: AppModel
     @ObservedObject var cleanupModels: CleanupModelController
     @ObservedObject var settingsModel: SettingsModel
@@ -64,7 +64,8 @@ struct OnboardingWindow: View {
 
     private var models: (detail: String, ready: Bool) {
         OnboardingState.modelsRow(
-            sttDownload: model.sttDownloadStatus, cleanupStatus: cleanupModels.cleanupModelStatus)
+            sttDownload: model.sttDownloadStatus, cleanupStatus: cleanupModels.cleanupModelStatus,
+            loading: model.startupPreloadInFlight || cleanupModels.pendingCleanupModel != nil)
     }
 
     /// Dictating into the field needs the grants and loaded models; before that it would only fail.

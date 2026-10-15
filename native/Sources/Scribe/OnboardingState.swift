@@ -119,11 +119,16 @@ extension OnboardingState {
         action == .request ? "Request \(title(grant)) access" : "Open \(title(grant)) settings"
     }
 
-    /// The Models row: a download or load in progress, else ready. `ready` gates the "Hold … and speak" test field.
-    static func modelsRow(sttDownload: String?, cleanupStatus: String?) -> (detail: String, ready: Bool) {
+    /// The Models row. `loading` covers what the two statuses can't: a load from disk reports nothing, and the
+    /// cleanup status stays nil until its first progress callback. Without it the row says "Ready" mid-load.
+    /// A status with `loading` off is a failed switch ("Couldn't load …"): shown, but nothing is loading and the
+    /// previous model still works. `ready` gates the "Hold … and speak" test field.
+    static func modelsRow(
+        sttDownload: String?, cleanupStatus: String?, loading: Bool
+    ) -> (detail: String, ready: Bool) {
         if let sttDownload { return (sttDownload, false) }
-        if let cleanupStatus { return (cleanupStatus, false) }
-        return ("Ready", true)
+        if loading { return (cleanupStatus ?? "Loading models…", false) }
+        return (cleanupStatus ?? "Ready", true)
     }
 
     static func notificationsDetail(_ status: NotificationAuthorization) -> String {

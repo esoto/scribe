@@ -214,19 +214,34 @@ final class OnboardingStateTests: XCTestCase {
     }
 
     func testModelsRowSttDownloadTakesPrecedence() {
-        let row = OnboardingState.modelsRow(sttDownload: "Downloading speech model", cleanupStatus: "Loading cleanup")
+        let row = OnboardingState.modelsRow(
+            sttDownload: "Downloading speech model", cleanupStatus: "Loading cleanup", loading: true)
         XCTAssertEqual(row.detail, "Downloading speech model")
         XCTAssertFalse(row.ready)
     }
 
-    func testModelsRowCleanupStatusWhenNoDownload() {
-        let row = OnboardingState.modelsRow(sttDownload: nil, cleanupStatus: "Loading cleanup")
+    func testModelsRowCleanupStatusWhileLoading() {
+        let row = OnboardingState.modelsRow(sttDownload: nil, cleanupStatus: "Loading cleanup", loading: true)
         XCTAssertEqual(row.detail, "Loading cleanup")
         XCTAssertFalse(row.ready)
     }
 
+    func testModelsRowLoadingWithNoStatusIsNotReady() {
+        // A load from disk reports nothing, so the flag alone must hold the row back.
+        let row = OnboardingState.modelsRow(sttDownload: nil, cleanupStatus: nil, loading: true)
+        XCTAssertEqual(row.detail, "Loading models…")
+        XCTAssertFalse(row.ready)
+    }
+
+    func testModelsRowStatusWithoutLoadingIsAFailureAndStaysReady() {
+        let row = OnboardingState.modelsRow(
+            sttDownload: nil, cleanupStatus: "Couldn't load Gemma — still using Apple Intelligence", loading: false)
+        XCTAssertEqual(row.detail, "Couldn't load Gemma — still using Apple Intelligence")
+        XCTAssertTrue(row.ready)
+    }
+
     func testModelsRowReadyWhenNothingInProgress() {
-        let row = OnboardingState.modelsRow(sttDownload: nil, cleanupStatus: nil)
+        let row = OnboardingState.modelsRow(sttDownload: nil, cleanupStatus: nil, loading: false)
         XCTAssertEqual(row.detail, "Ready")
         XCTAssertTrue(row.ready)
     }
