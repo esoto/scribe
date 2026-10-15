@@ -81,6 +81,11 @@ final class AVEngineControl: EngineControl {
     private var engine = AVAudioEngine()
     private var tapInstalled = false
     private var preferredInputUID: String?
+    private let onLog: ((String) -> Void)?
+
+    init(onLog: ((String) -> Void)? = nil) {
+        self.onLog = onLog
+    }
 
     var isRunning: Bool { engine.isRunning }
 
@@ -128,7 +133,7 @@ final class AVEngineControl: EngineControl {
             UInt32(MemoryLayout<AudioDeviceID>.size))
         if status != noErr {
             // Fall back to the system default rather than a dead engine.
-            print("[AVEngineControl] could not select input device \(uid): OSStatus \(status)")
+            onLog?("recorder: could not select input device \(uid): OSStatus \(status)")
         }
     }
 

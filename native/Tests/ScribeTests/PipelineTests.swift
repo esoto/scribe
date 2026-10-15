@@ -512,6 +512,89 @@ final class PipelineTests: XCTestCase {
         XCTAssertEqual(cleaner.received, ["so um deploy with kamal today"])
     }
 
+    // MARK: - Diagnostics: every degraded outcome leaves a line in scribe.log
+
+    /// The log promises no dictated text: neither the transcript nor the cleaner's output may appear in any line.
+    /// Strings under 4 characters are skipped, as they would match unrelated log text.
+    private func assertNoDictatedText(
+        _ h: Harness, stt: FakeStt, cleaner: FakeCleaner, file: StaticString = #filePath, line: UInt = #line
+    ) {
+        for secret in [stt.text, cleaner.out] where secret.count >= 4 {
+            XCTAssertFalse(
+                h.logs.value.contains { $0.contains(secret) },
+                "dictated text reached the log: \(h.logs.value)", file: file, line: line)
+        }
+    }
+
+    /// The `dictation:` summary of a single dictation run with `cleaner`.
+    private func dictationLine(
+        cleaner: FakeCleaner, stt: FakeStt = FakeStt(), config: PipelineConfig = PipelineConfig()
+    ) -> String {
+        let h = make(stt: stt, cleaner: cleaner, config: config)
+        dictateBounded(h)
+        assertNoDictatedText(h, stt: stt, cleaner: cleaner)
+        return h.logs.value.last { $0.hasPrefix("dictation:") } ?? "<no dictation line: \(h.logs.value)>"
+    }
+
+    func testSttErrorIsLoggedWithItsMessage() {
+        let h = make(stt: FakeStt(err: SttError(message: "model file missing")))
+        dictate(h)
+        XCTAssertTrue(
+            h.logs.value.contains { $0.hasPrefix("stt failed") && $0.contains("model file missing") },
+            "\(h.logs.value)")
+    }
+
+    func testSttDeadlineIsLogged() {
+        let h = make(stt: FakeStt(hang: true), config: PipelineConfig(sttTimeout: 0.05))
+        dictateBounded(h)
+        XCTAssertTrue(
+            h.logs.value.contains { $0.hasPrefix("stt failed") && $0.contains("timed out") },
+            "\(h.logs.value)")
+    }
+
+    func testUnexpectedSttFailureIsLogged() {
+        let h = make(stt: FakeStt(err: TestError(message: "odd failure")))
+        dictate(h)
+        XCTAssertTrue(
+            h.logs.value.contains { $0.hasPrefix("stt failed") && $0.contains("odd failure") },
+            "\(h.logs.value)")
+    }
+
+    func testCleanupDeadlineLogsTimeoutAsTheSkipReason() {
+        let line = dictationLine(
+            cleaner: FakeCleaner(hang: true), config: PipelineConfig(cleanupTimeout: 0.05))
+        XCTAssertTrue(line.contains("cleaned=false"), line)
+        XCTAssertTrue(line.hasSuffix(" cleanup_skip=timeout"), line)
+    }
+
+    func testCleanupErrorLogsErrorAsTheSkipReasonWithoutItsMessage() {
+        // The backend sees the dictated text, so its error text could echo it: log the reason, never the message.
+        let line = dictationLine(cleaner: FakeCleaner(err: TestError(message: "so um hello there world")))
+        XCTAssertTrue(line.hasSuffix(" cleanup_skip=error"), line)
+    }
+
+    func testEmptyCleanupLogsEmptyAsTheSkipReason() {
+        XCTAssertTrue(dictationLine(cleaner: FakeCleaner(out: "")).hasSuffix(" cleanup_skip=empty"))
+    }
+
+    func testOutOfBandCleanupLogsLengthAsTheSkipReason() {
+        let line = dictationLine(cleaner: FakeCleaner(out: "a much longer rewrite than anything the speaker said"))
+        XCTAssertTrue(line.hasSuffix(" cleanup_skip=length"), line)
+    }
+
+    func testLanguageFlipLogsLanguageAsTheSkipReason() {
+        let line = dictationLine(
+            cleaner: FakeCleaner(out: "el perro es de la mesa con los"),
+            stt: FakeStt(text: "the dog is on the table with you"))
+        XCTAssertTrue(line.hasSuffix(" cleanup_skip=language"), line)
+    }
+
+    func testSuccessfulCleanupLogsNoSkipReason() {
+        let line = dictationLine(cleaner: FakeCleaner())
+        XCTAssertTrue(line.contains("cleaned=true"), line)
+        XCTAssertFalse(line.contains("cleanup_skip"), line)
+    }
+
     // MARK: - Bounds: deadlines, queue age, hold limits
 
     func testHangingCleanerIsBoundedAndRawIsPasted() {

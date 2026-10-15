@@ -95,10 +95,16 @@ final class AppModel: ObservableObject {
             restoreDelay: settings.restoreDelay
         )
 
+        // First, so the model loads below can report into scribe.log instead of stdout.
+        let logger = FileLogger()
+        self.logger = logger
+        let log: @Sendable (String) -> Void = { logger.log($0) }
+
         let sttRelay = sttProgressRelay
         self.engines = [
-            "parakeet": ParakeetEngine(onDownloadProgress: { sttRelay.report(model: "Parakeet Ultra", fraction: $0) }),
-            "whisper": WhisperEngine(),
+            "parakeet": ParakeetEngine(
+                onDownloadProgress: { sttRelay.report(model: "Parakeet Ultra", fraction: $0) }, onLog: log),
+            "whisper": WhisperEngine(onLog: log),
         ]
         let store = CleanupModelStore()
         let statuses = AppModel.computeModelStatuses(store)
@@ -123,9 +129,8 @@ final class AppModel: ObservableObject {
         let lostHandoff = AppleIntelligenceLostHandoff()
         self.appleIntelligenceLost = lostHandoff
         self.cleaner = CleanupModelCatalog.makeBackend(
-            selection, relay: progressRelay, onAppleIntelligenceLost: { lostHandoff.fire() })
+            selection, relay: progressRelay, onAppleIntelligenceLost: { lostHandoff.fire() }, onLog: log)
         self.idleTracker = IdleTracker(unloadAfterMinutes: settings.idleUnloadMinutes)
-        self.logger = FileLogger()
 
         let dictionary = UserDictionaryStore()
         dictionary.learningEnabled = settings.dictionaryLearningEnabled
@@ -158,7 +163,7 @@ final class AppModel: ObservableObject {
 
         // All stored properties are initialized, so self can be captured by callbacks arriving off the main actor.
         let engine = self.engines[startingEngine]!
-        let recorder = Recorder(sampleRate: pipelineConfig.sampleRate)
+        let recorder = Recorder(sampleRate: pipelineConfig.sampleRate, engineControl: AVEngineControl(onLog: log))
         recorder.setPreferredInput(uid: settings.microphoneUID)
         self.recorder = recorder
         self.pipeline = DictationPipeline(
@@ -190,7 +195,7 @@ final class AppModel: ObservableObject {
                 }
             },
             cleanupEnabled: settings.cleanupEnabled,
-            onLog: { [logger] line in logger.log(line) },
+            onLog: log,
             // Store is thread-safe and observe() is fire-and-forget: no main-actor hop.
             onCleaned: { [dictionary] text in dictionary.observe(cleanedText: text) },
             replacementPairs: { [dictionary] in dictionary.allPairs }
@@ -234,6 +239,8 @@ final class AppModel: ObservableObject {
 
     /// Installs the hotkey tap and starts the preload + idle-unload loops. Must run on main (CGEventTap).
     private func start() {
+        // last_failed.wav is for debugging a recent failure, not for keeping audio around.
+        FileLogger.expireFailedAudio()
         // Cached TCC reads (no prompt), seeded early so the launch auto-open decision is correct.
         grants.microphone = TCC.microphoneGranted()
         grants.accessibility = TCC.accessibilityGranted()
@@ -295,6 +302,7 @@ final class AppModel: ObservableObject {
         Task { [weak self] in
             let t0 = Date()
             await engine?.preload()
+            var cleanupLoaded = true   // not attempted (disabled or superseded) is not a failure
             // Stale-cleaner guard: a model switch during the STT preload above
             // may already have committed a new cleaner and unloaded this one.
             // Preloading the captured `cleaner` now would resurrect an orphan
@@ -304,6 +312,9 @@ final class AppModel: ObservableObject {
             if cleanupEnabled, let self, self.cleaner === cleaner {
                 self.cleanupLoadInFlight = true
                 await cleaner.preload()
+                // A switch that committed during the warm-up unloads this cleaner; that is superseded, not failed.
+                let loaded = await cleaner.isLoaded
+                cleanupLoaded = loaded || self.cleaner !== cleaner
                 // A user-initiated switch may have started downloading while
                 // this preload ran; it owns the flag and the status line then.
                 if self.pendingCleanupModel == nil {
@@ -312,9 +323,21 @@ final class AppModel: ObservableObject {
                     self.cleanupModelProgress = nil
                 }
             }
-            let elapsed = Date().timeIntervalSince(t0)
-            logger.log("models ready in \(String(format: "%.1f", elapsed))s")
+            let sttLoaded = await engine?.isLoaded ?? true
+            logger.log(
+                AppModel.startupLogLine(
+                    sttLoaded: sttLoaded, cleanupLoaded: cleanupLoaded, elapsed: Date().timeIntervalSince(t0)))
         }
+    }
+
+    /// "models ready" must only be written when they are; the load errors themselves are logged where they happen.
+    nonisolated static func startupLogLine(sttLoaded: Bool, cleanupLoaded: Bool, elapsed: Double) -> String {
+        let took = String(format: "%.1f", elapsed)
+        var failed: [String] = []
+        if !sttLoaded { failed.append("transcription model") }
+        if !cleanupLoaded { failed.append("cleanup model") }
+        guard !failed.isEmpty else { return "models ready in \(took)s" }
+        return "models not ready after \(took)s — \(failed.joined(separator: " and ")) failed to load"
     }
 
     private func startIdleUnloadLoop() {
@@ -395,7 +418,6 @@ final class AppModel: ObservableObject {
         UNUserNotificationCenter.current().add(request) { error in
             if let error {
                 logger.log("notification delivery failed: \(message) (\(error))")
-                print("[scribe] \(message)")
             }
         }
     }
@@ -521,12 +543,13 @@ final class AppModel: ObservableObject {
             let selection = CleanupModelCatalog.Selection.model(id)
             let spec = CleanupModelCatalog.spec(id)
             let handoff = appleIntelligenceLost
+            let logger = self.logger
             let newCleaner = CleanupModelCatalog.makeBackend(
-                selection, relay: progressRelay, onAppleIntelligenceLost: { handoff.fire() })
+                selection, relay: progressRelay, onAppleIntelligenceLost: { handoff.fire() },
+                onLog: { logger.log($0) })
             newCleaner.setDictionary(CleanupModelCatalog.promptSnapshot(dictionary.snapshot, for: selection))
             let previous = cleaner
             let previousLabel = activeSelectionLabel
-            let logger = self.logger
             cleanupLoadInFlight = true
             cleanupModelStatus = "Loading \(spec.label)…"
             cleanupModelProgress = nil

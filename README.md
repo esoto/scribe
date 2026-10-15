@@ -228,10 +228,11 @@ outside scribe's process. scribe manages them on demand:
 - **Hotkey does nothing** → Input Monitoring grant missing (common after
   replacing the app binary: re-toggle scribe in System Settings → Privacy &
   Security → Input Monitoring, or use the setup window's Request button).
-  If the log shows `flagsChanged` lines while you type, the tap is alive and
-  the grant is fine — check the keycode: Right ⌥ is **61**, and an external
-  keyboard may report its Option key as 58 (Left ⌥), which won't match. A
-  press that registers logs `keycode=61 ... -> down`.
+  The log records only presses of the hotkey itself. If pressing it logs
+  `flagsChanged keycode=61 ... -> down`, the tap is alive and the grant is
+  fine. If it logs nothing, the key isn't reaching scribe as Right ⌥ (**61**):
+  an external keyboard may report its Option key as 58 (Left ⌥), which won't
+  match.
 - **Old clipboard contents got pasted** → increase `restoreDelay`.
 - **Transcription failed** → the audio was saved to
   `~/Library/Logs/scribe/last_failed.wav`.

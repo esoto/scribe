@@ -23,6 +23,11 @@ struct PipelineConfig {
     var sampleRate: Double = 16000.0
 }
 
+/// Why a cleanup attempt fell back to the raw transcript. The raw values are what scribe.log records.
+enum CleanupSkip: String, Error {
+    case timeout, error, empty, length, language
+}
+
 protocol RecorderLike {
     func arm() throws
     func disarm() -> [Float]
@@ -206,7 +211,9 @@ final class DictationPipeline {
 
         let t0 = clock()
         let sttStart = t0
-        func failTranscription(_ notice: String) {
+        func failTranscription(_ notice: String, reason: String) {
+            // The status row says "Error — check log", so the log has to say what failed.
+            onLog?("stt failed (\(engineName)): \(reason)")
             saveFailedAudio(pcm)
             onNotice(notice)
             terminal = true
@@ -217,13 +224,16 @@ final class DictationPipeline {
             let engine = stt
             raw = Gates.normalize(try await withDeadline(config.sttTimeout) { try await engine.transcribe(pcm) })
         } catch let sttError as SttError {
-            failTranscription("Transcription failed: \(sttError.message)")
+            failTranscription("Transcription failed: \(sttError.message)", reason: sttError.message)
             return
         } catch is DeadlineExceeded {
-            failTranscription("Transcription timed out after \(Int(config.sttTimeout)) s — audio saved")
+            failTranscription(
+                "Transcription timed out after \(Int(config.sttTimeout)) s — audio saved",
+                reason: "timed out after \(Int(config.sttTimeout)) s")
             return
         } catch {
-            // Non-SttError failures have no defined contract here.
+            // Non-SttError failures have no defined contract here; log, but keep the dictation quiet.
+            onLog?("stt failed (\(engineName)): unexpected error: \(error)")
             return
         }
 
@@ -245,17 +255,22 @@ final class DictationPipeline {
         var final = transcript
         var cleaned = false
         var cleanupMs = 0
+        var skipNote = ""
         if let cleaner,
             Gates.shouldClean(transcript, enabled: cleanupEnabled, minWords: config.minWords)
         {
             let cleanStart = clock()
-            if let out = await tryClean(transcript, cleaner: cleaner) {
+            switch await tryClean(transcript, cleaner: cleaner) {
+            case .success(let out):
                 final = TermReplacer.apply(pairs, to: out)
                 cleaned = true
+            case .failure(let skip):
+                // The reason token only: the backend's error text could echo the dictated text.
+                skipNote = " cleanup_skip=\(skip.rawValue)"
             }
             cleanupMs = Int((clock() - cleanStart) * 1000)
         }
-        onLog?("dictation: engine=\(engineName) cleanupModel=\(cleanupModelName) stt=\(sttMs)ms bias=\(biasMs)ms cleanup=\(cleanupMs)ms cleaned=\(cleaned) chars=\(final.count)")
+        onLog?("dictation: engine=\(engineName) cleanupModel=\(cleanupModelName) stt=\(sttMs)ms bias=\(biasMs)ms cleanup=\(cleanupMs)ms cleaned=\(cleaned) chars=\(final.count)\(skipNote)")
 
         if cleaned {
             onCleaned?(final)
@@ -280,22 +295,19 @@ final class DictationPipeline {
         ))
     }
 
-    /// Returns nil for any gate/error that means "use raw".
-    private func tryClean(_ raw: String, cleaner: CleanupBackend) async -> String? {
+    /// The failure case is any gate/error that means "use raw", with the reason it was hit.
+    private func tryClean(_ raw: String, cleaner: CleanupBackend) async -> Result<String, CleanupSkip> {
         let out: String
         do {
             // withDeadline also cancels the call when the deadline fires, so Gemma's token loop frees the model.
             out = Gates.normalize(try await withDeadline(config.cleanupTimeout) { try await cleaner.clean(raw) })
         } catch {
-            return nil
+            return .failure(error is DeadlineExceeded ? .timeout : .error)
         }
-        guard !out.isEmpty, Gates.lengthOk(raw: raw, cleaned: out, band: config.lengthBand) else {
-            return nil
-        }
-        guard Gates.languageConsistent(raw: raw, cleaned: out) else {
-            return nil
-        }
-        return out
+        guard !out.isEmpty else { return .failure(.empty) }
+        guard Gates.lengthOk(raw: raw, cleaned: out, band: config.lengthBand) else { return .failure(.length) }
+        guard Gates.languageConsistent(raw: raw, cleaned: out) else { return .failure(.language) }
+        return .success(out)
     }
 
     // MARK: - Default runner
