@@ -198,7 +198,7 @@ final class AppModel: ObservableObject {
         AudioDevices.onDevicesChanged { [weak self] in
             guard let self else { return }
             // Republish only on a real change: CoreAudio's transient aggregates also fire the listener,
-            // and a no-op republish closes the open Microphone submenu.
+            // and a no-op republish rebuilds the open menu and the Settings window's microphone picker.
             let fresh = AudioDevices.inputDevices()
             if fresh != self.microphones {
                 self.microphones = fresh
@@ -360,6 +360,20 @@ struct ScribeApp: App {
 
         Window("scribe settings", id: settingsWindowID) {
             SettingsWindow(model: model)
+        }
+        .commands { SettingsCommand() }
+    }
+}
+
+/// The menu bar menu's ⌘, only fires while that menu is open. With a scribe window frontmost the app is a
+/// regular app with a main menu, and ⌘, belongs there.
+private struct SettingsCommand: Commands {
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some Commands {
+        CommandGroup(replacing: .appSettings) {
+            Button("Settings…") { openSettingsWindow(openWindow) }
+                .keyboardShortcut(",")
         }
     }
 }

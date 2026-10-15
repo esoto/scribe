@@ -1,3 +1,4 @@
+import Combine
 import XCTest
 
 /// Pins the cleanup-model switch protocol (begin, commit, failed load, revert, supersede, Apple Intelligence
@@ -85,11 +86,13 @@ final class CleanupModelControllerTests: XCTestCase {
     }
 
     private var h: Harness!
+    private var cancellables: Set<AnyCancellable> = []
 
     override func setUp() {
         super.setUp()
         h = Harness()
         h.settings.cleanupModel = CleanupModelID.gemma3.rawValue
+        cancellables = []
     }
 
     override func tearDown() {
@@ -656,6 +659,53 @@ final class CleanupModelControllerTests: XCTestCase {
         let notified = await eventually { !h.notifications.isEmpty }
         XCTAssertTrue(notified)
         XCTAssertEqual(h.factoryCalls.count, 2)
+    }
+
+    /// Counts `objectWillChange` emissions, i.e. the menu, Models pane and Dictionary window rebuilds a write causes.
+    private func countPublishes(_ controller: CleanupModelController) -> () -> Int {
+        var count = 0
+        controller.objectWillChange.sink { count += 1 }.store(in: &cancellables)
+        return { count }
+    }
+
+    func testRefreshingUnchangedAvailabilityPublishesNothing() {
+        let c = h.makeController()
+        let publishes = countPublishes(c)
+
+        c.refreshAppleIntelligenceAvailability()
+        c.refreshAppleIntelligenceAvailability()
+
+        XCTAssertEqual(publishes(), 0, "refresh runs on every key-down")
+    }
+
+    func testRefreshingAnUnchangedLossPublishesOnlyTheFirstTime() {
+        let c = h.makeController()
+        h.afmAvailable = false
+        h.afmReason = "Turn on Apple Intelligence in System Settings"
+        let publishes = countPublishes(c)
+
+        c.refreshAppleIntelligenceAvailability()
+        let afterTheChange = publishes()
+        c.refreshAppleIntelligenceAvailability()
+        c.refreshAppleIntelligenceAvailability()
+
+        XCTAssertGreaterThan(afterTheChange, 0, "going unavailable is a real change")
+        XCTAssertEqual(publishes(), afterTheChange, "repeating it must not rebuild the views again")
+        XCTAssertEqual(c.appleIntelligenceUnavailableReason, "Turn on Apple Intelligence in System Settings")
+    }
+
+    func testAChangedReasonPublishesAgain() {
+        let c = h.makeController()
+        h.afmAvailable = false
+        h.afmReason = "Apple Intelligence is still downloading"
+        c.refreshAppleIntelligenceAvailability()
+        let publishes = countPublishes(c)
+
+        h.afmReason = "Turn on Apple Intelligence in System Settings"
+        c.refreshAppleIntelligenceAvailability()
+
+        XCTAssertGreaterThan(publishes(), 0)
+        XCTAssertEqual(c.appleIntelligenceUnavailableReason, "Turn on Apple Intelligence in System Settings")
     }
 
     func testLossWhileAGemmaIsActiveOnlyMarksAppleIntelligenceUnavailable() {
