@@ -36,6 +36,7 @@ protocol HotkeyMonitoring: AnyObject {
     var onModifierEvent: ((String) -> Void)? { get set }
     func install() throws
     func reinstall() throws
+    func uninstall()
     func forgetHeldKey()
 }
 
@@ -79,7 +80,8 @@ final class DictationCoordinator: ObservableObject {
 
     private let recorder: RecorderPreparing
     private let pipelineConfig: PipelineConfig
-    private let hotkey: HotKey
+    private(set) var hotkey: HotKey
+    private let makeHotkeyMonitor: (HotKey, @escaping () -> Void, @escaping () -> Void) -> HotkeyMonitoring
     private let notifier: Notifier
     private let playSound: (String) -> Void
     private let soundsEnabled: () -> Bool
@@ -95,7 +97,8 @@ final class DictationCoordinator: ObservableObject {
         pipelineConfig: PipelineConfig,
         hotkey: HotKey,
         makePipeline: (PipelineSinks) -> DictationPipeline,
-        makeHotkeyMonitor: (_ onDown: @escaping () -> Void, _ onUp: @escaping () -> Void) -> HotkeyMonitoring,
+        makeHotkeyMonitor: @escaping (_ key: HotKey, _ onDown: @escaping () -> Void, _ onUp: @escaping () -> Void)
+            -> HotkeyMonitoring,
         notifier: Notifier,
         playSound: @escaping (String) -> Void,
         soundsEnabled: @escaping () -> Bool,
@@ -109,6 +112,7 @@ final class DictationCoordinator: ObservableObject {
         self.recorder = recorder
         self.pipelineConfig = pipelineConfig
         self.hotkey = hotkey
+        self.makeHotkeyMonitor = makeHotkeyMonitor
         self.notifier = notifier
         self.playSound = playSound
         self.soundsEnabled = soundsEnabled
@@ -147,7 +151,12 @@ final class DictationCoordinator: ObservableObject {
                         self?.playPasteCue()
                     }
                 }))
-        self.hotkeyMonitor = makeHotkeyMonitor(
+        self.hotkeyMonitor = buildHotkeyMonitor(for: hotkey)
+    }
+
+    private func buildHotkeyMonitor(for key: HotKey) -> HotkeyMonitoring {
+        makeHotkeyMonitor(
+            key,
             { [weak self] in self?.handleKeyDown() },
             { [weak self] in self?.handleKeyUp() })
     }
@@ -218,6 +227,27 @@ final class DictationCoordinator: ObservableObject {
 
     func setCleanupEnabled(_ on: Bool) {
         pipeline.cleanupEnabled = on
+    }
+
+    /// Swaps the hotkey at runtime. The old tap goes first, while its monitor is still retained, and a hold in
+    /// progress ends: the old key's release will never arrive. The new monitor is kept even when its install
+    /// fails, so the Input Monitoring retry rebuilds the tap for the new key.
+    func setHotkey(_ key: HotKey) {
+        holdWatchdog?.cancel()
+        pipeline.cancelHold()
+        hotkeyMonitor.uninstall()
+
+        hotkey = key
+        hotkeyMonitor = buildHotkeyMonitor(for: key)
+        hotkeyMonitor.onModifierEvent = { [log] line in log("tap: \(line)") }
+        do {
+            try hotkeyMonitor.install()
+            reportInputMonitoring(true)
+        } catch {
+            log("hotkey install failed: \(error)")
+            reportInputMonitoring(false)
+        }
+        log("hotkey changed to \(key.rawValue)")
     }
 
     // MARK: - Pipeline callbacks (always entered on @MainActor — see the sinks in init)

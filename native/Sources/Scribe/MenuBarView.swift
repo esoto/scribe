@@ -143,10 +143,6 @@ struct MenuBarView: View {
         .pickerStyle(.menu)
         .disabled(cleanupModels.activeCleanupModel == "custom")
 
-        Button("Manage Models…") {
-            openModelsWindow(openWindow)
-        }
-
         Picker("Microphone", selection: Binding(
             get: { model.microphoneUID ?? "" },
             set: { model.setMicrophone(uid: $0.isEmpty ? nil : $0) }
@@ -229,6 +225,11 @@ struct MenuBarView: View {
         }
 
         Divider()
+
+        Button("Settings…") {
+            openSettingsWindow(openWindow)
+        }
+        .keyboardShortcut(",")
 
         Button("Setup / Doctor…") {
             openOnboarding(openWindow)

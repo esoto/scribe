@@ -82,6 +82,10 @@ final class HotkeyMonitor {
         try install()
     }
 
+    /// Removes the tap without installing another. Call while the monitor is still retained: the C callback holds
+    /// an unretained pointer to it, so a tap that outlives its monitor crashes on the next keystroke.
+    func uninstall() { teardown() }
+
     private func teardown() {
         if let tap {
             CGEvent.tapEnable(tap: tap, enable: false)
