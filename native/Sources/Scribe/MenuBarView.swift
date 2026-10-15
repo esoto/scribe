@@ -56,15 +56,6 @@ func nowLine(engine: String, cleanupModel: String, cleanupEnabled: Bool) -> Stri
     cleanupEnabled ? "\(engine) · \(cleanupModel)" : "\(engine) · cleanup off"
 }
 
-/// Shown for a few seconds after a dictation pasted the raw transcript, so raw and cleaned stop looking alike.
-func pastedRawHint(_ skip: CleanupSkip) -> String {
-    switch skip {
-    case .timeout: return "Pasted raw — cleanup timed out"
-    case .error: return "Pasted raw — cleanup failed"
-    case .empty, .length, .language: return "Pasted raw — cleanup output rejected"
-    }
-}
-
 /// History row: the text, plus a marker when cleanup did not run so the user can tell the two apart.
 func historyRowLabel(_ record: DictationRecord) -> String {
     record.cleaned ? truncateLabel(record.final) : truncateLabel(record.final) + " · raw"

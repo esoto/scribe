@@ -150,14 +150,14 @@ final class DictationCoordinatorTests: XCTestCase {
         XCTAssertEqual(c.hint, "Pasted raw — cleanup failed")
     }
 
-    func testANewerHintReplacesTheOldOneAndCancelsItsClear() async {
-        let c = make(hintSeconds: 0.05)
+    func testANewerHintReplacesTheOldOneAndCancelsItsClear() {
+        let c = make(hintSeconds: 30)
         c.showHint("first")
         let firstClear = c.hintClear
 
         c.showHint("second")
-        await firstClear?.value
 
+        XCTAssertEqual(firstClear?.isCancelled, true)
         XCTAssertEqual(c.hint, "second")
     }
 

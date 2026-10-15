@@ -28,6 +28,15 @@ enum CleanupSkip: String, Error {
     case timeout, error, empty, length, language
 }
 
+/// Shown for a few seconds after a dictation pasted the raw transcript, so raw and cleaned stop looking alike.
+func pastedRawHint(_ skip: CleanupSkip) -> String {
+    switch skip {
+    case .timeout: return "Pasted raw — cleanup timed out"
+    case .error: return "Pasted raw — cleanup failed"
+    case .empty, .length, .language: return "Pasted raw — cleanup output rejected"
+    }
+}
+
 protocol RecorderLike {
     func arm() throws
     func disarm() -> [Float]
