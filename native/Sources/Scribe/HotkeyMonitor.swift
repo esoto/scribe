@@ -73,6 +73,9 @@ final class HotkeyMonitor {
         runLoopSource = source
     }
 
+    /// The pipeline ended the hold itself; a release the tap never saw must not swallow the next press.
+    func forgetHeldKey() { _ = machine.reset() }
+
     /// Replaces the tap; onboarding uses this to activate the hotkey right after the grant.
     func reinstall() throws {
         teardown()

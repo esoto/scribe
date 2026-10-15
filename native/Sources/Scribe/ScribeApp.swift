@@ -252,6 +252,7 @@ final class AppModel: ObservableObject {
             MainActor.assumeIsolated {
                 self?.holdWatchdog?.cancel()
                 self?.pipeline.cancelHold()
+                self?.hotkeyMonitor.forgetHeldKey()
             }
         }
 
@@ -416,6 +417,7 @@ final class AppModel: ObservableObject {
             try? await Task.sleep(nanoseconds: UInt64(maxHold * 1e9))
             guard !Task.isCancelled else { return }
             self?.pipeline.forceStop()
+            self?.hotkeyMonitor.forgetHeldKey()
         }
         pipeline.keyDown()
     }

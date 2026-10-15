@@ -476,7 +476,7 @@ final class PipelineTests: XCTestCase {
         XCTAssertEqual(h.states.value.last, .error)
         XCTAssertEqual(h.states.value.filter { $0 == .idle }.count, 0)
         XCTAssertEqual(h.saved.value.count, 1)
-        XCTAssertTrue(h.notices.value.contains { $0.contains("timed out") }, "\(h.notices.value)")
+        XCTAssertEqual(h.notices.value, ["Transcription timed out after 0 s — audio saved"])
         XCTAssertEqual(paster.pasted, [])
     }
 
