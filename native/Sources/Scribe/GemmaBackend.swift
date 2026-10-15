@@ -353,7 +353,7 @@ final class GemmaBackend: CleanupModelBackend, @unchecked Sendable {
             input: LMInput(text: inputText), cache: cache, parameters: parameters, context: context)
         var output = ""
         for await generation in stream {
-            // Honor cleanWithTimeout cancellation, or a timed-out cleanup holds the model mutex.
+            // Honor the pipeline's cancel-on-timeout, or a timed-out cleanup holds the model mutex.
             try Task.checkCancellation()
             if case .chunk(let piece) = generation {
                 output += piece

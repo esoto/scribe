@@ -8,6 +8,7 @@ struct HotkeyError: Error {
 /// Session-level, listen-only `CGEventTap` feeding `KeyStateMachine`. Untested: needs Input Monitoring.
 final class HotkeyMonitor {
     private let machine: KeyStateMachine
+    private let keycode: Int
     private let onDown: () -> Void
     private let onUp: () -> Void
 
@@ -19,6 +20,7 @@ final class HotkeyMonitor {
 
     init(key: HotKey, onDown: @escaping () -> Void, onUp: @escaping () -> Void) {
         self.machine = KeyStateMachine(key: key)
+        self.keycode = key.keycode
         self.onDown = onDown
         self.onUp = onUp
     }
@@ -71,6 +73,9 @@ final class HotkeyMonitor {
         runLoopSource = source
     }
 
+    /// The pipeline ended the hold itself; a release the tap never saw must not swallow the next press.
+    func forgetHeldKey() { _ = machine.reset() }
+
     /// Replaces the tap; onboarding uses this to activate the hotkey right after the grant.
     func reinstall() throws {
         teardown()
@@ -104,8 +109,9 @@ final class HotkeyMonitor {
             if let tap = monitor.tap {
                 CGEvent.tapEnable(tap: tap, enable: true)
             }
-            // A release during the gap is gone; end the hold rather than record until the next tap.
-            if monitor.machine.reset() {
+            // A release during the gap is gone; end the hold rather than record until the next tap. A key still
+            // physically down keeps its hold, or the dictation is cut short and the real release is ignored.
+            if !CGEventSource.keyState(.hidSystemState, key: CGKeyCode(monitor.keycode)), monitor.machine.reset() {
                 monitor.onUp()
             }
             return nil

@@ -82,6 +82,18 @@ final class PipelineTests: XCTestCase {
         h.pipeline.keyUp()
     }
 
+    /// Fails instead of hanging the suite if the pipeline never returns — the exact regression the deadline tests guard.
+    private func dictateBounded(_ h: Harness, hold: Double = 1.0, limit: TimeInterval = 5.0) {
+        h.pipeline.keyDown()
+        h.clock.t += hold
+        let returned = DispatchSemaphore(value: 0)
+        DispatchQueue.global().async {
+            h.pipeline.keyUp()
+            returned.signal()
+        }
+        XCTAssertEqual(returned.wait(timeout: .now() + limit), .success, "pipeline did not return within \(limit) s")
+    }
+
     func testHappyPathCleansAndPastes() {
         let paster = FakePaster()
         let hist = History(maxLen: 10)
@@ -498,6 +510,144 @@ final class PipelineTests: XCTestCase {
         let h = make(stt: FakeStt(text: "so um deploy with camel today"), cleaner: cleaner, pairs: camelPair)
         dictate(h)
         XCTAssertEqual(cleaner.received, ["so um deploy with kamal today"])
+    }
+
+    // MARK: - Bounds: deadlines, queue age, hold limits
+
+    func testHangingCleanerIsBoundedAndRawIsPasted() {
+        let paster = FakePaster()
+        let h = make(cleaner: FakeCleaner(hang: true), paster: paster, config: PipelineConfig(cleanupTimeout: 0.05))
+        dictateBounded(h)
+        XCTAssertEqual(paster.pasted.last, "so um hello there world")
+        XCTAssertEqual(h.states.value.last, .idle)
+    }
+
+    func testTimedOutCleanupIsCancelledSoCooperativeBackendsReleaseTheModel() {
+        let cancelled = expectation(description: "cleaner told to stop")
+        let h = make(
+            cleaner: FakeCleaner(delay: 5.0, onCancel: { cancelled.fulfill() }),
+            config: PipelineConfig(cleanupTimeout: 0.05))
+        dictateBounded(h)
+        wait(for: [cancelled], timeout: 2.0)
+    }
+
+    func testHangingSttIsBoundedAndEndsInTheErrorState() {
+        let paster = FakePaster()
+        let h = make(stt: FakeStt(hang: true), paster: paster, config: PipelineConfig(sttTimeout: 0.05))
+        dictateBounded(h)
+        XCTAssertEqual(h.states.value.last, .error)
+        XCTAssertEqual(h.states.value.filter { $0 == .idle }.count, 0)
+        XCTAssertEqual(h.saved.value.count, 1)
+        XCTAssertEqual(h.notices.value, ["Transcription timed out after 0 s — audio saved"])
+        XCTAssertEqual(paster.pasted, [])
+    }
+
+    func testJobThatWaitedTooLongBehindThePreviousOneIsSkipped() {
+        let runner = ManualRunner()
+        let paster = FakePaster()
+        let stt = FakeStt()
+        let h = make(stt: stt, paster: paster, runner: runner.run)
+        dictate(h)
+        h.clock.t += 31
+        runner.drain()
+        XCTAssertEqual(h.notices.value, ["Dictation skipped — it waited 31 s behind the previous one"])
+        XCTAssertEqual(paster.pasted, [])
+        XCTAssertEqual(stt.calls, 0)
+        XCTAssertEqual(h.states.value, [.recording, .idle], "a skipped job must still release the glyph")
+    }
+
+    func testJobWithinTheQueueLimitIsProcessed() {
+        let runner = ManualRunner()
+        let paster = FakePaster()
+        let h = make(paster: paster, runner: runner.run)
+        dictate(h)
+        h.clock.t += 29
+        runner.drain()
+        XCTAssertEqual(paster.pasted, ["hello there world"])
+        XCTAssertTrue(h.notices.value.isEmpty)
+    }
+
+    func testSkippedStaleJobStaysQuietWhileANewerHoldIsRecording() {
+        let runner = ManualRunner()
+        let h = make(runner: runner.run)
+        dictate(h)
+        h.clock.t += 31
+        h.pipeline.keyDown()
+        runner.drain()
+        XCTAssertEqual(h.states.value.last, .recording)
+    }
+
+    func testForceStopWhileArmedNoticesThenProcessesTheHold() {
+        let paster = FakePaster()
+        let h = make(paster: paster)
+        h.pipeline.keyDown()
+        h.clock.t += 120
+        h.pipeline.forceStop()
+        XCTAssertEqual(h.notices.value, ["Stopped after 2 min — release the key"])
+        XCTAssertTrue(h.states.value.contains(.processing))
+        XCTAssertEqual(paster.pasted, ["hello there world"])
+    }
+
+    func testReleasingTheKeyAfterForceStopStartsNoSecondJob() {
+        let paster = FakePaster()
+        let stt = FakeStt()
+        let h = make(stt: stt, paster: paster)
+        h.pipeline.keyDown()
+        h.clock.t += 120
+        h.pipeline.forceStop()
+        h.pipeline.keyUp()
+        XCTAssertEqual(stt.calls, 1)
+        XCTAssertEqual(paster.pasted.count, 1)
+    }
+
+    func testForceStopWhileIdleIsANoOp() {
+        let h = make()
+        h.pipeline.forceStop()
+        XCTAssertTrue(h.states.value.isEmpty)
+        XCTAssertTrue(h.notices.value.isEmpty)
+    }
+
+    func testForceStopAfterTheHoldEndedIsANoOp() {
+        let paster = FakePaster()
+        let h = make(paster: paster)
+        dictate(h)
+        h.pipeline.forceStop()
+        XCTAssertEqual(paster.pasted.count, 1)
+        XCTAssertTrue(h.notices.value.isEmpty)
+    }
+
+    func testCancelHoldWhileArmedDiscardsTheAudioQuietly() {
+        let recorder = FakeRecorder()
+        let paster = FakePaster()
+        let stt = FakeStt()
+        let h = make(recorder: recorder, stt: stt, paster: paster)
+        h.pipeline.keyDown()
+        XCTAssertTrue(recorder.armed)
+        h.clock.t += 5
+        h.pipeline.cancelHold()
+        XCTAssertFalse(recorder.armed)
+        XCTAssertEqual(h.states.value, [.recording, .idle])
+        XCTAssertEqual(stt.calls, 0)
+        XCTAssertEqual(paster.pasted, [])
+        XCTAssertTrue(h.notices.value.isEmpty)
+    }
+
+    func testReleasingTheKeyAfterCancelHoldIsANoOp() {
+        let stt = FakeStt()
+        let h = make(stt: stt)
+        h.pipeline.keyDown()
+        h.pipeline.cancelHold()
+        h.clock.t += 5
+        h.pipeline.keyUp()
+        XCTAssertEqual(stt.calls, 0)
+        XCTAssertEqual(h.states.value, [.recording, .idle])
+    }
+
+    func testCancelHoldWhileIdleIsANoOp() {
+        let h = make()
+        h.pipeline.cancelHold()
+        XCTAssertTrue(h.states.value.isEmpty)
+        XCTAssertTrue(h.notices.value.isEmpty)
     }
 
     /// Locks in: arm() failure notifies, stays idle, never reaches the STT engine.
