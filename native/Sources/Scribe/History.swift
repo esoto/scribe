@@ -14,7 +14,7 @@ struct DictationRecord: Identifiable {
 
 /// Bounded, thread-safe in-memory dictation history (privacy: never persisted).
 final class History {
-    private let maxLen: Int
+    private var maxLen: Int
     private var storage: [DictationRecord] = []
     private let lock = NSLock()
 
@@ -26,6 +26,16 @@ final class History {
         lock.lock()
         defer { lock.unlock() }
         storage.append(r)
+        if storage.count > maxLen {
+            storage.removeFirst(storage.count - maxLen)
+        }
+    }
+
+    /// Shrinking drops the oldest records at once; growing keeps everything already stored.
+    func setMaxLen(_ n: Int) {
+        lock.lock()
+        defer { lock.unlock() }
+        maxLen = max(1, n)
         if storage.count > maxLen {
             storage.removeFirst(storage.count - maxLen)
         }
