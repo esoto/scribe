@@ -70,7 +70,8 @@ final class UserDictionaryStore: @unchecked Sendable {
         try? FileManager.default.createDirectory(
             at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         loadLocked()
-        decayLocked()
+        // The learning flag isn't set yet; its setter ages the glossary once it is.
+        decayLocked(includingGlossary: false)
         capLocked()
         lastSnapshot = computeSnapshotLocked()
         lastStructure = computeStructureLocked()
@@ -82,13 +83,17 @@ final class UserDictionaryStore: @unchecked Sendable {
         set { queue.sync { changeHandler = newValue } }
     }
 
-    /// Runtime learning switch; when off, no new words are written to disk and no candidate is promoted.
+    /// Runtime learning switch; when off, nothing learned is written to disk, the glossary is frozen, and no candidate is promoted.
     var learningEnabled: Bool {
         get { queue.sync { enabled } }
         set {
             queue.sync {
+                let wasEnabled = enabled
                 enabled = newValue
                 if newValue {
+                    // Words heard while off must neither reach disk nor count toward promotion.
+                    if !wasEnabled { candidates.removeAll() }
+                    decayLocked()
                     notifyIfChangedLocked()
                 } else {
                     // Persisting rewrites the file without candidates, purging any left by an earlier run.
@@ -135,6 +140,8 @@ final class UserDictionaryStore: @unchecked Sendable {
             let t = self.now()
             for term in terms {
                 if let i = self.glossary.firstIndex(where: { $0.term == term }) {
+                    // Use-counts and recency are learning too, so they freeze with it.
+                    guard self.enabled else { continue }
                     self.glossary[i].count += 1
                     self.glossary[i].lastSeen = t
                 } else if let i = self.candidates.firstIndex(where: { $0.term == term }) {
@@ -235,13 +242,16 @@ final class UserDictionaryStore: @unchecked Sendable {
             pairs: pairs.map { "\($0.original)=>\($0.replacement)" }.sorted())
     }
 
-    private func decayLocked() {
+    /// Candidates always age out. The glossary is skipped while learning is off, so switching it off never erodes learned terms.
+    private func decayLocked(includingGlossary: Bool = true) {
         let t = now()
         func stale(_ entry: GlossaryEntry, days: Double) -> Bool {
             t.timeIntervalSince(entry.lastSeen) > days * 86_400
         }
         candidates.removeAll { stale($0, days: Self.candidateDecayDays) }
-        glossary.removeAll { stale($0, days: Self.glossaryDecayDays) }
+        if includingGlossary, enabled {
+            glossary.removeAll { stale($0, days: Self.glossaryDecayDays) }
+        }
     }
 
     private func capLocked() {
