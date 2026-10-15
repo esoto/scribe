@@ -36,13 +36,14 @@ final class AppModel: ObservableObject {
     private var hotkeyMonitor: HotkeyMonitor!
     // Concrete so start() can prewarm its audio engine ahead of the first key-down.
     private var recorder: Recorder!
+    private let pasteTarget = PasteTarget()
     private var engineSwitchTask: Task<Void, Never>?
     // Target of the in-flight engine switch; nil when none.
     private var pendingEngineName: String?
 
     @Published private(set) var state: PipelineState = .idle
-    // Seeded from TCC probes in start(); the onboarding poll loop keeps it current.
-    @Published var grants: GrantStatus = GrantStatus(microphone: false, accessibility: false, inputMonitoring: false)
+    // Seeded from TCC probes in start(); refreshGrants() keeps it current.
+    @Published private(set) var grants: GrantStatus = GrantStatus(microphone: false, accessibility: false, inputMonitoring: false)
     @Published private(set) var activeEngineName: String
     @Published private(set) var cleanupEnabled: Bool
     @Published private(set) var microphoneUID: String?
@@ -72,7 +73,7 @@ final class AppModel: ObservableObject {
 
     private let pipelineConfig: PipelineConfig
 
-    var glyph: String { menuBarGlyph(state, progress: cleanupModelProgress) }
+    var glyph: String { menuBarGlyph(state, progress: cleanupModelProgress, needsAttention: !grantsOk) }
     var grantsOk: Bool { grants.microphone && grants.accessibility && grants.inputMonitoring }
 
     init() {
@@ -159,11 +160,16 @@ final class AppModel: ObservableObject {
         let recorder = Recorder(sampleRate: pipelineConfig.sampleRate)
         recorder.setPreferredInput(uid: settings.microphoneUID)
         self.recorder = recorder
+        let pasteTarget = self.pasteTarget
         self.pipeline = DictationPipeline(
             recorder: recorder,
             stt: engine,
             cleaner: self.cleaner,
-            paster: self.paster,
+            paster: GuardedPaster(
+                inner: self.paster,
+                accessibilityGranted: { TCC.accessibilityGranted() },
+                expectedFrontmost: { pasteTarget.get() },
+                currentFrontmost: frontmostPID),
             history: self.history,
             config: pipelineConfig,
             clock: { Date().timeIntervalSince1970 },
@@ -266,6 +272,7 @@ final class AppModel: ObservableObject {
         // Seed the idle tracker: due() requires a touch, so without this an unused launch pins ~3 GB forever.
         idleTracker.touch(now: ProcessInfo.processInfo.systemUptime)
         startIdleUnloadLoop()
+        startGrantWatch()
     }
 
     private func preloadAtStartup() {
@@ -309,6 +316,23 @@ final class AppModel: ObservableObject {
                     await self.unloadIdleModels()
                 }
             }
+        }
+    }
+
+    /// Grants change in System Settings, which scribe can't observe, so re-probe on a timer and on return to the app.
+    /// Without this a revoked permission only shows while the Setup window is open.
+    private func startGrantWatch() {
+        Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 5_000_000_000)
+                guard !Task.isCancelled, let self else { return }
+                self.refreshGrants()
+            }
+        }
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.refreshGrants() }
         }
     }
 
@@ -370,7 +394,10 @@ final class AppModel: ObservableObject {
     /// Runs on main (CGEventTap callback).
     private func handleKeyDown() {
         idleTracker.touch(now: ProcessInfo.processInfo.systemUptime)
+        pasteTarget.set(NSWorkspace.shared.frontmostApplication?.processIdentifier)
         refreshAppleIntelligenceAvailability()
+        // Deferred: a flip can reinstall the event tap, which must not happen inside the tap's own callback.
+        Task { [weak self] in self?.refreshGrants() }
 
         if let engine = engines[activeEngineName] {
             let cleaner = self.cleaner
@@ -705,6 +732,27 @@ final class AppModel: ObservableObject {
     }
 
     // MARK: - Onboarding
+
+    /// Re-reads all probes. A false→true flip on mic or Input Monitoring reacts without a restart.
+    func refreshGrants() {
+        let fresh = GrantStatus(
+            microphone: TCC.microphoneGranted(),
+            accessibility: TCC.accessibilityGranted(),
+            inputMonitoring: TCC.inputMonitoringGranted())
+        let change = GrantChange(from: grants, to: fresh)
+
+        // Publish only on change: each write rebuilds the menu bar and closes any open submenu.
+        if change.publish {
+            grants = fresh
+        }
+        if change.microphoneNewlyGranted {
+            prewarmRecorderIfGranted()
+        }
+        if change.inputMonitoringNewlyGranted {
+            // Reinstalls the tap; on failure it flips grants.inputMonitoring back to false itself.
+            activateHotkeyIfNeeded()
+        }
+    }
 
     /// Live-activates the hotkey tap after Input Monitoring is granted. Must run on main.
     func activateHotkeyIfNeeded() {

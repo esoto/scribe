@@ -173,6 +173,16 @@ final class PipelineTests: XCTestCase {
         XCTAssertEqual(hist.items().count, 1)
     }
 
+    func testPasteGuardErrorSurfacesItsOwnNotice() {
+        let hist = History(maxLen: 10)
+        let h = make(paster: FakePaster(err: PasteGuardError(notice: "X")), history: hist)
+        dictate(h)
+        XCTAssertEqual(h.notices.value, ["X"])
+        XCTAssertFalse(h.notices.value.contains("Paste failed — press ⌘V to paste manually"))
+        // The text is on the clipboard and in history, so the dictation still counts.
+        XCTAssertEqual(hist.items().count, 1)
+    }
+
     func testHistoryRecordsEngineAndRawFinal() {
         let hist = History(maxLen: 10)
         let h = make(history: hist)

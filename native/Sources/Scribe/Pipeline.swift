@@ -195,6 +195,8 @@ final class DictationPipeline {
 
         do {
             try paster.paste(final)
+        } catch let guarded as PasteGuardError {
+            onNotice(guarded.notice)
         } catch {
             onNotice("Paste failed — press ⌘V to paste manually")
         }

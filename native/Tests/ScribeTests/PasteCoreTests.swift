@@ -187,6 +187,32 @@ final class PasteCoreTests: XCTestCase {
         XCTAssertNil(pb.items.first?["org.nspasteboard.TransientType"])
     }
 
+    func test_copyOnly_sets_marked_text_without_posting_or_scheduling_a_restore() {
+        let pb = FakePasteboard()
+        let sched = FakeScheduler()
+        var posts = 0
+        let paster = Paster(pasteboard: pb, postCmdV: { posts += 1 }, schedule: sched.schedule, restoreDelay: 2.0)
+
+        paster.copyOnly("hola")
+
+        XCTAssertEqual(pb.items.first?[text], Data("hola".utf8))
+        XCTAssertNotNil(pb.items.first?["org.nspasteboard.TransientType"])
+        XCTAssertEqual(posts, 0)
+        XCTAssertEqual(sched.pending, 0)
+    }
+
+    func test_copyOnly_after_a_paste_keeps_the_copied_text_when_the_old_restore_fires() throws {
+        let pb = FakePasteboard()
+        let sched = FakeScheduler()
+        let paster = Paster(pasteboard: pb, postCmdV: {}, schedule: sched.schedule, restoreDelay: 2.0)
+
+        try paster.paste("first")
+        paster.copyOnly("second")  // the user still has to paste this by hand
+        sched.fireAll()
+
+        XCTAssertEqual(pb.items.first?[text], Data("second".utf8))
+    }
+
     func test_a_copy_made_between_two_dictations_is_what_gets_restored() throws {
         let copied = [[text: Data("theirs".utf8)]]
         let pb = FakePasteboard(items: [[text: Data("mine".utf8)]])

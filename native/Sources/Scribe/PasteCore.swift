@@ -56,6 +56,14 @@ final class Paster {
         }
     }
 
+    /// For when ⌘V can't be sent. The user pastes by hand, so there is no restore to wipe the text.
+    func copyOnly(_ text: String) {
+        lock.withLock {
+            pending = nil
+            pasteboard.setTransient(text)
+        }
+    }
+
     private func restore(saved: [PasteboardItemData], setCount: Int) {
         lock.withLock {
             // Also frees a snapshot (up to 32 MiB) when the user copied meanwhile.
