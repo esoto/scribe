@@ -14,6 +14,7 @@
     --brand-violet-1: #5B4FE9;
     --brand-violet-2: #6D28D9;
     --brand-violet-3: #3B1D8F;
+    --violet-text: #6D28D9;
     --brand-gradient: linear-gradient(135deg, #5B4FE9 0%, #6D28D9 55%, #3B1D8F 100%);
     --accent: #007AFF;
     --page-bg: #FFFFFF;
@@ -21,7 +22,7 @@
     --control-border: rgba(0, 0, 0, 0.12);
     --separator: rgba(0, 0, 0, 0.08);
     --text-primary: rgba(0, 0, 0, 0.85);
-    --text-secondary: rgba(0, 0, 0, 0.50);
+    --text-secondary: rgba(0, 0, 0, 0.60);
     --text-tertiary: rgba(0, 0, 0, 0.26);
     --demo-shadow: 0 12px 40px rgba(30, 17, 69, 0.10);
     --font-system: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", "Helvetica Neue", sans-serif;
@@ -35,6 +36,7 @@
       --text-primary: rgba(255, 255, 255, 0.88);
       --text-secondary: rgba(255, 255, 255, 0.55);
       --text-tertiary: rgba(255, 255, 255, 0.28);
+      --violet-text: #A99BFF;
       --demo-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
     }
   }
@@ -50,7 +52,7 @@
 
   header { padding: 72px 48px 64px; text-align: center; }
   h1 { font-size: 56px; font-weight: 700; letter-spacing: -0.02em; text-wrap: balance; }
-  h1 .violet { color: var(--brand-violet-2); }
+  h1 .violet { color: var(--violet-text); }
   header p { font-size: 18px; color: var(--text-secondary); max-width: 560px; margin: 20px auto 0; line-height: 1.5; }
   .cta { display: flex; gap: 12px; justify-content: center; margin-top: 32px; flex-wrap: wrap; }
   .btn-primary { background: var(--brand-violet-2); color: #fff; font-size: 14px; font-weight: 500; padding: 10px 22px; border-radius: 8px; }
@@ -60,27 +62,27 @@
   .btn-demo .glyph.rec { color: #FF3B30; }
 
   .demo { max-width: 640px; margin: 0 auto; padding: 0 48px; }
-  .demo-box { background: var(--card-bg); border: 1px solid var(--separator); border-radius: 12px; box-shadow: var(--demo-shadow); padding: 18px 20px; min-height: 56px; font-size: 15px; line-height: 1.5; text-align: left; color: var(--text-tertiary); }
+  .demo-box { background: var(--card-bg); border: 1px solid var(--separator); border-radius: 12px; box-shadow: var(--demo-shadow); padding: 18px 20px; min-height: 56px; font-size: 15px; line-height: 1.5; text-align: left; color: var(--text-secondary); }
   .demo-box.filled { color: var(--text-primary); }
 
   .steps { padding-top: 72px; padding-bottom: 72px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; }
   .step { border-top: 1px solid var(--separator); padding-top: 20px; }
-  .step .n { font-size: 13px; font-weight: 600; color: var(--brand-violet-2); }
+  .step .n { font-size: 13px; font-weight: 600; color: var(--violet-text); }
   .step .t { font-size: 17px; font-weight: 600; margin-top: 6px; }
   .step .d { font-size: 13px; color: var(--text-secondary); line-height: 1.5; margin-top: 6px; }
 
   .learns { padding-bottom: 80px; }
   .learns h2 { font-size: 32px; font-weight: 700; letter-spacing: -0.01em; text-wrap: balance; }
-  .learns h2 .violet { color: var(--brand-violet-2); }
+  .learns h2 .violet { color: var(--violet-text); }
   .learns .lede { font-size: 15px; color: var(--text-secondary); line-height: 1.5; max-width: 560px; margin-top: 14px; }
   .learns .fix { background: var(--card-bg); border: 1px solid var(--separator); border-radius: 12px; box-shadow: var(--demo-shadow); padding: 18px 20px; margin-top: 28px; max-width: 640px; }
   .learns .fix .row { display: flex; align-items: baseline; gap: 14px; font-size: 15px; line-height: 1.6; }
   .learns .fix .row + .row { margin-top: 8px; padding-top: 10px; border-top: 1px solid var(--separator); }
-  .learns .fix .lbl { font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-tertiary); width: 44px; flex: none; }
+  .learns .fix .lbl { font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-secondary); width: 44px; flex: none; }
   .learns .fix .heard { color: var(--text-secondary); }
   .learns .fix .heard s { text-decoration-color: var(--text-tertiary); }
   .learns .fix .typed { color: var(--text-primary); }
-  .learns .fix .typed b { color: var(--brand-violet-2); font-weight: 600; }
+  .learns .fix .typed b { color: var(--violet-text); font-weight: 600; }
 
   .learns .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 24px; margin-top: 32px; }
   .learns .cell { background: var(--card-bg); border: 1px solid var(--separator); border-radius: 12px; padding: 20px 22px; }
@@ -94,9 +96,9 @@
   .privacy .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; margin-top: 36px; }
   .privacy .cell { background: rgba(255, 255, 255, 0.10); border-radius: 12px; padding: 20px 22px; }
   .privacy .cell .t { font-size: 15px; font-weight: 600; color: #fff; }
-  .privacy .cell .d { font-size: 13px; color: rgba(255, 255, 255, 0.75); line-height: 1.5; margin-top: 6px; }
+  .privacy .cell .d { font-size: 13px; color: rgba(255, 255, 255, 0.90); line-height: 1.5; margin-top: 6px; }
 
-  footer { padding-top: 40px; padding-bottom: 40px; display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--text-tertiary); }
+  footer { padding-top: 40px; padding-bottom: 40px; display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--text-secondary); }
   footer a { margin-left: auto; color: var(--text-secondary); }
   footer a:hover { color: var(--text-primary); }
 
@@ -110,11 +112,12 @@
 <body>
 
 <nav class="wrap">
-  <img src="appicon.svg" width="28" height="28" alt="">
+  <img src="appicon.svg" width="28" height="28" alt="scribe app icon">
   <span class="name">scribe</span>
   <a class="gh" href="https://github.com/esoto/scribe">GitHub</a>
 </nav>
 
+<main>
 <header>
   <h1>Hold a key. Speak.<br><span class="violet">It's typed.</span></h1>
   <p>Personal hold-to-talk dictation for macOS — fully local, English + Spanish.
@@ -122,21 +125,21 @@
   <div class="cta">
     <a class="btn-primary" href="https://github.com/esoto/scribe/releases/latest">Get scribe</a>
     <button class="btn-demo" id="demoBtn" type="button">
-      <span class="glyph" id="demoGlyph">◦</span><span id="demoLabel">See it dictate</span>
+      <span class="glyph" id="demoGlyph" aria-hidden="true">◦</span><span id="demoLabel">See it dictate</span>
     </button>
   </div>
   <p class="note">macOS 15+, Apple silicon. Not notarized — right-click, Open on first launch. Models (~3.5 GB) download once.</p>
 </header>
 
 <div class="demo">
-  <div class="demo-box" id="demoBox">Hold Right ⌥ and speak — the cleaned-up text lands here.</div>
+  <div class="demo-box" id="demoBox" aria-live="polite">Hold Right ⌥ and speak — the cleaned-up text lands here.</div>
 </div>
 
 <section class="wrap steps">
   <div class="step">
     <div class="n">1</div>
     <div class="t">Hold Right ⌥</div>
-    <div class="d">The mic is captured only while the key is held — the orange indicator turns off at key-up.</div>
+    <div class="d">The mic is captured only while the key is held — the orange indicator turns off at key-up. Prefer Right ⌘ or F13? Pick it in Settings.</div>
   </div>
   <div class="step">
     <div class="n">2</div>
@@ -146,7 +149,7 @@
   <div class="step">
     <div class="n">3</div>
     <div class="t">Release</div>
-    <div class="d">Text is pasted into whatever app has focus. If cleanup ever misbehaves, the raw transcript is pasted — you never lose words.</div>
+    <div class="d">Text is pasted into whatever app has focus. If focus moved while it was transcribing, the text is copied instead and scribe tells you to press ⌘V. If cleanup ever misbehaves, the raw transcript is pasted — you never lose words.</div>
   </div>
 </section>
 
@@ -190,11 +193,11 @@
     <div class="grid">
       <div class="cell">
         <div class="t">Local models only</div>
-        <div class="d">Parakeet Ultra for speech, a cleanup model you choose — Gemma 3 4B by default — downloaded once, then everything runs offline.</div>
+        <div class="d">Parakeet Ultra for speech, a cleanup model you choose — Gemma 3 4B by default — downloaded once at a pinned version, then everything runs offline.</div>
       </div>
       <div class="cell">
         <div class="t">Transcripts never saved</div>
-        <div class="d">History keeps the last 10 dictations in memory only. Transcripts are never written to disk. scribe writes your dictionary (individual words), a diagnostic log that contains no dictated text, and — only when a dictation fails — one audio file you can delete.</div>
+        <div class="d">History keeps the last 10 dictations in memory only. Transcripts are never written to disk. scribe writes your dictionary (individual words), a diagnostic log that contains no dictated text, and — only when a dictation fails — one audio file you can delete. Dictations are marked transient, so clipboard managers skip them.</div>
       </div>
       <div class="cell">
         <div class="t">Nothing sent</div>
@@ -203,6 +206,7 @@
     </div>
   </div>
 </section>
+</main>
 
 <footer class="wrap">
   <img src="appicon.svg" width="18" height="18" alt="">
