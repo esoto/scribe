@@ -26,7 +26,7 @@ make generate           # xcodegen -> native/Scribe.xcodeproj
 make install-app        # Release build -> /Applications/Scribe.app
 ```
 
-`make app` builds the same thing into `dist/scribe-<version>.zip` (~12 MB)
+`make app` builds the same thing into `dist/scribe-<version>.zip` (~22 MB)
 without installing. The app is ad-hoc signed unless a `scribe-dev`
 code-signing identity exists in the keychain (create one via Keychain
 Access → Certificate Assistant to keep TCC grants stable across updates).
@@ -226,6 +226,8 @@ outside scribe's process. scribe manages them on demand:
 - **Nothing types, but the icon reacts** → Accessibility grant missing.
   scribe copies the text instead and notifies "press ⌘V". It does the same
   when you switch apps while it's transcribing.
+- **The menu bar shows ⚠ while idle** → a permission was revoked. Open
+  Setup / Doctor; the highlighted row is the one to fix.
 - **Hotkey does nothing** → Input Monitoring grant missing (common after
   replacing the app binary: re-toggle scribe in System Settings → Privacy &
   Security → Input Monitoring, or use the setup window's Request button).
@@ -233,10 +235,16 @@ outside scribe's process. scribe manages them on demand:
   `flagsChanged keycode=61 ... -> down`, the tap is alive and the grant is
   fine. If it logs nothing, the key isn't reaching scribe as Right ⌥ (**61**):
   an external keyboard may report its Option key as 58 (Left ⌥), which won't
-  match.
+  match. Pick **Right ⌘** or **F13** in Settings › General instead — it
+  takes effect immediately, no relaunch.
 - **Old clipboard contents got pasted** → increase `restoreDelay`.
 - **Transcription failed** → the audio was saved to
-  `~/Library/Logs/scribe/last_failed.wav`.
+  `~/Library/Logs/scribe/last_failed.wav`. For a few seconds the status
+  row shows "Error — check log"; the log names the cause, and
+  **Show Log in Finder** (Setup / Doctor) reveals it.
+- **No notification when a dictation fails** → scribe only asks for
+  notification permission from the Notifications row in Setup / Doctor;
+  click Request there, or allow it in System Settings → Notifications.
 - Logs: `~/Library/Logs/scribe/scribe.log`.
 
 ## Development
