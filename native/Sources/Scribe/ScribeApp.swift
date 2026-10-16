@@ -30,6 +30,8 @@ final class AppModel: ObservableObject {
     @Published private(set) var launchAtLoginEnabled: Bool = LoginItem.isEnabled
     /// "Downloading Parakeet Ultra… NN%" while the STT model downloads (first launch after upgrade); nil otherwise.
     @Published private(set) var sttDownloadStatus: String?
+    /// True until the launch preload ends. The download statuses cover only part of it: a load from disk reports nothing.
+    @Published private(set) var startupPreloadInFlight = true
 
     init() {
         let defaults = UserDefaults.standard
@@ -111,6 +113,7 @@ final class AppModel: ObservableObject {
 
         let permissions = PermissionsModel(
             probe: LiveTCCProbe(),
+            notificationAuthorizer: LiveNotificationAuthorizer(log: log),
             onMicrophoneGranted: { lateDictation.prewarmRecorderIfGranted() },
             onInputMonitoringGranted: { lateDictation.activateHotkeyIfNeeded() })
         let dictation = DictationCoordinator(
@@ -219,11 +222,12 @@ final class AppModel: ObservableObject {
         let cleaner = cleanupModels.cleaner
         let cleanupEnabled = self.cleanupEnabled
         let logger = self.logger
-        Task {
+        Task { [weak self] in
             let t0 = Date()
             await engine.preload()
             let cleanupLoaded = await cleanupModels.preloadAtStartup(cleaner, enabled: cleanupEnabled)
             let sttLoaded = await engine.isLoaded
+            self?.startupPreloadInFlight = false
             logger.log(
                 AppModel.startupLogLine(
                     sttLoaded: sttLoaded, cleanupLoaded: cleanupLoaded, elapsed: Date().timeIntervalSince(t0)))
@@ -351,7 +355,9 @@ struct ScribeApp: App {
         .menuBarExtraStyle(.menu)
 
         Window("scribe setup", id: onboardingWindowID) {
-            OnboardingWindow(permissions: model.permissions, settingsModel: model.settingsModel)
+            OnboardingWindow(
+                permissions: model.permissions, model: model, cleanupModels: model.cleanupModels,
+                settingsModel: model.settingsModel)
         }
 
         Window("scribe dictionary", id: dictionaryWindowID) {
@@ -395,13 +401,20 @@ private struct MenuBarLabel: View {
     var body: some View {
         Text(
             menuBarGlyph(
-                dictation.state, progress: cleanupModels.cleanupModelProgress, needsAttention: !permissions.grantsOk))
-            .onAppear {
-                guard !didAutoOpen else { return }
-                didAutoOpen = true
-                guard !OnboardingState.missing(permissions.grants).isEmpty else { return }
-                openOnboarding(openWindow)
-            }
+                dictation.state, progress: cleanupModels.cleanupModelProgress, needsAttention: !permissions.grantsOk)
+        )
+        // The glyph alone reads as "white bullet" or "warning sign"; the value says what it means.
+        .accessibilityLabel("scribe")
+        .accessibilityValue(
+            glyphAccessibilityValue(
+                dictation.state, progress: cleanupModels.cleanupModelProgress, needsAttention: !permissions.grantsOk)
+        )
+        .onAppear {
+            guard !didAutoOpen else { return }
+            didAutoOpen = true
+            guard !OnboardingState.missing(permissions.grants).isEmpty else { return }
+            openOnboarding(openWindow)
+        }
     }
 }
 

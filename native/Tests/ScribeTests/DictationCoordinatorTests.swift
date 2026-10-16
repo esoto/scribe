@@ -306,14 +306,13 @@ final class DictationCoordinatorTests: XCTestCase {
 
     // MARK: - Startup and hotkey install
 
-    func testStartPrewarmsInstallsTheTapAndAsksForNotificationAuthorization() {
+    func testStartPrewarmsAndInstallsTheTap() {
         let c = make()
 
         c.start()
 
         XCTAssertEqual(recorder.prewarmCalls, 1)
         XCTAssertEqual(monitor.installCalls, 1)
-        XCTAssertEqual(notifier.authorizationRequests, 1)
         XCTAssertEqual(inputMonitoring.value, [true])
         XCTAssertTrue(logs.value.contains("hotkey installed (key=right_option)"))
     }
