@@ -96,7 +96,7 @@
   .privacy .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; margin-top: 36px; }
   .privacy .cell { background: rgba(255, 255, 255, 0.10); border-radius: 12px; padding: 20px 22px; }
   .privacy .cell .t { font-size: 15px; font-weight: 600; color: #fff; }
-  .privacy .cell .d { font-size: 13px; color: rgba(255, 255, 255, 0.90); line-height: 1.5; margin-top: 6px; }
+  .privacy .cell .d { font-size: 13px; color: #fff; line-height: 1.5; margin-top: 6px; }
 
   footer { padding-top: 40px; padding-bottom: 40px; display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--text-secondary); }
   footer a { margin-left: auto; color: var(--text-secondary); }
@@ -112,7 +112,7 @@
 <body>
 
 <nav class="wrap">
-  <img src="appicon.svg" width="28" height="28" alt="scribe app icon">
+  <img src="appicon.svg" width="28" height="28" alt="">
   <span class="name">scribe</span>
   <a class="gh" href="https://github.com/esoto/scribe">GitHub</a>
 </nav>
@@ -149,7 +149,7 @@
   <div class="step">
     <div class="n">3</div>
     <div class="t">Release</div>
-    <div class="d">Text is pasted into whatever app has focus. If focus moved while it was transcribing, the text is copied instead and scribe tells you to press ⌘V. If cleanup ever misbehaves, the raw transcript is pasted — you never lose words.</div>
+    <div class="d">Text is pasted into whatever app has focus. If focus moved while it was transcribing, the text is copied instead — press ⌘V. If cleanup ever misbehaves, the raw transcript is pasted — you never lose words.</div>
   </div>
 </section>
 
@@ -193,11 +193,11 @@
     <div class="grid">
       <div class="cell">
         <div class="t">Local models only</div>
-        <div class="d">Parakeet Ultra for speech, a cleanup model you choose — Gemma 3 4B by default — downloaded once at a pinned version, then everything runs offline.</div>
+        <div class="d">Parakeet Ultra for speech, a cleanup model you choose — Gemma 3 4B by default — downloaded once, then everything runs offline. The Gemma cleanup models are pinned to a fixed version.</div>
       </div>
       <div class="cell">
         <div class="t">Transcripts never saved</div>
-        <div class="d">History keeps the last 10 dictations in memory only. Transcripts are never written to disk. scribe writes your dictionary (individual words), a diagnostic log that contains no dictated text, and — only when a dictation fails — one audio file you can delete. Dictations are marked transient, so clipboard managers skip them.</div>
+        <div class="d">History keeps the last 10 dictations in memory only. Transcripts are never written to disk. scribe writes your dictionary (individual words), a diagnostic log that contains no dictated text, and — only when a dictation fails — one audio file you can delete. Dictations are marked transient, so clipboard managers that honor the marker skip them.</div>
       </div>
       <div class="cell">
         <div class="t">Nothing sent</div>
@@ -231,6 +231,7 @@
     const words = RAW.split(" ");
     box.classList.add("filled");
     box.textContent = "";
+    box.setAttribute("aria-busy", "true");
     glyph.textContent = "●";
     glyph.className = "glyph rec";
     label.textContent = "Recording…";
@@ -243,6 +244,7 @@
     label.textContent = "Transcribing…";
     await new Promise(r => setTimeout(r, 700));
     box.textContent = CLEAN;
+    box.removeAttribute("aria-busy");
     glyph.textContent = "◦";
     label.textContent = "See it dictate";
     running = false;
