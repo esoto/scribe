@@ -14,10 +14,13 @@ struct TestError: Error, CustomStringConvertible {
     var description: String { message }
 }
 
-final class FakeRecorder: RecorderLike {
+final class FakeRecorder: RecorderLike, RecorderPreparing {
     let pcm: [Float]
     let armError: Error?
     private(set) var armed = false
+    var prewarmError: Error?
+    private(set) var prewarmCalls = 0
+    private(set) var preferredInputs: [String?] = []
 
     init(pcm: [Float] = VOICED, armError: Error? = nil) {
         self.pcm = pcm
@@ -32,6 +35,15 @@ final class FakeRecorder: RecorderLike {
     func disarm() -> [Float] {
         armed = false
         return pcm
+    }
+
+    func prewarm() throws {
+        prewarmCalls += 1
+        if let prewarmError { throw prewarmError }
+    }
+
+    func setPreferredInput(uid: String?) {
+        preferredInputs.append(uid)
     }
 }
 
@@ -121,4 +133,196 @@ final class FakeClock {
 final class Box<T> {
     private(set) var value: [T] = []
     func append(_ v: T) { value.append(v) }
+}
+
+/// A `CleanupModelBackend` whose `preload()` can be held open, so a test drives the cancel/supersede/commit
+/// orderings of a model switch deterministically instead of racing real timing.
+final class FakeCleanupModelBackend: CleanupModelBackend, @unchecked Sendable {
+    private let lock = NSLock()
+    private var _loaded: Bool
+    private var _holdsMemory: Bool
+    private var _preloadCalls = 0
+    private var _unloadCalls = 0
+    private var _dictionaries: [DictionarySnapshot] = []
+    private var _events: [String] = []
+    private var _onIsLoaded: (() -> Void)?
+    private var gate: CheckedContinuation<Void, Never>?
+    private var gateReleased = false
+    private let gated: Bool
+
+    init(loaded: Bool = false, gatedPreload: Bool = false, holdsMemory: Bool = true) {
+        _loaded = loaded
+        gated = gatedPreload
+        _holdsMemory = holdsMemory
+    }
+
+    var loaded: Bool {
+        get { lock.withLock { _loaded } }
+        set { lock.withLock { _loaded = newValue } }
+    }
+    var preloadCalls: Int { lock.withLock { _preloadCalls } }
+    var unloadCalls: Int { lock.withLock { _unloadCalls } }
+    var dictionaries: [DictionarySnapshot] { lock.withLock { _dictionaries } }
+    /// "setDictionary", "preload", "unload" in call order.
+    var events: [String] { lock.withLock { _events } }
+    var holdsMemory: Bool {
+        get { lock.withLock { _holdsMemory } }
+        set { lock.withLock { _holdsMemory = newValue } }
+    }
+
+    /// Runs inside `isLoaded`, i.e. at the suspension point a caller awaits: lets a test land a cancellation there.
+    var onIsLoaded: (() -> Void)? {
+        get { lock.withLock { _onIsLoaded } }
+        set { lock.withLock { _onIsLoaded = newValue } }
+    }
+
+    var isLoaded: Bool {
+        get async {
+            onIsLoaded?()
+            return lock.withLock { _loaded }
+        }
+    }
+
+    func setDictionary(_ snapshot: DictionarySnapshot) {
+        lock.withLock {
+            _dictionaries.append(snapshot)
+            _events.append("setDictionary")
+        }
+    }
+
+    func preload() async {
+        lock.withLock {
+            _preloadCalls += 1
+            _events.append("preload")
+        }
+        guard gated else { return }
+        // Ignores cancellation, like a real model load.
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            let resumeNow = lock.withLock { () -> Bool in
+                if gateReleased { return true }
+                gate = continuation
+                return false
+            }
+            if resumeNow { continuation.resume() }
+        }
+    }
+
+    /// Lets a held `preload()` return, optionally deciding whether the model ends up loaded.
+    func releasePreload(loaded: Bool? = nil) {
+        let continuation = lock.withLock { () -> CheckedContinuation<Void, Never>? in
+            if let loaded { _loaded = loaded }
+            gateReleased = true
+            defer { gate = nil }
+            return gate
+        }
+        continuation?.resume()
+    }
+
+    func unload() async {
+        lock.withLock {
+            _unloadCalls += 1
+            _loaded = false
+            _events.append("unload")
+        }
+    }
+
+    func clean(_ text: String) async throws -> String { text }
+}
+
+/// Polls main-actor state in 1 ms steps (bounded at ~1 s) so a test waits on a condition, never a fixed delay.
+@MainActor
+func eventually(_ condition: () -> Bool) async -> Bool {
+    for _ in 0..<1000 {
+        if condition() { return true }
+        try? await Task.sleep(nanoseconds: 1_000_000)
+    }
+    return condition()
+}
+
+/// Scripted TCC answers; `requestMicrophone` can flip the answer the way the user's click does.
+final class FakeTCCProbe: TCCProbing {
+    var microphone = false
+    var accessibility = false
+    var inputMonitoring = false
+    /// What the mic prompt does to the mic grant when it resolves.
+    var microphoneGrantedByRequest = false
+    private(set) var events: [String] = []
+
+    func resetEvents() { events.removeAll() }
+
+    func microphoneGranted() -> Bool {
+        events.append("probe-microphone")
+        return microphone
+    }
+
+    func accessibilityGranted() -> Bool {
+        events.append("probe-accessibility")
+        return accessibility
+    }
+
+    func inputMonitoringGranted() -> Bool {
+        events.append("probe-inputMonitoring")
+        return inputMonitoring
+    }
+
+    func requestMicrophone() async -> Bool {
+        events.append("request-microphone")
+        microphone = microphoneGrantedByRequest
+        return microphoneGrantedByRequest
+    }
+
+    func requestAccessibility() { events.append("request-accessibility") }
+    func requestInputMonitoring() { events.append("request-inputMonitoring") }
+}
+
+final class FakeNotifier: Notifier {
+    private(set) var delivered: [(title: String, body: String)] = []
+    private(set) var authorizationRequests = 0
+    /// When set, every delivery reports it through `onError`.
+    var deliveryError: Error?
+
+    func requestAuthorization(log: @escaping @Sendable (String) -> Void) {
+        authorizationRequests += 1
+    }
+
+    func deliver(title: String, body: String, onError: @escaping @Sendable (Error) -> Void) {
+        delivered.append((title, body))
+        if let deliveryError { onError(deliveryError) }
+    }
+}
+
+final class FakeHotkeyMonitor: HotkeyMonitoring {
+    var onModifierEvent: ((String) -> Void)?
+    var installError: Error?
+    var reinstallError: Error?
+    private(set) var installCalls = 0
+    private(set) var reinstallCalls = 0
+    private(set) var forgetCalls = 0
+
+    func install() throws {
+        installCalls += 1
+        if let installError { throw installError }
+    }
+
+    func reinstall() throws {
+        reinstallCalls += 1
+        if let reinstallError { throw reinstallError }
+    }
+
+    func forgetHeldKey() { forgetCalls += 1 }
+}
+
+/// A value shared with `@Sendable` closures (detached tasks, background queues) under a lock.
+final class Locked<T>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored: T
+
+    init(_ value: T) { stored = value }
+
+    var value: T {
+        get { lock.withLock { stored } }
+        set { lock.withLock { stored = newValue } }
+    }
+
+    func mutate(_ change: (inout T) -> Void) { lock.withLock { change(&stored) } }
 }

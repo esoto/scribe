@@ -17,7 +17,7 @@ protocol UnloadableCleaner: CleanupBackend {
 }
 
 /// A cleanup backend the app can swap at runtime: lifecycle hooks plus the
-/// dictionary push every model needs (AppModel gates what's in it — see
+/// dictionary push every model needs (callers gate what's in it — see
 /// `CleanupModelCatalog.promptSnapshot`).
 protocol CleanupModelBackend: UnloadableCleaner, AnyObject {
     func setDictionary(_ snapshot: DictionarySnapshot)
@@ -84,7 +84,7 @@ final class GemmaBackend: CleanupModelBackend, @unchecked Sendable {
 
     /// `spec` picks the stock model; `customModelPath` overrides it with a local MLX folder.
     /// `onProgress` gets download progress (0…1) on any thread. A load from a local snapshot reports
-    /// nothing; AppModel clears the status line when the load ends.
+    /// nothing; CleanupModelController clears the status line when the load ends.
     init(
         spec: CleanupModelSpec = CleanupModelCatalog.gemma3,
         customModelPath: String? = nil,

@@ -43,7 +43,7 @@ final class AppleIntelligenceBackend: CleanupModelBackend, @unchecked Sendable {
     private let lock = NSLock()
     private var snapshot = DictionarySnapshot.empty
     /// Fired when a clean() finds the model gone (Apple Intelligence turned
-    /// off, assets evicted) — AppModel then switches to a Gemma fallback.
+    /// off, assets evicted) — CleanupModelController then switches to a Gemma fallback.
     private let onUnavailable: (@Sendable () -> Void)?
 
     init(onUnavailable: (@Sendable () -> Void)? = nil) {
@@ -107,7 +107,7 @@ final class AppleIntelligenceBackend: CleanupModelBackend, @unchecked Sendable {
     var isLoaded: Bool { get async { model.isAvailable } }
 
     /// `isLoaded` means "usable" here (the switch commit relies on it), so it
-    /// can't double as "holds memory". AppModel's idle unload keys off this
+    /// can't double as "holds memory". CleanupModelController's idle unload keys off this
     /// instead and skips us, rather than logging a false "unloaded models".
     var holdsMemory: Bool { false }
 }

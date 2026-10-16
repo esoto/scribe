@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-/// Menu bar UI. The view delegates every decision to `AppModel`.
+/// Menu bar UI. The view delegates every decision to the models it observes.
 
 func glyphFor(_ state: PipelineState) -> String {
     switch state {
@@ -70,18 +70,30 @@ private let engineOptions: [(id: String, label: String)] = [
 
 struct MenuBarView: View {
     @ObservedObject var model: AppModel
+    @ObservedObject var dictionaryModel: DictionaryModel
+    @ObservedObject var permissions: PermissionsModel
+    @ObservedObject var dictation: DictationCoordinator
+    @ObservedObject var cleanupModels: CleanupModelController
     @Environment(\.openWindow) private var openWindow
+
+    init(model: AppModel) {
+        self.model = model
+        self.dictionaryModel = model.dictionaryModel
+        self.permissions = model.permissions
+        self.dictation = model.dictation
+        self.cleanupModels = model.cleanupModels
+    }
 
     private var statusText: String? {
         menuStatusText(
-            model.state, sttDownload: model.sttDownloadStatus, cleanupStatus: model.cleanupModelStatus,
-            attention: attentionText(for: model.grants))
+            dictation.state, sttDownload: model.sttDownloadStatus, cleanupStatus: cleanupModels.cleanupModelStatus,
+            attention: attentionText(for: permissions.grants))
     }
 
     var body: some View {
         if let statusText {
             Text(statusText)
-                .foregroundStyle(model.state == .error ? Color.red : Color.secondary)
+                .foregroundStyle(dictation.state == .error ? Color.red : Color.secondary)
             Divider()
         }
 
@@ -96,25 +108,25 @@ struct MenuBarView: View {
         .pickerStyle(.inline)
 
         Picker("Cleanup Model", selection: Binding(
-            get: { model.activeCleanupModel },
-            set: { if let id = CleanupModelID(rawValue: $0) { model.switchCleanupModel(to: id) } }
+            get: { cleanupModels.activeCleanupModel },
+            set: { if let id = CleanupModelID(rawValue: $0) { cleanupModels.switchCleanupModel(to: id) } }
         )) {
             ForEach(
                 CleanupModelCatalog.all.filter {
-                    $0.id != .appleIntelligence || model.appleIntelligenceAvailable
-                        || model.activeCleanupModel == $0.id.rawValue
+                    $0.id != .appleIntelligence || cleanupModels.appleIntelligenceAvailable
+                        || cleanupModels.activeCleanupModel == $0.id.rawValue
                 }, id: \.id
             ) { spec in
-                Text(pickerLabel(spec, status: model.modelStatuses[spec.id] ?? .notDownloaded))
+                Text(pickerLabel(spec, status: cleanupModels.modelStatuses[spec.id] ?? .notDownloaded))
                     .tag(spec.id.rawValue)
             }
             // A defaults-set custom path overrides the picker — keep it visible.
-            if model.activeCleanupModel == "custom" {
+            if cleanupModels.activeCleanupModel == "custom" {
                 Text("Custom model (set via defaults)").tag("custom")
             }
         }
         .pickerStyle(.menu)
-        .disabled(model.activeCleanupModel == "custom")
+        .disabled(cleanupModels.activeCleanupModel == "custom")
 
         Button("Manage Models…") {
             openModelsWindow(openWindow)
@@ -163,19 +175,19 @@ struct MenuBarView: View {
             Toggle(
                 "Correct Speech (bias recognizer)",
                 isOn: Binding(
-                    get: { model.vocabularyBiasingEnabled },
-                    set: { model.setVocabularyBiasing($0) }
+                    get: { dictionaryModel.vocabularyBiasingEnabled },
+                    set: { dictionaryModel.setVocabularyBiasing($0) }
                 )
             )
             Toggle(
                 "Learn New Terms",
                 isOn: Binding(
-                    get: { model.dictionaryLearningEnabled },
-                    set: { model.setDictionaryLearning($0) }
+                    get: { dictionaryModel.dictionaryLearningEnabled },
+                    set: { dictionaryModel.setDictionaryLearning($0) }
                 )
             )
             if let note = learningNote(
-                fidelitySafe: model.activeCleanupFidelitySafe, learningOn: model.dictionaryLearningEnabled)
+                fidelitySafe: cleanupModels.activeCleanupFidelitySafe, learningOn: dictionaryModel.dictionaryLearningEnabled)
             {
                 Text(note)
             }
@@ -183,20 +195,20 @@ struct MenuBarView: View {
                 openDictionaryWindow(openWindow)
             }
             Divider()
-            let learned = menuGlossaryTerms(model.glossaryEntries)
+            let learned = menuGlossaryTerms(dictionaryModel.glossaryEntries)
             if learned.isEmpty {
                 Text("(no learned terms)")
             } else {
                 ForEach(learned, id: \.self) { term in
                     Menu(truncateLabel(term)) {
                         Button("Remove") {
-                            model.removeGlossaryTerm(term)
+                            dictionaryModel.removeGlossaryTerm(term)
                         }
                     }
                 }
                 Divider()
                 Button("Clear Learned Terms") {
-                    model.clearLearnedTerms()
+                    dictionaryModel.clearLearnedTerms()
                 }
             }
         }

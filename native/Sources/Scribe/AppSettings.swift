@@ -130,7 +130,7 @@ final class AppSettings {
     }
 
     /// The picked cleanup model (`CleanupModelID.rawValue`); nil = never
-    /// chosen, and AppModel resolves one via `CleanupModelCatalog.resolve`.
+    /// chosen, and CleanupModelController resolves one via `CleanupModelCatalog.resolve`.
     /// `cleanupModelPath`, when set, overrides this.
     var cleanupModel: String? {
         get { defaults.string(forKey: Key.cleanupModel) }

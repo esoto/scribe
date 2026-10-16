@@ -409,7 +409,7 @@ final class UserDictionaryStoreTests: XCTestCase {
         XCTAssertFalse(makeStore().unmatchedHeardWords.isEmpty, "precondition: on disk")
 
         let relaunched = makeStore()
-        relaunched.learningEnabled = false  // what AppModel does at launch
+        relaunched.learningEnabled = false  // what DictionaryModel does at launch
         _ = relaunched.snapshot
         XCTAssertTrue(makeStore().unmatchedHeardWords.isEmpty)
     }
@@ -463,7 +463,7 @@ final class UserDictionaryStoreTests: XCTestCase {
         clock.advance(days: 61)
 
         let relaunched = makeStore()
-        relaunched.learningEnabled = false  // what AppModel does at launch
+        relaunched.learningEnabled = false  // what DictionaryModel does at launch
         _ = relaunched.snapshot
         XCTAssertEqual(relaunched.allGlossaryEntries.map(\.term), ["Kamal"])
         let text = String(decoding: try Data(contentsOf: fileURL), as: UTF8.self)
