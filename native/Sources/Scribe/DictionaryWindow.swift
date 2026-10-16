@@ -40,6 +40,7 @@ func glossaryRowDetail(count: Int, lastSeen: Date, now: Date = Date()) -> String
 /// Mutations go through `DictionaryModel`, which forwards to `UserDictionaryStore`.
 struct DictionaryWindow: View {
     @ObservedObject var model: DictionaryModel
+    @ObservedObject var cleanupModels: CleanupModelController
     @State private var newOriginal = ""
     @State private var newReplacement = ""
 
@@ -55,6 +56,25 @@ struct DictionaryWindow: View {
             Text("Corrections and vocabulary the cleanup step applies to your dictations. Everything lives on this Mac.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
+
+            GroupBox {
+                VStack(alignment: .leading, spacing: 8) {
+                    Toggle("Learn new terms", isOn: Binding(
+                        get: { model.dictionaryLearningEnabled },
+                        set: { model.setDictionaryLearning($0) }))
+                    Text("Collects distinctive words from cleaned dictations into Learned Terms.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    if let note = learningNote(fidelitySafe: cleanupModels.activeCleanupFidelitySafe, learningOn: model.dictionaryLearningEnabled) {
+                        Text(note).font(.caption).foregroundStyle(.secondary)
+                    }
+                    Toggle("Prefer dictionary words (experimental)", isOn: Binding(
+                        get: { model.vocabularyBiasingEnabled },
+                        set: { model.setVocabularyBiasing($0) }))
+                    Text("Biases Parakeet toward your words — can also replace ordinary words.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                .padding(4)
+            }
 
             GroupBox("Replacements") {
                 VStack(alignment: .leading, spacing: 8) {
@@ -171,13 +191,6 @@ struct DictionaryWindow: View {
                         .frame(maxHeight: 220)
                     }
                     HStack {
-                        Toggle(
-                            "Learn new terms",
-                            isOn: Binding(
-                                get: { model.dictionaryLearningEnabled },
-                                set: { model.setDictionaryLearning($0) }
-                            )
-                        )
                         Spacer()
                         Button("Clear Learned Terms") {
                             model.clearLearnedTerms()
@@ -188,8 +201,12 @@ struct DictionaryWindow: View {
                 .padding(4)
             }
         }
-        .padding(20)
+        .padding(24)
         .frame(width: 480)
-        .onAppear { model.refreshDictionaryState() }
+        .onAppear {
+            model.refreshDictionaryState()
+            WindowActivation.shared.windowAppeared()
+        }
+        .onDisappear { WindowActivation.shared.windowDisappeared() }
     }
 }

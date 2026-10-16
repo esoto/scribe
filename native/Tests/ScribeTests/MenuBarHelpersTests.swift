@@ -81,4 +81,63 @@ final class MenuBarHelpersTests: XCTestCase {
             attentionText(for: GrantStatus(microphone: true, accessibility: false, inputMonitoring: false)),
             "Accessibility is off — open Setup / Doctor…")
     }
+
+    func testIdleStatusPrecedenceIsAttentionDownloadEngineHintCleanup() {
+        XCTAssertEqual(
+            menuStatusText(.idle, sttDownload: "dl", engineStatus: "eng", hint: "hint", cleanupStatus: "cl", attention: "att"),
+            "att")
+        XCTAssertEqual(
+            menuStatusText(.idle, sttDownload: "dl", engineStatus: "eng", hint: "hint", cleanupStatus: "cl", attention: nil),
+            "dl")
+        XCTAssertEqual(
+            menuStatusText(.idle, sttDownload: nil, engineStatus: "eng", hint: "hint", cleanupStatus: "cl", attention: nil),
+            "eng")
+        XCTAssertEqual(
+            menuStatusText(.idle, sttDownload: nil, engineStatus: nil, hint: "hint", cleanupStatus: "cl", attention: nil),
+            "hint")
+        XCTAssertEqual(
+            menuStatusText(.idle, sttDownload: nil, engineStatus: nil, hint: nil, cleanupStatus: "cl", attention: nil),
+            "cl")
+        XCTAssertNil(menuStatusText(.idle, sttDownload: nil, cleanupStatus: nil, attention: nil))
+    }
+
+    func testEngineStatusAndHintOnlyShowWhileIdle() {
+        XCTAssertEqual(
+            menuStatusText(.recording, sttDownload: nil, engineStatus: "eng", hint: "hint", cleanupStatus: nil, attention: nil),
+            "Recording…")
+        XCTAssertEqual(
+            menuStatusText(.processing, sttDownload: nil, engineStatus: "eng", hint: "hint", cleanupStatus: nil, attention: nil),
+            "Transcribing…")
+    }
+
+    func testNowLine() {
+        XCTAssertEqual(nowLine(engine: "Parakeet (fast)", cleanupModel: "Gemma 3 4B", cleanupEnabled: true), "Parakeet (fast) · Gemma 3 4B")
+        XCTAssertEqual(nowLine(engine: "Parakeet (fast)", cleanupModel: "Gemma 3 4B", cleanupEnabled: false), "Parakeet (fast) · cleanup off")
+    }
+
+    func testPastedRawHintNamesTheReason() {
+        XCTAssertEqual(pastedRawHint(.timeout), "Pasted raw — cleanup timed out")
+        XCTAssertEqual(pastedRawHint(.error), "Pasted raw — cleanup failed")
+        for skip in [CleanupSkip.empty, .length, .language] {
+            XCTAssertEqual(pastedRawHint(skip), "Pasted raw — cleanup output rejected")
+        }
+    }
+
+    func testHistoryRowLabelMarksRawDictations() {
+        let cleaned = DictationRecord(raw: "r", final: "hello there", engine: "parakeet", cleaned: true, at: Date(), durationMs: 1)
+        let raw = DictationRecord(raw: "r", final: "hello there", engine: "parakeet", cleaned: false, at: Date(), durationMs: 1)
+        XCTAssertEqual(historyRowLabel(cleaned), "hello there")
+        XCTAssertEqual(historyRowLabel(raw), "hello there · raw")
+    }
+
+    func testEngineLabelIsTheOptionLabelAndFallsBackToTheId() {
+        XCTAssertEqual(engineLabel("parakeet"), "Parakeet (fast)")
+        XCTAssertEqual(engineLabel("whisper"), "Whisper (best Spanish)")
+        XCTAssertEqual(engineLabel("unknown"), "unknown")
+    }
+
+    func testCleanupModelLabelNamesTheCatalogModelOrCustom() {
+        XCTAssertEqual(cleanupModelLabel("gemma3"), "Gemma 3 4B")
+        XCTAssertEqual(cleanupModelLabel("custom"), "Custom model")
+    }
 }

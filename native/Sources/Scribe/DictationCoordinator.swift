@@ -2,24 +2,14 @@ import AppKit
 import Foundation
 import UserNotifications
 
-/// Test seam over `UNUserNotificationCenter`.
+/// Test seam over `UNUserNotificationCenter` delivery. The authorization prompt belongs to the Setup window's
+/// Notifications row (`NotificationAuthorizing`), so a first run doesn't meet it unexplained.
 protocol Notifier {
-    func requestAuthorization(log: @escaping @Sendable (String) -> Void)
     func deliver(title: String, body: String, onError: @escaping @Sendable (Error) -> Void)
 }
 
 /// Live `Notifier`. Excluded from unit tests: the notification center needs a real app bundle.
 struct UserNotifier: Notifier {
-    func requestAuthorization(log: @escaping @Sendable (String) -> Void) {
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { granted, error in
-            if let error {
-                log("notification authorization failed: \(error)")
-            } else if !granted {
-                log("notification authorization denied")
-            }
-        }
-    }
-
     func deliver(title: String, body: String, onError: @escaping @Sendable (Error) -> Void) {
         let content = UNMutableNotificationContent()
         content.title = title
@@ -36,6 +26,7 @@ protocol HotkeyMonitoring: AnyObject {
     var onModifierEvent: ((String) -> Void)? { get set }
     func install() throws
     func reinstall() throws
+    func uninstall()
     func forgetHeldKey()
 }
 
@@ -54,6 +45,8 @@ struct PipelineSinks {
     let onState: (PipelineState) -> Void
     let onNotice: (String) -> Void
     let saveFailedAudio: ([Float]) -> Void
+    let onHint: (String) -> Void
+    let onPasted: () -> Void
 }
 
 /// Recording runtime: the pipeline, the hotkey tap, the hold watchdog, the published state with its sticky
@@ -61,6 +54,8 @@ struct PipelineSinks {
 @MainActor
 final class DictationCoordinator: ObservableObject {
     @Published private(set) var state: PipelineState = .idle
+    /// A short verdict on the last dictation ("Pasted raw — …"), cleared after `hintSeconds` or by the next key-down.
+    @Published private(set) var hint: String?
 
     /// Key-down work that isn't about recording (idle touch, availability refresh, model warm-up).
     /// Runs first, so it is already under way when the watchdog is armed and the pipeline starts.
@@ -70,17 +65,20 @@ final class DictationCoordinator: ObservableObject {
     private(set) var pipeline: DictationPipeline!
     private var hotkeyMonitor: HotkeyMonitoring!
     private(set) var errorRevert: Task<Void, Never>?
+    private(set) var hintClear: Task<Void, Never>?
     private(set) var holdWatchdog: Task<Void, Never>?
 
     private let recorder: RecorderPreparing
     private let pipelineConfig: PipelineConfig
-    private let hotkey: HotKey
+    private(set) var hotkey: HotKey
+    private let makeHotkeyMonitor: (HotKey, @escaping () -> Void, @escaping () -> Void) -> HotkeyMonitoring
     private let notifier: Notifier
     private let playSound: (String) -> Void
     private let soundsEnabled: () -> Bool
     private let microphoneGranted: () -> Bool
     private let reportInputMonitoring: (Bool) -> Void
     private let errorStickySeconds: Double
+    private let hintSeconds: Double
     private let failedAudioURL: URL
     private let log: @Sendable (String) -> Void
 
@@ -89,25 +87,29 @@ final class DictationCoordinator: ObservableObject {
         pipelineConfig: PipelineConfig,
         hotkey: HotKey,
         makePipeline: (PipelineSinks) -> DictationPipeline,
-        makeHotkeyMonitor: (_ onDown: @escaping () -> Void, _ onUp: @escaping () -> Void) -> HotkeyMonitoring,
+        makeHotkeyMonitor: @escaping (_ key: HotKey, _ onDown: @escaping () -> Void, _ onUp: @escaping () -> Void)
+            -> HotkeyMonitoring,
         notifier: Notifier,
         playSound: @escaping (String) -> Void,
         soundsEnabled: @escaping () -> Bool,
         microphoneGranted: @escaping () -> Bool,
         reportInputMonitoring: @escaping (Bool) -> Void,
         errorStickySeconds: Double = 5,
+        hintSeconds: Double = 4,
         failedAudioURL: URL = FileLogger.logsDirectory.appendingPathComponent("last_failed.wav"),
         log: @escaping @Sendable (String) -> Void
     ) {
         self.recorder = recorder
         self.pipelineConfig = pipelineConfig
         self.hotkey = hotkey
+        self.makeHotkeyMonitor = makeHotkeyMonitor
         self.notifier = notifier
         self.playSound = playSound
         self.soundsEnabled = soundsEnabled
         self.microphoneGranted = microphoneGranted
         self.reportInputMonitoring = reportInputMonitoring
         self.errorStickySeconds = errorStickySeconds
+        self.hintSeconds = hintSeconds
         self.failedAudioURL = failedAudioURL
         self.log = log
 
@@ -128,8 +130,23 @@ final class DictationCoordinator: ObservableObject {
                     Task { @MainActor in
                         self?.saveFailedAudio(pcm)
                     }
+                },
+                onHint: { [weak self] message in
+                    Task { @MainActor in
+                        self?.showHint(message)
+                    }
+                },
+                onPasted: { [weak self] in
+                    Task { @MainActor in
+                        self?.playPasteCue()
+                    }
                 }))
-        self.hotkeyMonitor = makeHotkeyMonitor(
+        self.hotkeyMonitor = buildHotkeyMonitor(for: hotkey)
+    }
+
+    private func buildHotkeyMonitor(for key: HotKey) -> HotkeyMonitoring {
+        makeHotkeyMonitor(
+            key,
             { [weak self] in self?.handleKeyDown() },
             { [weak self] in self?.handleKeyUp() })
     }
@@ -162,8 +179,6 @@ final class DictationCoordinator: ObservableObject {
                 self?.hotkeyMonitor.forgetHeldKey()
             }
         }
-
-        notifier.requestAuthorization(log: log)
     }
 
     /// Live-activates the hotkey tap after Input Monitoring is granted. Must run on main.
@@ -202,6 +217,27 @@ final class DictationCoordinator: ObservableObject {
         pipeline.cleanupEnabled = on
     }
 
+    /// Swaps the hotkey at runtime. The old tap goes first, while its monitor is still retained, and a hold in
+    /// progress ends: the old key's release will never arrive. The new monitor is kept even when its install
+    /// fails, so the Input Monitoring retry rebuilds the tap for the new key.
+    func setHotkey(_ key: HotKey) {
+        holdWatchdog?.cancel()
+        pipeline.cancelHold()
+        hotkeyMonitor.uninstall()
+
+        hotkey = key
+        hotkeyMonitor = buildHotkeyMonitor(for: key)
+        hotkeyMonitor.onModifierEvent = { [log] line in log("tap: \(line)") }
+        do {
+            try hotkeyMonitor.install()
+            reportInputMonitoring(true)
+        } catch {
+            log("hotkey install failed: \(error)")
+            reportInputMonitoring(false)
+        }
+        log("hotkey changed to \(key.rawValue)")
+    }
+
     // MARK: - Pipeline callbacks (always entered on @MainActor — see the sinks in init)
 
     func applyState(_ newState: PipelineState) {
@@ -230,6 +266,26 @@ final class DictationCoordinator: ObservableObject {
         }
     }
 
+    func showHint(_ message: String) {
+        // With the mic off every hold is silent, so "No speech heard" would just repeat itself; point at the fix.
+        if message == DictationPipeline.noSpeechHint, !microphoneGranted() {
+            notify("Microphone is off — open Setup / Doctor…")
+            return
+        }
+        hint = message
+        hintClear?.cancel()
+        let seconds = hintSeconds
+        hintClear = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(seconds * 1e9))
+            guard !Task.isCancelled, let self else { return }
+            self.hint = nil
+        }
+    }
+
+    func playPasteCue() {
+        if soundsEnabled() { playSound("Tink") }
+    }
+
     func saveFailedAudio(_ pcm: [Float]) {
         do {
             try WavWriter.write(pcm: pcm, sampleRate: UInt32(pipelineConfig.sampleRate), to: failedAudioURL)
@@ -242,6 +298,9 @@ final class DictationCoordinator: ObservableObject {
 
     /// Runs the key-down hook, arms the hold watchdog, and forwards to the pipeline. Runs on main (CGEventTap callback).
     func handleKeyDown() {
+        // A new dictation supersedes the last one's verdict.
+        hintClear?.cancel()
+        if hint != nil { hint = nil }
         onKeyDown()
 
         // A release the tap never reports must not leave the mic recording until the ring buffer overflows.

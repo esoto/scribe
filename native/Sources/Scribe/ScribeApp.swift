@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 /// Composition root: builds every collaborator, wires the sub-models to each other, and owns the state that
-/// belongs to none of them (engines, microphone, launch at login). The views observe the sub-models directly;
+/// belongs to none of them (microphone, launch at login). The views observe the sub-models directly;
 /// nothing is forwarded through here, so one model's write never rebuilds another's views.
 @MainActor
 final class AppModel: ObservableObject {
@@ -10,7 +10,6 @@ final class AppModel: ObservableObject {
     let history: History
     let pasteboard: MacPasteboard
     let paster: Paster
-    let engines: [String: UnloadableEngine]
     /// Parakeet Ultra download progress; same phase-1-init workaround as the cleanup controller's relay.
     private let sttProgressRelay = ProgressRelay()
     let idleTracker: IdleTracker
@@ -18,14 +17,11 @@ final class AppModel: ObservableObject {
     let dictionaryModel: DictionaryModel
     let permissions: PermissionsModel
     let dictation: DictationCoordinator
+    let settingsModel: SettingsModel
     let cleanupModels: CleanupModelController
+    let engineController: EngineController
     nonisolated let logger: FileLogger
 
-    private var engineSwitchTask: Task<Void, Never>?
-    // Target of the in-flight engine switch; nil when none.
-    private var pendingEngineName: String?
-
-    @Published private(set) var activeEngineName: String
     @Published private(set) var cleanupEnabled: Bool
     @Published private(set) var microphoneUID: String?
     // Stable snapshot: enumerating in the menu body re-ran slow CoreAudio queries on every hover
@@ -34,6 +30,8 @@ final class AppModel: ObservableObject {
     @Published private(set) var launchAtLoginEnabled: Bool = LoginItem.isEnabled
     /// "Downloading Parakeet Ultra… NN%" while the STT model downloads (first launch after upgrade); nil otherwise.
     @Published private(set) var sttDownloadStatus: String?
+    /// True until the launch preload ends. The download statuses cover only part of it: a load from disk reports nothing.
+    @Published private(set) var startupPreloadInFlight = true
 
     init() {
         let defaults = UserDefaults.standard
@@ -60,7 +58,7 @@ final class AppModel: ObservableObject {
         let log: @Sendable (String) -> Void = { logger.log($0) }
 
         let sttRelay = sttProgressRelay
-        self.engines = [
+        let engines: [String: UnloadableEngine] = [
             "parakeet": ParakeetEngine(
                 onDownloadProgress: { sttRelay.report(model: "Parakeet Ultra", fraction: $0) }, onLog: log),
             "whisper": WhisperEngine(onLog: log),
@@ -73,6 +71,13 @@ final class AppModel: ObservableObject {
         // The sub-models call into each other (permissions ↔ coordinator, cleanup → coordinator); this ref
         // closes those loops once the coordinator exists.
         var lateDictation: DictationCoordinator!
+        let engineController = EngineController(
+            engines: engines,
+            startingEngine: engines[settings.engine] != nil ? settings.engine : "parakeet",
+            settings: settings,
+            onEngineCommitted: { lateDictation.pipeline.setEngine($0, name: $1) },
+            log: log)
+        self.engineController = engineController
         let cleanupModels = CleanupModelController(
             settings: settings,
             makeBackend: { selection, relay, afmLost, onLog in
@@ -90,8 +95,6 @@ final class AppModel: ObservableObject {
             log: log)
         self.cleanupModels = cleanupModels
 
-        let startingEngine = engines[settings.engine] != nil ? settings.engine : "parakeet"
-        self.activeEngineName = startingEngine
         self.cleanupEnabled = settings.cleanupEnabled
         self.microphoneUID = settings.microphoneUID
 
@@ -104,12 +107,13 @@ final class AppModel: ObservableObject {
             sampleRate: 16000.0
         )
 
-        let engine = self.engines[startingEngine]!
+        let engine = engineController.activeEngine
         let recorder = Recorder(sampleRate: config.sampleRate, engineControl: AVEngineControl(onLog: log))
         recorder.setPreferredInput(uid: settings.microphoneUID)
 
         let permissions = PermissionsModel(
             probe: LiveTCCProbe(),
+            notificationAuthorizer: LiveNotificationAuthorizer(log: log),
             onMicrophoneGranted: { lateDictation.prewarmRecorderIfGranted() },
             onInputMonitoringGranted: { lateDictation.activateHotkeyIfNeeded() })
         let dictation = DictationCoordinator(
@@ -137,13 +141,15 @@ final class AppModel: ObservableObject {
                     onLog: log,
                     // Store is thread-safe and observe() is fire-and-forget: no main-actor hop.
                     onCleaned: { [dictionary] text in dictionary.observe(cleanedText: text) },
-                    replacementPairs: { [dictionary] in dictionary.allPairs }
+                    replacementPairs: { [dictionary] in dictionary.allPairs },
+                    onHint: sinks.onHint,
+                    onPasted: sinks.onPasted
                 )
                 pipeline.setCleaner(cleanupModels.cleaner, name: cleanupModels.activeCleanupModel)
                 return pipeline
             },
-            makeHotkeyMonitor: { onDown, onUp in
-                HotkeyMonitor(key: settings.hotkey, onDown: onDown, onUp: onUp)
+            makeHotkeyMonitor: { key, onDown, onUp in
+                HotkeyMonitor(key: key, onDown: onDown, onUp: onUp)
             },
             notifier: UserNotifier(),
             playSound: { Sounds.play($0) },
@@ -154,8 +160,14 @@ final class AppModel: ObservableObject {
         lateDictation = dictation
         self.permissions = permissions
         self.dictation = dictation
+        self.settingsModel = SettingsModel(
+            settings: settings,
+            onHotkeyChanged: { dictation.setHotkey($0) },
+            onHoldThresholdChanged: { dictation.pipeline.setHoldThreshold($0) },
+            onIdleMinutesChanged: { idleTracker.setUnloadAfterMinutes($0) },
+            onHistorySizeChanged: { history.setMaxLen($0) })
 
-        let parakeet = self.engines["parakeet"] as? ParakeetEngine
+        let parakeet = engines["parakeet"] as? ParakeetEngine
         self.dictionaryModel = DictionaryModel(
             store: dictionary, settings: settings,
             setBiasVocabulary: { parakeet?.setBiasVocabulary($0) },
@@ -189,7 +201,7 @@ final class AppModel: ObservableObject {
         AudioDevices.onDevicesChanged { [weak self] in
             guard let self else { return }
             // Republish only on a real change: CoreAudio's transient aggregates also fire the listener,
-            // and a no-op republish closes the open Microphone submenu.
+            // and a no-op republish rebuilds the open menu and the Settings window's microphone picker.
             let fresh = AudioDevices.inputDevices()
             if fresh != self.microphones {
                 self.microphones = fresh
@@ -204,17 +216,18 @@ final class AppModel: ObservableObject {
     }
 
     private func preloadAtStartup() {
-        let engine = engines[activeEngineName]
+        let engine = engineController.activeEngine
         let cleanupModels = self.cleanupModels
         // Captured before the STT preload below: the controller re-checks it is still the current one afterwards.
         let cleaner = cleanupModels.cleaner
         let cleanupEnabled = self.cleanupEnabled
         let logger = self.logger
-        Task {
+        Task { [weak self] in
             let t0 = Date()
-            await engine?.preload()
+            await engine.preload()
             let cleanupLoaded = await cleanupModels.preloadAtStartup(cleaner, enabled: cleanupEnabled)
-            let sttLoaded = await engine?.isLoaded ?? true
+            let sttLoaded = await engine.isLoaded
+            self?.startupPreloadInFlight = false
             logger.log(
                 AppModel.startupLogLine(
                     sttLoaded: sttLoaded, cleanupLoaded: cleanupLoaded, elapsed: Date().timeIntervalSince(t0)))
@@ -231,8 +244,9 @@ final class AppModel: ObservableObject {
         return "models not ready after \(took)s — \(failed.joined(separator: " and ")) failed to load"
     }
 
+    /// Runs even while unloading is off: `due` answers false then, and a later Settings change takes effect
+    /// without a relaunch.
     private func startIdleUnloadLoop() {
-        guard idleTracker.enabled else { return }
         Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 60_000_000_000)
@@ -246,13 +260,7 @@ final class AppModel: ObservableObject {
     }
 
     private func unloadIdleModels() async {
-        var unloadedAny = false
-        for engine in engines.values {
-            if await engine.isLoaded {
-                await engine.unload()
-                unloadedAny = true
-            }
-        }
+        var unloadedAny = await engineController.unloadAll()
         if await cleanupModels.unloadIfResident() {
             unloadedAny = true
         }
@@ -271,57 +279,23 @@ final class AppModel: ObservableObject {
         // Deferred: a flip can reinstall the event tap, which must not happen inside the tap's own callback.
         Task { [weak self] in self?.permissions.refreshGrants() }
 
-        if let engine = engines[activeEngineName] {
-            let cleanupModels = self.cleanupModels
-            let cleaner = cleanupModels.cleaner
-            let cleanupEnabled = self.cleanupEnabled
-            // LazyModel coalesces concurrent loads; an in-flight load can't be cancelled.
-            Task {
-                if await !engine.isLoaded {
-                    await engine.preload()
-                }
-                await cleanupModels.warmUpIfNeeded(cleaner, enabled: cleanupEnabled)
+        let engine = engineController.activeEngine
+        let cleanupModels = self.cleanupModels
+        let cleaner = cleanupModels.cleaner
+        let cleanupEnabled = self.cleanupEnabled
+        // LazyModel coalesces concurrent loads; an in-flight load can't be cancelled.
+        Task {
+            if await !engine.isLoaded {
+                await engine.preload()
             }
+            await cleanupModels.warmUpIfNeeded(cleaner, enabled: cleanupEnabled)
         }
     }
 
     // MARK: - Menu actions
 
     func switchEngine(to name: String) {
-        guard let newEngine = engines[name] else { return }
-        switch EngineSwitch.action(selecting: name, active: activeEngineName, pending: pendingEngineName) {
-        case .ignore:
-            return
-        case .revert:
-            // Re-selected the committed engine mid-preload: abandon the switch; the cancelled task unloads the superseded engine.
-            engineSwitchTask?.cancel()
-            engineSwitchTask = nil
-            pendingEngineName = nil
-        case .begin:
-            engineSwitchTask?.cancel()
-            pendingEngineName = name
-            let previousEngine = engines[activeEngineName]
-            let logger = self.logger
-            engineSwitchTask = Task { [weak self] in
-                await newEngine.preload()
-                guard let self else { return }
-                if Task.isCancelled {
-                    // Superseded mid-preload: drop the load unless a newer selection landed back on this engine.
-                    if EngineSwitch.shouldUnloadSuperseded(
-                        name, active: self.activeEngineName, pending: self.pendingEngineName)
-                    {
-                        await newEngine.unload()
-                    }
-                    return
-                }
-                self.dictation.pipeline.setEngine(newEngine, name: name)
-                self.activeEngineName = name
-                self.pendingEngineName = nil
-                self.settings.engine = name
-                logger.log("switched engine to \(name)")
-                await previousEngine?.unload()
-            }
-        }
+        engineController.switchEngine(to: name)
     }
 
     /// Switches the capture device (nil = system default). The built-in mic avoids Bluetooth HFP renegotiation delay.
@@ -381,15 +355,31 @@ struct ScribeApp: App {
         .menuBarExtraStyle(.menu)
 
         Window("scribe setup", id: onboardingWindowID) {
-            OnboardingWindow(permissions: model.permissions, settings: model.settings)
+            OnboardingWindow(
+                permissions: model.permissions, model: model, cleanupModels: model.cleanupModels,
+                settingsModel: model.settingsModel)
         }
 
         Window("scribe dictionary", id: dictionaryWindowID) {
-            DictionaryWindow(model: model.dictionaryModel)
+            DictionaryWindow(model: model.dictionaryModel, cleanupModels: model.cleanupModels)
         }
 
-        Window("scribe models", id: modelsWindowID) {
-            ModelsWindow(model: model.cleanupModels)
+        Window("scribe settings", id: settingsWindowID) {
+            SettingsWindow(model: model)
+        }
+        .commands { SettingsCommand() }
+    }
+}
+
+/// The menu bar menu's ⌘, only fires while that menu is open. With a scribe window frontmost the app is a
+/// regular app with a main menu, and ⌘, belongs there.
+private struct SettingsCommand: Commands {
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some Commands {
+        CommandGroup(replacing: .appSettings) {
+            Button("Settings…") { openSettingsWindow(openWindow) }
+                .keyboardShortcut(",")
         }
     }
 }
@@ -411,13 +401,20 @@ private struct MenuBarLabel: View {
     var body: some View {
         Text(
             menuBarGlyph(
-                dictation.state, progress: cleanupModels.cleanupModelProgress, needsAttention: !permissions.grantsOk))
-            .onAppear {
-                guard !didAutoOpen else { return }
-                didAutoOpen = true
-                guard !OnboardingState.missing(permissions.grants).isEmpty else { return }
-                openOnboarding(openWindow)
-            }
+                dictation.state, progress: cleanupModels.cleanupModelProgress, needsAttention: !permissions.grantsOk)
+        )
+        // The glyph alone reads as "white bullet" or "warning sign"; the value says what it means.
+        .accessibilityLabel("scribe")
+        .accessibilityValue(
+            glyphAccessibilityValue(
+                dictation.state, progress: cleanupModels.cleanupModelProgress, needsAttention: !permissions.grantsOk)
+        )
+        .onAppear {
+            guard !didAutoOpen else { return }
+            didAutoOpen = true
+            guard !OnboardingState.missing(permissions.grants).isEmpty else { return }
+            openOnboarding(openWindow)
+        }
     }
 }
 

@@ -1,3 +1,4 @@
+import Combine
 import XCTest
 
 /// Pins the cleanup-model switch protocol (begin, commit, failed load, revert, supersede, Apple Intelligence
@@ -26,6 +27,7 @@ final class CleanupModelControllerTests: XCTestCase {
         var afmReason: String?
         var snapshot = DictionarySnapshot(pairs: [], glossary: [])
         var initialBackendLoaded = false
+        var failureStickySeconds: Double = 10
         let statuses = Locked<[CleanupModelID: CleanupModelStore.Status]>([.gemma3: .downloaded(bytes: 100)])
         let statusComputations = Locked(0)
         let deletedRepos = Locked<[String]>([])
@@ -78,16 +80,19 @@ final class CleanupModelControllerTests: XCTestCase {
                 },
                 notify: { self.notifications.append($0) },
                 touchIdle: { self.touchIdleCalls += 1 },
+                failureStickySeconds: failureStickySeconds,
                 log: { line in logs.mutate { $0.append(line) } })
         }
     }
 
     private var h: Harness!
+    private var cancellables: Set<AnyCancellable> = []
 
     override func setUp() {
         super.setUp()
         h = Harness()
         h.settings.cleanupModel = CleanupModelID.gemma3.rawValue
+        cancellables = []
     }
 
     override func tearDown() {
@@ -278,6 +283,44 @@ final class CleanupModelControllerTests: XCTestCase {
         XCTAssertTrue(refreshed)
     }
 
+    func testFailureStatusClearsAfterTheStickyWindow() async {
+        h.failureStickySeconds = 0.05
+        let c = h.makeController()
+        let (task, backend) = beginSwitch(c, to: .gemma4)
+        backend.releasePreload(loaded: false)
+        await task.value
+        XCTAssertNotNil(c.cleanupModelStatus)
+
+        let cleared = await eventually { c.cleanupModelStatus == nil }
+
+        XCTAssertTrue(cleared)
+    }
+
+    func testFailureStatusSticksUntilTheWindowEnds() async {
+        let c = h.makeController()
+        let (task, backend) = beginSwitch(c, to: .gemma4)
+        backend.releasePreload(loaded: false)
+        await task.value
+
+        try? await Task.sleep(nanoseconds: 100_000_000)
+
+        XCTAssertEqual(c.cleanupModelStatus, "Couldn't load Gemma 4 E4B — still using Gemma 3 4B")
+    }
+
+    func testANewSwitchReplacesTheFailureAndTheOldWindowDoesNotClearIt() async {
+        h.failureStickySeconds = 0.05
+        let c = h.makeController()
+        let (failed, failedBackend) = beginSwitch(c, to: .gemma4)
+        failedBackend.releasePreload(loaded: false)
+        await failed.value
+
+        _ = beginSwitch(c, to: .gemma4e2b)
+        XCTAssertEqual(c.cleanupModelStatus, "Loading Gemma 4 E2B…")
+        try? await Task.sleep(nanoseconds: 200_000_000)
+
+        XCTAssertEqual(c.cleanupModelStatus, "Loading Gemma 4 E2B…", "the failure's clear must not wipe a newer status")
+    }
+
     // MARK: - 4. revert
 
     func testRevertingMidLoadAbandonsTheSwitchAndUnloadsTheOrphan() async {
@@ -403,6 +446,29 @@ final class CleanupModelControllerTests: XCTestCase {
         XCTAssertEqual(h.committed.count, 0)
         XCTAssertEqual(c.activeCleanupModel, "gemma3")
         XCTAssertEqual(h.settings.cleanupModel, "gemma3")
+    }
+
+    func testASwitchSupersededWhileCheckingIsLoadedThatEndsNotLoadedDoesNotClobberTheNewerSwitch() async {
+        // Same suspension point, failed load: the stale failure must not clear the newer switch's pending model,
+        // overwrite its status, or arm a clear over it.
+        h.failureStickySeconds = 0.05
+        let c = h.makeController()
+        let (taskA, backendA) = beginSwitch(c, to: .gemma4)
+        backendA.onIsLoaded = { c.switchCleanupModel(to: .gemma4e2b) }
+
+        backendA.releasePreload(loaded: false)
+        await taskA.value
+
+        XCTAssertEqual(c.pendingCleanupModel, "gemma4e2b")
+        XCTAssertEqual(c.cleanupModelStatus, "Loading Gemma 4 E2B…")
+        XCTAssertFalse(h.logs.value.contains("cleanup model switch to gemma4 failed to load"))
+        XCTAssertTrue(h.committed.isEmpty)
+        try? await Task.sleep(nanoseconds: 200_000_000)
+        XCTAssertEqual(c.cleanupModelStatus, "Loading Gemma 4 E2B…", "no stale failure clear over the newer switch")
+
+        h.backends.last!.releasePreload(loaded: true)
+        await c.cleanupSwitchTask?.value
+        XCTAssertEqual(c.activeCleanupModel, "gemma4e2b")
     }
 
     // MARK: - 7. download notification
@@ -593,6 +659,53 @@ final class CleanupModelControllerTests: XCTestCase {
         let notified = await eventually { !h.notifications.isEmpty }
         XCTAssertTrue(notified)
         XCTAssertEqual(h.factoryCalls.count, 2)
+    }
+
+    /// Counts `objectWillChange` emissions, i.e. the menu, Models pane and Dictionary window rebuilds a write causes.
+    private func countPublishes(_ controller: CleanupModelController) -> () -> Int {
+        var count = 0
+        controller.objectWillChange.sink { count += 1 }.store(in: &cancellables)
+        return { count }
+    }
+
+    func testRefreshingUnchangedAvailabilityPublishesNothing() {
+        let c = h.makeController()
+        let publishes = countPublishes(c)
+
+        c.refreshAppleIntelligenceAvailability()
+        c.refreshAppleIntelligenceAvailability()
+
+        XCTAssertEqual(publishes(), 0, "refresh runs on every key-down")
+    }
+
+    func testRefreshingAnUnchangedLossPublishesOnlyTheFirstTime() {
+        let c = h.makeController()
+        h.afmAvailable = false
+        h.afmReason = "Turn on Apple Intelligence in System Settings"
+        let publishes = countPublishes(c)
+
+        c.refreshAppleIntelligenceAvailability()
+        let afterTheChange = publishes()
+        c.refreshAppleIntelligenceAvailability()
+        c.refreshAppleIntelligenceAvailability()
+
+        XCTAssertGreaterThan(afterTheChange, 0, "going unavailable is a real change")
+        XCTAssertEqual(publishes(), afterTheChange, "repeating it must not rebuild the views again")
+        XCTAssertEqual(c.appleIntelligenceUnavailableReason, "Turn on Apple Intelligence in System Settings")
+    }
+
+    func testAChangedReasonPublishesAgain() {
+        let c = h.makeController()
+        h.afmAvailable = false
+        h.afmReason = "Apple Intelligence is still downloading"
+        c.refreshAppleIntelligenceAvailability()
+        let publishes = countPublishes(c)
+
+        h.afmReason = "Turn on Apple Intelligence in System Settings"
+        c.refreshAppleIntelligenceAvailability()
+
+        XCTAssertGreaterThan(publishes(), 0)
+        XCTAssertEqual(c.appleIntelligenceUnavailableReason, "Turn on Apple Intelligence in System Settings")
     }
 
     func testLossWhileAGemmaIsActiveOnlyMarksAppleIntelligenceUnavailable() {

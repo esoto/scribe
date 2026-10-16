@@ -28,6 +28,15 @@ enum CleanupSkip: String, Error {
     case timeout, error, empty, length, language
 }
 
+/// Shown for a few seconds after a dictation pasted the raw transcript, so raw and cleaned stop looking alike.
+func pastedRawHint(_ skip: CleanupSkip) -> String {
+    switch skip {
+    case .timeout: return "Pasted raw — cleanup timed out"
+    case .error: return "Pasted raw — cleanup failed"
+    case .empty, .length, .language: return "Pasted raw — cleanup output rejected"
+    }
+}
+
 protocol RecorderLike {
     func arm() throws
     func disarm() -> [Float]
@@ -43,6 +52,9 @@ extension Paster: Pasting {}
 
 /// Dictation orchestrator: state machine + degradation policy.
 final class DictationPipeline {
+    /// Shown when a hold that passed the tap threshold captured near-silence.
+    static let noSpeechHint = "No speech heard"
+
     private let recorder: RecorderLike
     private var stt: SttEngine
     private var cleaner: CleanupBackend?
@@ -50,6 +62,8 @@ final class DictationPipeline {
     private let paster: Pasting
     private let history: History
     private let config: PipelineConfig
+    /// Main-only (Settings writes, `keyUp` reads); kept out of `config`, which the runner reads off-main.
+    private var holdThreshold: Double
     private let clock: () -> Double
     private let runner: (@escaping () async -> Void) -> Void
     private let frontmost: () -> pid_t?
@@ -61,6 +75,10 @@ final class DictationPipeline {
     /// Read fresh each dictation; applied deterministically here, not via the cleanup prompt.
     private let replacementPairs: () -> [ReplacementPair]
     private let saveFailedAudio: ([Float]) -> Void
+    /// A short verdict on the last dictation for the status row; fires only for degradations, never for the user's own choices.
+    private let onHint: (String) -> Void
+    /// Fires after a paste that went through, never when the text only reached the clipboard.
+    private let onPasted: () -> Void
 
     private(set) var engineName: String
     var cleanupEnabled: Bool
@@ -93,7 +111,9 @@ final class DictationPipeline {
         cleanupEnabled: Bool = true,
         onLog: ((String) -> Void)? = nil,
         onCleaned: ((String) -> Void)? = nil,
-        replacementPairs: @escaping () -> [ReplacementPair] = { [] }
+        replacementPairs: @escaping () -> [ReplacementPair] = { [] },
+        onHint: @escaping (String) -> Void = { _ in },
+        onPasted: @escaping () -> Void = {}
     ) {
         self.recorder = recorder
         self.stt = stt
@@ -102,6 +122,7 @@ final class DictationPipeline {
         self.paster = paster
         self.history = history
         self.config = config
+        self.holdThreshold = config.holdThreshold
         self.clock = clock
         self.runner = runner ?? DictationPipeline.makeSerialRunner()
         self.frontmost = frontmost
@@ -112,6 +133,8 @@ final class DictationPipeline {
         self.onLog = onLog
         self.onCleaned = onCleaned
         self.replacementPairs = replacementPairs
+        self.onHint = onHint
+        self.onPasted = onPasted
     }
 
     // MARK: - Public API
@@ -137,7 +160,7 @@ final class DictationPipeline {
         isArmed = false
         let pcm = recorder.disarm()
         let held = clock() - (downAt ?? 0.0)
-        guard held >= config.holdThreshold else {
+        guard held >= holdThreshold else {
             endHoldIdle()
             return
         }
@@ -182,6 +205,11 @@ final class DictationPipeline {
         self.engineName = name
     }
 
+    /// Read at each key release, so a change applies from the next hold.
+    func setHoldThreshold(_ seconds: Double) {
+        holdThreshold = seconds
+    }
+
     func setCleaner(_ cleaner: CleanupBackend?, name: String) {
         self.cleaner = cleaner
         self.cleanupModelName = name
@@ -205,7 +233,9 @@ final class DictationPipeline {
         defer { if !terminal { emit(.idle) } }
 
         guard Gates.passesEnergyGate(pcm, threshold: config.energyGate) else {
-            // Near-silent capture (likely missing Microphone TCC grant); no notice, expected from accidental taps.
+            // Near-silent capture (likely missing Microphone TCC grant). The hold already passed the tap threshold, so
+            // this isn't an accidental tap: say so in the status row, but no notification.
+            onHint(DictationPipeline.noSpeechHint)
             return
         }
 
@@ -256,6 +286,7 @@ final class DictationPipeline {
         var cleaned = false
         var cleanupMs = 0
         var skipNote = ""
+        var cleanupSkip: CleanupSkip?
         if let cleaner,
             Gates.shouldClean(transcript, enabled: cleanupEnabled, minWords: config.minWords)
         {
@@ -267,6 +298,7 @@ final class DictationPipeline {
             case .failure(let skip):
                 // The reason token only: the backend's error text could echo the dictated text.
                 skipNote = " cleanup_skip=\(skip.rawValue)"
+                cleanupSkip = skip
             }
             cleanupMs = Int((clock() - cleanStart) * 1000)
         }
@@ -278,6 +310,9 @@ final class DictationPipeline {
 
         do {
             try paster.paste(final, target: target)
+            onPasted()
+            // Only a degradation gets a hint: disabled or too-short cleanup is the user's choice.
+            if let cleanupSkip { onHint(pastedRawHint(cleanupSkip)) }
         } catch let guarded as PasteGuardError {
             onNotice(guarded.notice)
         } catch {

@@ -6,7 +6,7 @@ Hold the hotkey (**Right ⌥** by default), speak, release:
 [Parakeet Ultra](https://huggingface.co/FluidInference/parakeet-ultra-coreml)
 transcribes (~0.2 s), [Gemma 3 4B](https://huggingface.co/mlx-community/gemma-3-4b-it-qat-4bit)
 strips fillers and resolves self-corrections — or pick Gemma 4 E4B, Gemma 4
-E2B or Apple Intelligence from the menu (see *Cleanup models*) — and the result
+E2B or Apple Intelligence in **Settings › Models** (see *Cleanup models*) — and the result
 is pasted into whatever app has focus. No cloud, no accounts. Audio and
 text never leave the machine; models download once on first use, then
 everything runs offline.
@@ -37,6 +37,8 @@ system permission dialogs (Microphone, Accessibility, Input Monitoring).
 Each grant auto-adds "scribe" to the right System Settings pane, a live
 checkmark lands within ~2 s of granting, and nothing needs a restart —
 Input Monitoring installs the hotkey tap live, mid-session.
+The same window shows the model downloads, and an optional Notifications row: scribe asks for
+notifications only when you click Request there, and uses them only to tell you when a dictation fails.
 
 **Models** are not bundled; they download on first use into a single
 app-managed store — `~/Library/Application Support/scribe/models/` —
@@ -52,7 +54,7 @@ everything re-downloads on next use.
 | Parakeet Ultra (STT) | ~0.6 GB | `parakeet/` |
 | Whisper (optional STT) | ~1.5 GB | `whisper/` |
 
-Downloaded cleanup models can be deleted from **Manage Models…** (not
+Downloaded cleanup models can be deleted from **Settings › Models** (not
 the one in use).
 
 Upgrading from a v3 install downloads Ultra on first launch (progress shows in the menu); the old v3 model is kept as a fallback until Ultra loads, then removed.
@@ -64,14 +66,11 @@ Upgrading from a v3 install downloads Ultra on first launch (progress shows in t
   permission, plus a live status line while recording/transcribing.
 - **Engine** picker: Parakeet (fast, default) ↔ Whisper (better for
   Spanish-heavy dictation; loads on first switch).
-- **Cleanup Model** picker: Gemma 3 4B · Gemma 4 E4B · Gemma 4 E2B
-  (smallest, fastest) · Apple Intelligence (shown when available). Selecting one downloads
-  it with progress in the status line; the previous model is unloaded
-  once the new one is ready. **Manage Models…** lists what's on disk and
-  deletes what you no longer want.
+- **Settings…** (⌘,) has three tabs. **General** holds the hotkey, hold delay, sounds, Launch at Login, idle unload, and history size. **Audio** picks the microphone. **Models** downloads, switches, and deletes the cleanup model.
 - **Cleanup** toggle: off = verbatim transcription pasted raw.
-- **History**: last 10 dictations (in memory only, never persisted); click
-  one to copy it back to the clipboard.
+- **History**: the last 10 dictations by default (Settings › General), in
+  memory only, never persisted; "· raw" marks one pasted without cleanup.
+  Click one to copy it back to the clipboard.
 - **Dictionary**: your vocabulary and corrections, fed to the cleanup pass
   so names and jargon come out spelled right — see below.
 - If cleanup ever misbehaves (timeout, length/language sanity gates), the
@@ -81,7 +80,7 @@ Upgrading from a v3 install downloads Ultra on first launch (progress shows in t
 
 ## Cleanup models
 
-The **Cleanup Model** picker offers four models; the default is
+The cleanup model is picked in **Settings › Models**, which offers four models; the default is
 **Gemma 3 4B**. The intent is that the default must pass golden + guard;
 today it has one known guard failure, documented below. Existing installs
 keep the model they already use.
@@ -107,7 +106,7 @@ not recorded as `known_failures`:
   injected instruction instead of cleaning the sentence (both E4B and
   E2B).
 
-Learned vocabulary (Dictionary → **Learn New Terms**) reaches only models
+Learned vocabulary (Dictionary window, **Learn new terms**) reaches only models
 proven by `DictionaryFidelityTests` to keep every word — currently
 **Gemma 4 E4B** and **Gemma 4 E2B**; Gemma 3 and Apple Intelligence do
 not receive learned terms. Apple Intelligence is built into macOS 26+;
@@ -117,8 +116,8 @@ and scribe switches to Gemma.
 ## Dictionary
 
 Cleanup knows generic English and Spanish, not *your* nouns. The dictionary
-teaches it — menu bar → **Dictionary**, or **Edit Dictionary…** for the
-full editor.
+teaches it. **Edit Dictionary…** in the menu opens the editor, whose top section holds the
+two toggles **Learn new terms** and **Prefer dictionary words (experimental)**.
 
 **Replacements (manual).** "Heard as → Replace with" pairs — this is the
 part that works, and the one to reach for. A word the STT mishears comes
@@ -152,7 +151,7 @@ session only (to offer bindings), learned terms are frozen, and nothing is
 promoted. The learned vocabulary
 only reaches models proven by `DictionaryFidelityTests` to keep every
 word — currently **Gemma 4 E4B** and **Gemma 4 E2B**. With other models the toggle still
-collects words, and the menu notes they aren't sent. The intent:
+collects words, and the Dictionary window notes they aren't sent. The intent:
 distinctive vocabulary in cleaned dictations (proper nouns, acronyms,
 `camelCase`, words with digits) is counted, and anything appearing in
 **3 separate dictations** gets its spelling locked in. Terms go stale
@@ -176,26 +175,28 @@ nothing, since the model never sees it.
 
 Settings live in `UserDefaults` under `dev.esoto.scribe` (a legacy
 `~/.config/scribe/config.toml` is imported once, first launch only).
-Change via `defaults write dev.esoto.scribe <key> <value>` and relaunch:
+Change via `defaults write dev.esoto.scribe <key> <value>` and relaunch, or use the control named in the table:
+
+Most of these have a control in **Settings…** (⌘,), the menu, or the Dictionary window and apply immediately; the rest are advanced keys that still need a relaunch.
 
 | Key | Default | Meaning |
 |---|---|---|
-| `hotkey` | `right_option` | `right_command` \| `right_option` \| `f13` |
-| `holdThreshold` | 0.3 | seconds the key must be held |
-| `engine` | `parakeet` | `parakeet` \| `whisper` |
-| `cleanupEnabled` | true | Gemma cleanup pass on/off |
+| `hotkey` | `right_option` | `right_command` \| `right_option` \| `f13` (Settings) |
+| `holdThreshold` | 0.3 | seconds the key must be held (Settings) |
+| `engine` | `parakeet` | `parakeet` \| `whisper` (menu) |
+| `cleanupEnabled` | true | Gemma cleanup pass on/off (menu) |
 | `minWords` | 4 | utterances shorter than this skip cleanup |
 | `cleanupTimeout` | 6.0 | seconds before falling back to raw text |
 | `restoreDelay` | 2.0 | seconds before restoring the prior clipboard |
 | `energyGate` | 0.0005 | silence gate (anti-hallucination); speech ~0.001+ |
-| `sounds` | true | start/error sounds |
-| `historySize` | 10 | menu history length |
-| `idleUnloadMinutes` | 15 | unload models after idle (0 = keep resident) |
-| `dictionaryLearningEnabled` | false | auto-learn vocabulary (known to drop words — see Dictionary) |
-| `cleanupModel` | resolved at first launch | `gemma3` \| `gemma4` \| `gemma4e2b` \| `appleIntelligence` |
-| `cleanupModelPath` | _(unset)_ | local MLX model folder to use for cleanup instead of stock Gemma; when set, overrides `cleanupModel` and disables the picker |
-| `vocabularyBiasingEnabled` | false | acoustic vocabulary biasing for Parakeet (experimental) |
-| `microphoneUID` | _(unset)_ | input device UID; unset follows the system default input |
+| `sounds` | true | start/error sounds (Settings) |
+| `historySize` | 10 | menu history length (Settings) |
+| `idleUnloadMinutes` | 15 | unload models after idle (0 = keep resident) (Settings) |
+| `dictionaryLearningEnabled` | false | auto-learn vocabulary (known to drop words — see Dictionary) (Dictionary window) |
+| `cleanupModel` | resolved at first launch | `gemma3` \| `gemma4` \| `gemma4e2b` \| `appleIntelligence` (Settings) |
+| `cleanupModelPath` | _(unset)_ | local MLX model folder to use for cleanup instead of stock Gemma; when set, overrides `cleanupModel` and disables switching in **Settings › Models** |
+| `vocabularyBiasingEnabled` | false | acoustic vocabulary biasing for Parakeet (experimental) (Dictionary window) |
+| `microphoneUID` | _(unset)_ | input device UID; unset follows the system default input (Settings) |
 
 **Custom cleanup model:** point `cleanupModelPath` at any local MLX model
 folder (config.json + safetensors + tokenizer) and relaunch;

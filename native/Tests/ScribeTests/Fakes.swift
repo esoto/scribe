@@ -145,7 +145,7 @@ final class FakeCleanupModelBackend: CleanupModelBackend, @unchecked Sendable {
     private var _unloadCalls = 0
     private var _dictionaries: [DictionarySnapshot] = []
     private var _events: [String] = []
-    private var _onIsLoaded: (() -> Void)?
+    private var _onIsLoaded: (@MainActor () -> Void)?
     private var gate: CheckedContinuation<Void, Never>?
     private var gateReleased = false
     private let gated: Bool
@@ -170,15 +170,16 @@ final class FakeCleanupModelBackend: CleanupModelBackend, @unchecked Sendable {
         set { lock.withLock { _holdsMemory = newValue } }
     }
 
-    /// Runs inside `isLoaded`, i.e. at the suspension point a caller awaits: lets a test land a cancellation there.
-    var onIsLoaded: (() -> Void)? {
+    /// Runs on the main actor inside `isLoaded`, i.e. at the suspension point a caller awaits: lets a test land a
+    /// cancellation, a revert or a newer switch there.
+    var onIsLoaded: (@MainActor () -> Void)? {
         get { lock.withLock { _onIsLoaded } }
         set { lock.withLock { _onIsLoaded = newValue } }
     }
 
     var isLoaded: Bool {
         get async {
-            onIsLoaded?()
+            if let hook = onIsLoaded { await MainActor.run { hook() } }
             return lock.withLock { _loaded }
         }
     }
@@ -229,6 +230,79 @@ final class FakeCleanupModelBackend: CleanupModelBackend, @unchecked Sendable {
     func clean(_ text: String) async throws -> String { text }
 }
 
+/// An `UnloadableEngine` whose `preload()` can be held open, so a test drives the cancel/supersede/commit
+/// orderings of an engine switch deterministically. Unlike the cleanup backend, one engine instance is shared by
+/// every switch to it, so several held preloads can wait on the same gate (as `LazyModel` coalesces them).
+final class FakeUnloadableEngine: UnloadableEngine, @unchecked Sendable {
+    let name: String
+    private let lock = NSLock()
+    private var _loaded: Bool
+    private var _preloadCalls = 0
+    private var _unloadCalls = 0
+    private var _onIsLoaded: (@MainActor () -> Void)?
+    private var gates: [CheckedContinuation<Void, Never>] = []
+    private var gateReleased = false
+
+    init(name: String, loaded: Bool = false) {
+        self.name = name
+        _loaded = loaded
+    }
+
+    var loaded: Bool {
+        get { lock.withLock { _loaded } }
+        set { lock.withLock { _loaded = newValue } }
+    }
+    var preloadCalls: Int { lock.withLock { _preloadCalls } }
+    var unloadCalls: Int { lock.withLock { _unloadCalls } }
+
+    /// Runs on the main actor inside `isLoaded`, i.e. at the suspension point a controller awaits: lets a test
+    /// land a revert or a newer switch there.
+    var onIsLoaded: (@MainActor () -> Void)? {
+        get { lock.withLock { _onIsLoaded } }
+        set { lock.withLock { _onIsLoaded = newValue } }
+    }
+
+    var isLoaded: Bool {
+        get async {
+            if let hook = onIsLoaded { await MainActor.run { hook() } }
+            return lock.withLock { _loaded }
+        }
+    }
+
+    func preload() async {
+        lock.withLock { _preloadCalls += 1 }
+        // Ignores cancellation, like a real model load.
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            let resumeNow = lock.withLock { () -> Bool in
+                if gateReleased { return true }
+                gates.append(continuation)
+                return false
+            }
+            if resumeNow { continuation.resume() }
+        }
+    }
+
+    /// Lets every held `preload()` return, optionally deciding whether the model ends up loaded.
+    func releasePreload(loaded: Bool? = nil) {
+        let waiting = lock.withLock { () -> [CheckedContinuation<Void, Never>] in
+            if let loaded { _loaded = loaded }
+            gateReleased = true
+            defer { gates = [] }
+            return gates
+        }
+        for continuation in waiting { continuation.resume() }
+    }
+
+    func unload() async {
+        lock.withLock {
+            _unloadCalls += 1
+            _loaded = false
+        }
+    }
+
+    func transcribe(_ pcm: [Float]) async throws -> String { "fake transcript" }
+}
+
 /// Polls main-actor state in 1 ms steps (bounded at ~1 s) so a test waits on a condition, never a fixed delay.
 @MainActor
 func eventually(_ condition: () -> Bool) async -> Bool {
@@ -246,6 +320,8 @@ final class FakeTCCProbe: TCCProbing {
     var inputMonitoring = false
     /// What the mic prompt does to the mic grant when it resolves.
     var microphoneGrantedByRequest = false
+    /// The user has already answered "Don't Allow": the tri-state reads denied rather than notDetermined.
+    var microphoneDenied = false
     private(set) var events: [String] = []
 
     func resetEvents() { events.removeAll() }
@@ -253,6 +329,12 @@ final class FakeTCCProbe: TCCProbing {
     func microphoneGranted() -> Bool {
         events.append("probe-microphone")
         return microphone
+    }
+
+    func microphoneStatus() -> TCCStatus {
+        events.append("probe-microphoneStatus")
+        if microphone { return .authorized }
+        return microphoneDenied ? .denied : .notDetermined
     }
 
     func accessibilityGranted() -> Bool {
@@ -268,6 +350,8 @@ final class FakeTCCProbe: TCCProbing {
     func requestMicrophone() async -> Bool {
         events.append("request-microphone")
         microphone = microphoneGrantedByRequest
+        // macOS answers a declined prompt with denied, and never prompts again.
+        microphoneDenied = !microphoneGrantedByRequest
         return microphoneGrantedByRequest
     }
 
@@ -275,15 +359,29 @@ final class FakeTCCProbe: TCCProbing {
     func requestInputMonitoring() { events.append("request-inputMonitoring") }
 }
 
+/// Scripted notification authorization; `request` can flip the answer the way the user's click does.
+final class FakeNotificationAuthorizer: NotificationAuthorizing {
+    var current: NotificationAuthorization = .notDetermined
+    /// What the prompt does to `current` when it resolves.
+    var answerToRequest: NotificationAuthorization = .authorized
+    private(set) var events: [String] = []
+
+    func status() async -> NotificationAuthorization {
+        events.append("status")
+        return current
+    }
+
+    func request() async -> Bool {
+        events.append("request")
+        current = answerToRequest
+        return answerToRequest == .authorized
+    }
+}
+
 final class FakeNotifier: Notifier {
     private(set) var delivered: [(title: String, body: String)] = []
-    private(set) var authorizationRequests = 0
     /// When set, every delivery reports it through `onError`.
     var deliveryError: Error?
-
-    func requestAuthorization(log: @escaping @Sendable (String) -> Void) {
-        authorizationRequests += 1
-    }
 
     func deliver(title: String, body: String, onError: @escaping @Sendable (Error) -> Void) {
         delivered.append((title, body))
@@ -295,13 +393,23 @@ final class FakeHotkeyMonitor: HotkeyMonitoring {
     var onModifierEvent: ((String) -> Void)?
     var installError: Error?
     var reinstallError: Error?
+    /// Shared by every monitor a test builds, so the order of install and uninstall calls across swaps is assertable.
+    var journal: Box<String>?
+    var name = "monitor"
     private(set) var installCalls = 0
     private(set) var reinstallCalls = 0
+    private(set) var uninstallCalls = 0
     private(set) var forgetCalls = 0
 
     func install() throws {
         installCalls += 1
+        journal?.append("\(name):install")
         if let installError { throw installError }
+    }
+
+    func uninstall() {
+        uninstallCalls += 1
+        journal?.append("\(name):uninstall")
     }
 
     func reinstall() throws {

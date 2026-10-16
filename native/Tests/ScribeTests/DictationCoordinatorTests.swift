@@ -5,6 +5,13 @@ import XCTest
 final class DictationCoordinatorTests: XCTestCase {
     private var recorder: FakeRecorder!
     private var monitor: FakeHotkeyMonitor!
+    /// Every monitor the factory built, in order; the first is `monitor`.
+    private var monitors: [FakeHotkeyMonitor] = []
+    private var monitorKeys: [HotKey] = []
+    private var journal: Box<String>!
+    private var jobs: Box<String>!
+    /// Applied to monitors built after the first, i.e. by `setHotkey`.
+    private var rebuiltInstallError: Error?
     private var notifier: FakeNotifier!
     private var sounds: Box<String>!
     private var logs: Box<String>!
@@ -21,6 +28,11 @@ final class DictationCoordinatorTests: XCTestCase {
         super.setUp()
         recorder = FakeRecorder()
         monitor = FakeHotkeyMonitor()
+        monitors = []
+        monitorKeys = []
+        journal = Box<String>()
+        jobs = Box<String>()
+        rebuiltInstallError = nil
         notifier = FakeNotifier()
         sounds = Box<String>()
         logs = Box<String>()
@@ -39,10 +51,12 @@ final class DictationCoordinatorTests: XCTestCase {
     private func make(
         config: PipelineConfig = PipelineConfig(),
         errorStickySeconds: Double = 5,
+        hintSeconds: Double = 4,
         failedAudioURL: URL? = nil
     ) -> DictationCoordinator {
         let recorder = self.recorder!
         let clock = pipelineClock!
+        let jobs = self.jobs!
         return DictationCoordinator(
             recorder: recorder,
             pipelineConfig: config,
@@ -52,13 +66,25 @@ final class DictationCoordinatorTests: XCTestCase {
                 return DictationPipeline(
                     recorder: recorder, stt: FakeStt(), cleaner: FakeCleaner(), paster: FakePaster(),
                     history: History(maxLen: 10), config: config, clock: { clock.t },
-                    runner: { _ in },  // jobs are not under test here: a held key is discarded or force-stopped
-                    onState: sinks.onState, onNotice: sinks.onNotice, saveFailedAudio: sinks.saveFailedAudio)
+                    runner: { _ in jobs.append("job") },  // queued, never run: only whether a hold produced one matters
+                    onState: sinks.onState, onNotice: sinks.onNotice, saveFailedAudio: sinks.saveFailedAudio,
+                    onHint: sinks.onHint, onPasted: sinks.onPasted)
             },
-            makeHotkeyMonitor: { [unowned self] down, up in
+            makeHotkeyMonitor: { [unowned self] key, down, up in
+                self.monitorKeys.append(key)
                 self.monitorDown = down
                 self.monitorUp = up
-                return self.monitor
+                let built: FakeHotkeyMonitor
+                if self.monitors.isEmpty {
+                    built = self.monitor
+                } else {
+                    built = FakeHotkeyMonitor()
+                    built.installError = self.rebuiltInstallError
+                }
+                built.name = "monitor\(self.monitors.count)"
+                built.journal = self.journal
+                self.monitors.append(built)
+                return built
             },
             notifier: notifier,
             playSound: { [unowned self] in sounds.append($0) },
@@ -66,6 +92,7 @@ final class DictationCoordinatorTests: XCTestCase {
             microphoneGranted: { [unowned self] in microphoneGranted },
             reportInputMonitoring: { [unowned self] in inputMonitoring.append($0) },
             errorStickySeconds: errorStickySeconds,
+            hintSeconds: hintSeconds,
             failedAudioURL: failedAudioURL ?? directory.appendingPathComponent("last_failed.wav"),
             log: { [logs] in logs!.append($0) })
     }
@@ -123,6 +150,101 @@ final class DictationCoordinatorTests: XCTestCase {
         let recording = await eventually { c.state == .recording }
         XCTAssertTrue(recording)
         XCTAssertEqual(sounds.value, ["Pop"])
+    }
+
+    // MARK: - Hints and the paste cue
+
+    func testHintReachesThePublishedStateThenClearsAfterHintSeconds() async {
+        let c = make(hintSeconds: 0.05)
+
+        sinks.onHint("Pasted raw — cleanup timed out")
+
+        let shown = await eventually { c.hint == "Pasted raw — cleanup timed out" }
+        XCTAssertTrue(shown)
+        let cleared = await eventually { c.hint == nil }
+        XCTAssertTrue(cleared)
+    }
+
+    func testHintStaysUntilItsWindowEnds() async {
+        let c = make(hintSeconds: 30)
+
+        c.showHint("Pasted raw — cleanup failed")
+        try? await Task.sleep(nanoseconds: 100_000_000)
+
+        XCTAssertEqual(c.hint, "Pasted raw — cleanup failed")
+    }
+
+    func testANewerHintReplacesTheOldOneAndCancelsItsClear() {
+        let c = make(hintSeconds: 30)
+        c.showHint("first")
+        let firstClear = c.hintClear
+
+        c.showHint("second")
+
+        XCTAssertEqual(firstClear?.isCancelled, true)
+        XCTAssertEqual(c.hint, "second")
+    }
+
+    func testKeyDownClearsTheHint() {
+        let c = make()
+        c.showHint("Pasted raw — cleanup failed")
+        let clear = c.hintClear
+
+        c.handleKeyDown()
+
+        XCTAssertNil(c.hint)
+        XCTAssertEqual(clear?.isCancelled, true)
+    }
+
+    func testNoSpeechHeardWithTheMicrophoneGrantedShowsTheHint() {
+        let c = make()
+
+        c.showHint("No speech heard")
+
+        XCTAssertEqual(c.hint, "No speech heard")
+        XCTAssertEqual(notifier.delivered.count, 0)
+    }
+
+    func testNoSpeechHeardWithoutTheMicrophoneNotifiesInsteadOfHinting() async {
+        microphoneGranted = false
+        let c = make()
+
+        sinks.onHint("No speech heard")
+
+        let delivered = await eventually { !notifier.delivered.isEmpty }
+        XCTAssertTrue(delivered)
+        XCTAssertEqual(notifier.delivered.first?.title, "scribe")
+        XCTAssertEqual(notifier.delivered.first?.body, "Microphone is off — open Setup / Doctor…")
+        XCTAssertNil(c.hint)
+    }
+
+    func testOtherHintsStillShowWithoutTheMicrophone() {
+        microphoneGranted = false
+        let c = make()
+
+        c.showHint("Pasted raw — cleanup timed out")
+
+        XCTAssertEqual(c.hint, "Pasted raw — cleanup timed out")
+        XCTAssertEqual(notifier.delivered.count, 0)
+    }
+
+    func testPasteCuePlaysTinkWhenSoundsAreOn() async {
+        let c = make()
+        _ = c
+
+        sinks.onPasted()
+
+        let played = await eventually { sounds.value == ["Tink"] }
+        XCTAssertTrue(played)
+    }
+
+    func testPasteCueIsSilentWhenSoundsAreOff() {
+        soundsEnabled = false
+        let c = make()
+
+        c.playPasteCue()
+
+        XCTAssertEqual(sounds.value, [])
     }
 
     // MARK: - Notifications
@@ -184,14 +306,13 @@ final class DictationCoordinatorTests: XCTestCase {
 
     // MARK: - Startup and hotkey install
 
-    func testStartPrewarmsInstallsTheTapAndAsksForNotificationAuthorization() {
+    func testStartPrewarmsAndInstallsTheTap() {
         let c = make()
 
         c.start()
 
         XCTAssertEqual(recorder.prewarmCalls, 1)
         XCTAssertEqual(monitor.installCalls, 1)
-        XCTAssertEqual(notifier.authorizationRequests, 1)
         XCTAssertEqual(inputMonitoring.value, [true])
         XCTAssertTrue(logs.value.contains("hotkey installed (key=right_option)"))
     }
@@ -233,6 +354,94 @@ final class DictationCoordinatorTests: XCTestCase {
 
         XCTAssertEqual(inputMonitoring.value, [false])
         XCTAssertTrue(logs.value.contains { $0.hasPrefix("hotkey reinstall failed:") })
+    }
+
+    // MARK: - Changing the hotkey at runtime
+
+    func testSetHotkeyUninstallsTheOldTapBeforeInstallingTheNewOne() {
+        let c = make()
+        c.start()
+
+        c.setHotkey(.f13)
+
+        XCTAssertEqual(monitorKeys, [.rightOption, .f13])
+        XCTAssertEqual(c.hotkey, .f13)
+        XCTAssertEqual(journal.value, ["monitor0:install", "monitor0:uninstall", "monitor1:install"])
+        XCTAssertEqual(inputMonitoring.value, [true, true])
+        XCTAssertTrue(logs.value.contains("hotkey changed to f13"))
+    }
+
+    func testSetHotkeyRewiresTheKeyHandlersAndTheModifierLog() {
+        let c = make()
+        c.start()
+        c.setHotkey(.f13)
+        var hookCalls = 0
+        c.onKeyDown = { hookCalls += 1 }
+
+        monitorDown()
+        XCTAssertEqual(hookCalls, 1)
+        XCTAssertTrue(recorder.armed)
+        monitorUp()
+        XCTAssertFalse(recorder.armed)
+
+        monitors[1].onModifierEvent?("flagsChanged keycode=105")
+        XCTAssertTrue(logs.value.contains("tap: flagsChanged keycode=105"))
+    }
+
+    func testSetHotkeyEndsAHoldInProgress() async {
+        let c = make()
+        c.start()
+        c.handleKeyDown()
+        let recording = await eventually { c.state == .recording }
+        XCTAssertTrue(recording)
+        let watchdog = c.holdWatchdog
+
+        c.setHotkey(.f13)
+
+        XCTAssertFalse(recorder.armed, "the swap itself ends the hold")
+        XCTAssertEqual(watchdog?.isCancelled, true)
+        let idle = await eventually { c.state == .idle }
+        XCTAssertTrue(idle)
+
+        pipelineClock.t = 1.0  // past the 0.3 s threshold: a release still reaching an armed pipeline queues a job
+        c.handleKeyUp()  // the old key's release, arriving late
+        XCTAssertEqual(jobs.value, [], "a hold cut off by the swap must not become a dictation")
+    }
+
+    func testSetHotkeyReportsInputMonitoringOffWhenTheNewTapFails() {
+        rebuiltInstallError = HotkeyError(message: "denied")
+        let c = make()
+        c.start()
+
+        c.setHotkey(.f13)
+
+        XCTAssertEqual(inputMonitoring.value, [true, false])
+        XCTAssertTrue(logs.value.contains { $0.hasPrefix("hotkey install failed:") })
+        XCTAssertTrue(logs.value.contains("hotkey changed to f13"))
+    }
+
+    func testTheRetryAfterAFailedSwapRebuildsTheNewKeysTap() {
+        rebuiltInstallError = HotkeyError(message: "denied")
+        let c = make()
+        c.start()
+        c.setHotkey(.f13)
+
+        c.activateHotkeyIfNeeded()
+
+        XCTAssertEqual(monitors[0].reinstallCalls, 0)
+        XCTAssertEqual(monitors[1].reinstallCalls, 1)
+    }
+
+    func testTheWatchdogAfterASwapForgetsTheNewMonitorsKey() async {
+        let c = make(config: PipelineConfig(maxHold: 0.05))
+        c.start()
+        c.setHotkey(.f13)
+
+        c.handleKeyDown()
+
+        let forgot = await eventually { monitors[1].forgetCalls == 1 }
+        XCTAssertTrue(forgot)
+        XCTAssertEqual(monitors[0].forgetCalls, 0)
     }
 
     // MARK: - Key handling and the hold watchdog

@@ -30,19 +30,6 @@ final class DictionaryWindowHelpersTests: XCTestCase {
         XCTAssertTrue(atPairCap(UserDictionaryStore.maxStoredPairs))
     }
 
-    func testMenuGlossaryTermsExcludesSeededAndRanksByUse() {
-        let now = Date(timeIntervalSince1970: 1_000_000)
-        let entries = [
-            GlossaryEntry(term: "Rare", count: 3, firstSeen: now, lastSeen: now),
-            GlossaryEntry(term: "Common", count: 40, firstSeen: now, lastSeen: now),
-            GlossaryEntry(term: "Middle", count: 9, firstSeen: now, lastSeen: now),
-        ]
-        XCTAssertEqual(menuGlossaryTerms(entries), ["Common", "Middle", "Rare"])
-        XCTAssertEqual(menuGlossaryTerms(entries, limit: 2), ["Common", "Middle"])
-        // Seeded pair vocabulary is excluded: the menu's Remove cannot delete it.
-        XCTAssertEqual(menuGlossaryTerms([]), [])
-    }
-
     func testDistinctReplacementTargets() {
         let at = Date(timeIntervalSince1970: 0)
         let pairs = [

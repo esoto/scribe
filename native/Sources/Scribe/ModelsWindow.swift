@@ -1,15 +1,6 @@
 import AppKit
 import SwiftUI
 
-/// Scene id for the cleanup-models window, shared by the menu's
-/// "Manage Models…" item and the scene in `ScribeApp`.
-let modelsWindowID = "models"
-
-func openModelsWindow(_ openWindow: OpenWindowAction) {
-    NSApp.activate(ignoringOtherApps: true)
-    openWindow(id: modelsWindowID)
-}
-
 struct ModelRow: Identifiable, Equatable {
     let id: CleanupModelID
     let label: String
@@ -18,6 +9,8 @@ struct ModelRow: Identifiable, Equatable {
     let canUse: Bool
     let canDelete: Bool
     let bytesOnDisk: Int64
+    let useLabel: String
+    let canCancel: Bool
 }
 
 /// Decimal GB/MB with a POSIX "." separator. Free function, unit-tested.
@@ -41,7 +34,7 @@ func modelRows(
                 id: spec.id, label: spec.label,
                 detail: isActive ? "In use · built into macOS" : (appleIntelligenceReason ?? "Built into macOS · no download"),
                 isActive: isActive, canUse: appleIntelligenceReason == nil && !isActive,
-                canDelete: false, bytesOnDisk: 0)
+                canDelete: false, bytesOnDisk: 0, useLabel: "Use", canCancel: false)
         }
         let status = statuses[spec.id] ?? .notDownloaded
         let detail: String
@@ -54,17 +47,15 @@ func modelRows(
             id: spec.id, label: spec.label, detail: detail, isActive: isActive,
             canUse: !isActive && spec.id.rawValue != pending,
             canDelete: status != .notDownloaded && canDeleteModel(spec.id, active: active, pending: pending),
-            bytesOnDisk: status.bytes)
+            bytesOnDisk: status.bytes,
+            useLabel: status.isDownloaded ? "Use" : "Download & Use",
+            canCancel: spec.id.rawValue == pending
+                // Cancel re-selects the active model; an unavailable Apple Intelligence can't be re-selected.
+                && !(active == CleanupModelID.appleIntelligence.rawValue && appleIntelligenceReason != nil))
     }
 }
 
-/// Menu label: download size until it's on disk; AFM labelled honestly.
-func pickerLabel(_ spec: CleanupModelSpec, status: CleanupModelStore.Status) -> String {
-    guard let bytes = spec.approxDownloadBytes else { return "\(spec.label) (fastest, less accurate)" }
-    return status.isDownloaded ? spec.label : "\(spec.label) — \(formatBytes(bytes)) download"
-}
-
-/// Shown under "Learn New Terms" when the active model is gated off.
+/// Shown under the Dictionary window's "Learn new terms" toggle when the active model is gated off.
 func learningNote(fidelitySafe: Bool, learningOn: Bool) -> String? {
     guard learningOn, !fidelitySafe else { return nil }
     return "Learned terms aren't sent to this model — it can drop words"
@@ -75,9 +66,9 @@ func deleteConfirmationTitle(_ row: ModelRow?) -> String {
     return "Delete \(row.label) (\(formatBytes(row.bytesOnDisk)))?"
 }
 
-/// Lists every cleanup model with its disk state: use one, or delete a
+/// Settings › Models: every cleanup model with its disk state. Use one, cancel a switch in flight, or delete a
 /// downloaded one you're done trying. The model in use can't be deleted.
-struct ModelsWindow: View {
+struct ModelsPane: View {
     @ObservedObject var model: CleanupModelController
     @State private var pendingDelete: ModelRow?
 
@@ -90,7 +81,6 @@ struct ModelsWindow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Cleanup Models").font(.title2.bold())
             if model.activeCleanupModel == "custom" {
                 Text("A custom model is set via `defaults write dev.esoto.scribe cleanupModelPath`; it overrides this list.")
                     .font(.caption).foregroundStyle(.secondary)
@@ -116,7 +106,15 @@ struct ModelsWindow: View {
                                 Text(row.detail).font(.caption).foregroundStyle(.secondary)
                             }
                             Spacer()
-                            Button("Use") { model.switchCleanupModel(to: row.id) }
+                            if row.canCancel {
+                                // Selecting the model already in use is the revert path.
+                                Button("Cancel") {
+                                    if let active = CleanupModelID(rawValue: model.activeCleanupModel) {
+                                        model.switchCleanupModel(to: active)
+                                    }
+                                }
+                            }
+                            Button(row.useLabel) { model.switchCleanupModel(to: row.id) }
                                 .disabled(!row.canUse || model.activeCleanupModel == "custom")
                             Button {
                                 pendingDelete = row
@@ -131,11 +129,16 @@ struct ModelsWindow: View {
                 }
                 .padding(4)
             }
-            Text("On disk: \(formatBytes(rows.map(\.bytesOnDisk).reduce(0, +)))")
-                .font(.caption).foregroundStyle(.secondary)
+            HStack {
+                Text("On disk: \(formatBytes(rows.map(\.bytesOnDisk).reduce(0, +)))")
+                    .font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                Button("Show in Finder") {
+                    NSWorkspace.shared.activateFileViewerSelecting([ModelStore.baseDirectory])
+                }
+            }
         }
-        .padding(20)
-        .frame(width: 480)
+        .padding(16)
         .onAppear {
             model.refreshDownloadedModels()
             model.refreshAppleIntelligenceAvailability()

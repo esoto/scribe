@@ -55,12 +55,6 @@ final class ModelsWindowHelpersTests: XCTestCase {
         XCTAssertFalse(rows[3].canUse)
     }
 
-    func testPickerLabel() {
-        XCTAssertEqual(pickerLabel(CleanupModelCatalog.gemma3, status: .downloaded(bytes: 1)), "Gemma 3 4B")
-        XCTAssertEqual(pickerLabel(CleanupModelCatalog.gemma4, status: .notDownloaded), "Gemma 4 E4B — 4.9 GB download")
-        XCTAssertEqual(pickerLabel(CleanupModelCatalog.appleIntelligence, status: .notDownloaded), "Apple Intelligence (fastest, less accurate)")
-    }
-
     func testLearningNote() {
         XCTAssertNil(learningNote(fidelitySafe: true, learningOn: true))
         XCTAssertNil(learningNote(fidelitySafe: false, learningOn: false))
@@ -71,5 +65,24 @@ final class ModelsWindowHelpersTests: XCTestCase {
         let row = modelRows(statuses: [.gemma4: .downloaded(bytes: 4_900_000_000)], active: "gemma3", pending: nil, appleIntelligenceReason: nil)[1]
         XCTAssertEqual(deleteConfirmationTitle(row), "Delete Gemma 4 E4B (4.9 GB)?")
         XCTAssertEqual(deleteConfirmationTitle(nil), "")
+    }
+
+    func testUseLabelSaysDownloadWhenNothingIsOnDisk() {
+        let rows = modelRows(statuses: [:], active: "gemma3", pending: nil, appleIntelligenceReason: "x")
+        XCTAssertEqual(rows.first { $0.id == .gemma4 }?.useLabel, "Download & Use")
+        let downloaded = modelRows(
+            statuses: [.gemma4: .downloaded(bytes: 1)], active: "gemma3", pending: nil, appleIntelligenceReason: "x")
+        XCTAssertEqual(downloaded.first { $0.id == .gemma4 }?.useLabel, "Use")
+    }
+
+    func testOnlyThePendingRowCanCancel() {
+        let rows = modelRows(statuses: [:], active: "gemma3", pending: "gemma4", appleIntelligenceReason: "x")
+        XCTAssertEqual(rows.filter(\.canCancel).map(\.id), [.gemma4])
+    }
+
+    func testNoCancelWhenTheActiveModelCannotBeReselected() {
+        let rows = modelRows(
+            statuses: [:], active: "appleIntelligence", pending: "gemma4", appleIntelligenceReason: "Turned off")
+        XCTAssertEqual(rows.filter(\.canCancel).map(\.id), [])
     }
 }
