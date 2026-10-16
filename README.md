@@ -37,6 +37,8 @@ system permission dialogs (Microphone, Accessibility, Input Monitoring).
 Each grant auto-adds "scribe" to the right System Settings pane, a live
 checkmark lands within ~2 s of granting, and nothing needs a restart —
 Input Monitoring installs the hotkey tap live, mid-session.
+The same window shows the model downloads, and an optional Notifications row: scribe asks for
+notifications only when you click Request there, and uses them only to tell you when a dictation fails.
 
 **Models** are not bundled; they download on first use into a single
 app-managed store — `~/Library/Application Support/scribe/models/` —
