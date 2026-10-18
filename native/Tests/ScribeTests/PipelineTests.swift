@@ -50,9 +50,9 @@ final class PipelineTests: XCTestCase {
         runner: ((@escaping () async -> Void) -> Void)? = nil,
         frontmost: @escaping () -> pid_t? = { nil },
         enhancer: AudioEnhancer? = nil,
-        enhanceEnabled: Bool = false
+        enhanceEnabled: Bool = false,
+        clock: FakeClock = FakeClock()
     ) -> Harness {
-        let clock = FakeClock()
         let states = Box<PipelineState>()
         let notices = Box<String>()
         let saved = Box<[Float]>()
@@ -890,5 +890,33 @@ final class PipelineTests: XCTestCase {
         XCTAssertEqual(stt.received, [VOICED])
         XCTAssertEqual(h.pipeline.engineName, "parakeet")
         XCTAssertTrue(h.notices.value.isEmpty, "a swallowed enhancement failure is not user-facing")
+    }
+
+    /// The enhanced copy is only a transcription input: a failed-audio save is for retrying the real capture.
+    func testSttFailureAfterEnhancementSavesTheRawCapture() {
+        let enhancer = FakeEnhancer(out: [Float](repeating: 0.5, count: 16000))
+        let h = make(
+            stt: FakeStt(err: SttError(message: "model file missing")), enhancer: enhancer, enhanceEnabled: true)
+        dictate(h)
+        XCTAssertEqual(enhancer.calls, 1)
+        XCTAssertEqual(h.saved.value, [VOICED])
+    }
+
+    func testSttTimeExcludesEnhancementTimeAndBothAreLogged() {
+        let clock = FakeClock()
+        let enhancer = FakeEnhancer(onEnhance: { clock.t += 2.0 })
+        let stt = FakeStt(onTranscribe: { clock.t += 1.0 })
+        let h = make(stt: stt, enhancer: enhancer, enhanceEnabled: true, clock: clock)
+        dictate(h)
+        let line = h.logs.value.last { $0.hasPrefix("dictation:") } ?? "<no dictation line: \(h.logs.value)>"
+        XCTAssertTrue(line.contains(" stt=1000ms "), line)
+        XCTAssertTrue(line.contains(" enhance=2000ms "), line)
+    }
+
+    func testEnhanceIsLoggedAsZeroWhenEnhancementIsOff() {
+        let h = make(enhancer: FakeEnhancer())
+        dictate(h)
+        let line = h.logs.value.last { $0.hasPrefix("dictation:") } ?? "<no dictation line: \(h.logs.value)>"
+        XCTAssertTrue(line.contains(" enhance=0ms "), line)
     }
 }

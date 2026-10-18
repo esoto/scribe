@@ -23,6 +23,7 @@ final class AppModel: ObservableObject {
     nonisolated let logger: FileLogger
 
     @Published private(set) var cleanupEnabled: Bool
+    @Published private(set) var enhanceAudioEnabled: Bool
     @Published private(set) var microphoneUID: String?
     // Stable snapshot: enumerating in the menu body re-ran slow CoreAudio queries on every hover
     // and broke click registration on the submenu.
@@ -96,6 +97,7 @@ final class AppModel: ObservableObject {
         self.cleanupModels = cleanupModels
 
         self.cleanupEnabled = settings.cleanupEnabled
+        self.enhanceAudioEnabled = settings.enhanceAudioEnabled
         self.microphoneUID = settings.microphoneUID
 
         let config = PipelineConfig(
@@ -138,6 +140,8 @@ final class AppModel: ObservableObject {
                     onNotice: sinks.onNotice,
                     saveFailedAudio: sinks.saveFailedAudio,
                     cleanupEnabled: settings.cleanupEnabled,
+                    enhancer: LocalVQEEnhancer(),
+                    enhanceAudioEnabled: settings.enhanceAudioEnabled,
                     onLog: log,
                     // Store is thread-safe and observe() is fire-and-forget: no main-actor hop.
                     onCleaned: { [dictionary] text in dictionary.observe(cleanedText: text) },
@@ -310,6 +314,12 @@ final class AppModel: ObservableObject {
         cleanupEnabled = on
         dictation.setCleanupEnabled(on)
         settings.cleanupEnabled = on
+    }
+
+    func setEnhanceAudio(_ on: Bool) {
+        enhanceAudioEnabled = on
+        dictation.setEnhanceAudioEnabled(on)
+        settings.enhanceAudioEnabled = on
     }
 
     func setLaunchAtLogin(_ on: Bool) {

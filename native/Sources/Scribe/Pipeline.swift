@@ -247,16 +247,16 @@ final class DictationPipeline {
         }
 
         let t0 = clock()
-        let sttStart = t0
         // Enhancement is best-effort: a failed or slow denoise must not cost the dictation,
         // so any error falls back to the raw capture.
         var input = pcm
         var enhanceMs = 0
         if enhanceAudioEnabled, let enhancer {
-            let enhanceStart = clock()
             input = (try? await enhancer.enhance(pcm)) ?? pcm
-            enhanceMs = Int((clock() - enhanceStart) * 1000)
+            enhanceMs = Int((clock() - t0) * 1000)
         }
+        // After enhancement, so stt= is the transcription alone.
+        let sttStart = clock()
         func failTranscription(_ notice: String, reason: String) {
             // The status row says "Error — check log", so the log has to say what failed.
             onLog?("stt failed (\(engineName)): \(reason)")
@@ -268,7 +268,8 @@ final class DictationPipeline {
         let raw: String
         do {
             let engine = stt
-            raw = Gates.normalize(try await withDeadline(config.sttTimeout) { try await engine.transcribe(input) })
+            let audio = input
+            raw = Gates.normalize(try await withDeadline(config.sttTimeout) { try await engine.transcribe(audio) })
         } catch let sttError as SttError {
             failTranscription("Transcription failed: \(sttError.message)", reason: sttError.message)
             return
@@ -286,7 +287,7 @@ final class DictationPipeline {
         // STT time includes Parakeet vocab biasing; split it out so stt=/bias= are disjoint.
         let sttTotalMs = Int((clock() - sttStart) * 1000)
         let biasMs = (stt as? ParakeetEngine)?.lastBiasMs ?? 0
-        let sttMs = max(0, sttTotalMs - biasMs - enhanceMs)
+        let sttMs = max(0, sttTotalMs - biasMs)
 
         guard !raw.isEmpty else {
             onNotice("Nothing transcribed")

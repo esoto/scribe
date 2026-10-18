@@ -52,19 +52,26 @@ final class FakeStt: SttEngine {
     let text: String
     let err: Error?
     let hang: Bool
+    /// Runs inside transcribe, so a test can move the fake clock by "STT time".
+    let onTranscribe: (() -> Void)?
     private(set) var calls = 0
     // Audio as received, so tests can assert an enhancer ran before transcription.
     private(set) var received: [[Float]] = []
 
-    init(text: String = "so um hello there world", err: Error? = nil, hang: Bool = false) {
+    init(
+        text: String = "so um hello there world", err: Error? = nil, hang: Bool = false,
+        onTranscribe: (() -> Void)? = nil
+    ) {
         self.text = text
         self.err = err
         self.hang = hang
+        self.onTranscribe = onTranscribe
     }
 
     func transcribe(_ pcm: [Float]) async throws -> String {
         calls += 1
         received.append(pcm)
+        onTranscribe?()
         if hang { await hangForever() }
         if let err { throw err }
         return text
@@ -74,17 +81,40 @@ final class FakeStt: SttEngine {
 final class FakeEnhancer: AudioEnhancer {
     let out: [Float]
     let err: Error?
+    let delay: Double
+    let hang: Bool
+    /// Runs inside enhance, so a test can move the fake clock by "enhance time".
+    let onEnhance: (() -> Void)?
+    /// Fires when the call is cancelled mid-delay, proving a timed-out enhance is told to stop.
+    let onCancel: (() -> Void)?
     private(set) var calls = 0
     private(set) var received: [[Float]] = []
 
-    init(out: [Float] = [Float](repeating: 0.5, count: 16000), err: Error? = nil) {
+    init(
+        out: [Float] = [Float](repeating: 0.5, count: 16000), err: Error? = nil, delay: Double = 0.0,
+        hang: Bool = false, onEnhance: (() -> Void)? = nil, onCancel: (() -> Void)? = nil
+    ) {
         self.out = out
         self.err = err
+        self.delay = delay
+        self.hang = hang
+        self.onEnhance = onEnhance
+        self.onCancel = onCancel
     }
 
     func enhance(_ pcm: [Float]) async throws -> [Float] {
         calls += 1
         received.append(pcm)
+        onEnhance?()
+        if hang { await hangForever() }
+        if delay > 0 {
+            do {
+                try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            } catch {
+                onCancel?()
+                throw error
+            }
+        }
         if let err { throw err }
         return out
     }
