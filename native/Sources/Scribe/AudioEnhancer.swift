@@ -69,11 +69,23 @@ final class LocalVQEEnhancer: UnloadableEnhancer, @unchecked Sendable {
             directory: ModelStore.baseDirectory,
             computeUnits: config.computeUnits,
             variant: ModelNames.LocalVQE.variantKey(variant: config.variant, chunk: config.chunk),
-            progressHandler: { progress($0.fractionCompleted) })
+            progressHandler: { event in
+                if let fraction = downloadFraction(event) { progress(fraction) }
+            })
         guard let model = models[file] else {
             throw LocalVqeError.modelLoadingFailed("\(file) missing after download")
         }
         return LocalVqeManager(config: config, model: model)
+    }
+
+    /// `loadModels` spends the first half of its fraction on the download and the second on the CoreML compile, and a
+    /// cached load reports a zero-file download; only real download bytes belong on the status line.
+    static func downloadFraction(_ event: DownloadProgress) -> Double? {
+        switch event.phase {
+        case .listing: return 0
+        case .downloading(_, let totalFiles) where totalFiles > 0: return min(event.fractionCompleted * 2, 1)
+        case .downloading, .compiling: return nil
+        }
     }
 
     /// Writes FluidAudio's process-wide revision override, which is unsynchronized: call it once at launch,

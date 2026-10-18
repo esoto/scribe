@@ -15,7 +15,7 @@ struct PipelineConfig {
     var minWords: Int = 4
     var cleanupTimeout: Double = 6.0
     var sttTimeout: Double = 20.0
-    /// A denoise that takes longer than the dictation itself must not delay the paste.
+    /// Caps what an experimental denoise can add to a dictation; past it the raw capture is transcribed.
     var enhanceTimeout: Double = 3.0
     /// A queued job older than this is dropped rather than pasted into whatever has focus by then.
     var queueMaxAge: Double = 30.0

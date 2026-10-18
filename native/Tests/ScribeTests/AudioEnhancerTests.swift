@@ -147,6 +147,17 @@ final class AudioEnhancerTests: XCTestCase {
         }
     }
 
+    func testOnlyRealDownloadBytesReachTheStatusLine() {
+        func f(_ fraction: Double, _ phase: DownloadPhase) -> Double? {
+            LocalVQEEnhancer.downloadFraction(DownloadProgress(fractionCompleted: fraction, phase: phase))
+        }
+        XCTAssertEqual(f(0, .listing), 0)
+        XCTAssertEqual(f(0.25, .downloading(completedFiles: 0, totalFiles: 1)), 0.5)
+        XCTAssertEqual(f(0.5, .downloading(completedFiles: 1, totalFiles: 1)), 1)
+        XCTAssertNil(f(0.5, .downloading(completedFiles: 0, totalFiles: 0)), "a cached load is not a download")
+        XCTAssertNil(f(0.5, .compiling(modelName: "localvqe-v1.3-4.8M-256ms.mlmodelc")))
+    }
+
     // MARK: - Where the model lives
 
     func testPinnedRevisionIsACommitSha() {

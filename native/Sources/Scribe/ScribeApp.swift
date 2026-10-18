@@ -22,7 +22,7 @@ final class AppModel: ObservableObject {
     let settingsModel: SettingsModel
     let cleanupModels: CleanupModelController
     let engineController: EngineController
-    let enhancer: UnloadableEnhancer
+    let enhancerLifecycle: EnhanceAudioLifecycle
     nonisolated let logger: FileLogger
 
     @Published private(set) var cleanupEnabled: Bool
@@ -74,7 +74,7 @@ final class AppModel: ObservableObject {
         let enhancerRelay = enhancerProgressRelay
         let enhancer = LocalVQEEnhancer(
             onDownloadProgress: { enhancerRelay.report(model: "Enhance Audio", fraction: $0) }, onLog: log)
-        self.enhancer = enhancer
+        self.enhancerLifecycle = EnhanceAudioLifecycle(enhancer: enhancer, enabled: settings.enhanceAudioEnabled)
         let idleTracker = IdleTracker(unloadAfterMinutes: settings.idleUnloadMinutes)
         self.idleTracker = idleTracker
         let dictionary = UserDictionaryStore()
@@ -241,8 +241,6 @@ final class AppModel: ObservableObject {
         // Captured before the STT preload below: the controller re-checks it is still the current one afterwards.
         let cleaner = cleanupModels.cleaner
         let cleanupEnabled = self.cleanupEnabled
-        let enhancer = self.enhancer
-        let enhanceEnabled = self.enhanceAudioEnabled
         let logger = self.logger
         Task { [weak self] in
             let t0 = Date()
@@ -254,7 +252,7 @@ final class AppModel: ObservableObject {
                 AppModel.startupLogLine(
                     sttLoaded: sttLoaded, cleanupLoaded: cleanupLoaded, elapsed: Date().timeIntervalSince(t0)))
             // After the line above: an optional experiment must not hold up "models ready" or the setup window.
-            if enhanceEnabled { await enhancer.preload() }
+            await self?.enhancerLifecycle.warmUp().value
         }
     }
 
@@ -288,8 +286,7 @@ final class AppModel: ObservableObject {
         if await cleanupModels.unloadIfResident() {
             unloadedAny = true
         }
-        if await enhancer.isLoaded {
-            await enhancer.unload()
+        if await enhancerLifecycle.unloadIfResident() {
             unloadedAny = true
         }
         if unloadedAny {
@@ -311,13 +308,9 @@ final class AppModel: ObservableObject {
         let cleanupModels = self.cleanupModels
         let cleaner = cleanupModels.cleaner
         let cleanupEnabled = self.cleanupEnabled
-        let enhancer = self.enhancer
-        let enhanceEnabled = self.enhanceAudioEnabled
         // LazyModel coalesces concurrent loads; an in-flight load can't be cancelled.
         // Separate from the STT warm-up: enhance skips itself while cold, so it must not queue behind it.
-        if enhanceEnabled {
-            Task { await enhancer.preload() }
-        }
+        enhancerLifecycle.warmUp()
         Task {
             if await !engine.isLoaded {
                 await engine.preload()
@@ -350,16 +343,7 @@ final class AppModel: ObservableObject {
         enhanceAudioEnabled = on
         dictation.setEnhanceAudioEnabled(on)
         settings.enhanceAudioEnabled = on
-        let enhancer = self.enhancer
-        Task { [weak self] in
-            guard on else {
-                await enhancer.unload()
-                return
-            }
-            await enhancer.preload()
-            // A load can't be cancelled, so a toggle-off during it would otherwise leave the model resident.
-            if self?.enhanceAudioEnabled == false { await enhancer.unload() }
-        }
+        enhancerLifecycle.setEnabled(on)
     }
 
     func setLaunchAtLogin(_ on: Bool) {
