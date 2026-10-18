@@ -53,6 +53,7 @@ everything re-downloads on next use.
 | Apple Intelligence (cleanup) | none — built into macOS 26+ | — |
 | Parakeet Ultra (STT) | ~0.6 GB | `parakeet/` |
 | Whisper (optional STT) | ~1.5 GB | `whisper/` |
+| LocalVQE (noise suppression, optional) | ~19 MB | `localvqe/` |
 
 Downloaded cleanup models can be deleted from **Settings › Models** (not
 the one in use).
@@ -66,7 +67,7 @@ Upgrading from a v3 install downloads Ultra on first launch (progress shows in t
   permission, plus a live status line while recording/transcribing.
 - **Engine** picker: Parakeet (fast, default) ↔ Whisper (better for
   Spanish-heavy dictation; loads on first switch).
-- **Settings…** (⌘,) has three tabs. **General** holds the hotkey, hold delay, sounds, Launch at Login, idle unload, and history size. **Audio** picks the microphone. **Models** downloads, switches, and deletes the cleanup model.
+- **Settings…** (⌘,) has three tabs. **General** holds the hotkey, hold delay, sounds, Launch at Login, idle unload, and history size. **Audio** picks the microphone and holds the experimental **Enhance Audio** toggle (LocalVQE noise suppression before transcription — off by default because it lowered accuracy on synthetic noise in tests). **Models** downloads, switches, and deletes the cleanup model.
 - **Cleanup** toggle: off = verbatim transcription pasted raw.
 - **History**: the last 10 dictations by default (Settings › General), in
   memory only, never persisted; "· raw" marks one pasted without cleanup.
@@ -196,6 +197,7 @@ Most of these have a control in **Settings…** (⌘,), the menu, or the Diction
 | `cleanupModel` | resolved at first launch | `gemma3` \| `gemma4` \| `gemma4e2b` \| `appleIntelligence` (Settings) |
 | `cleanupModelPath` | _(unset)_ | local MLX model folder to use for cleanup instead of stock Gemma; when set, overrides `cleanupModel` and disables switching in **Settings › Models** |
 | `vocabularyBiasingEnabled` | false | acoustic vocabulary biasing for Parakeet (experimental) (Dictionary window) |
+| `enhanceAudioEnabled` | false | LocalVQE noise suppression before transcription — experimental (Settings › Audio) |
 | `microphoneUID` | _(unset)_ | input device UID; unset follows the system default input (Settings) |
 
 **Custom cleanup model:** point `cleanupModelPath` at any local MLX model
@@ -245,6 +247,7 @@ outside scribe's process. scribe manages them on demand:
 - **No notification when a dictation fails** → scribe only asks for
   notification permission from the Notifications row in Setup / Doctor;
   click Request there, or allow it in System Settings → Notifications.
+- **Enhance Audio is on but dictations sound unchanged** → the model loads in the background after you turn it on (status line shows the download); until it is loaded, scribe transcribes the raw capture. A denoise that takes longer than 3 s is skipped for that dictation (log: `enhance_skip=timeout`).
 - Logs: `~/Library/Logs/scribe/scribe.log`.
 
 ## Development
