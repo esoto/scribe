@@ -15,6 +15,8 @@ struct PipelineConfig {
     var minWords: Int = 4
     var cleanupTimeout: Double = 6.0
     var sttTimeout: Double = 20.0
+    /// A denoise that takes longer than the dictation itself must not delay the paste.
+    var enhanceTimeout: Double = 3.0
     /// A queued job older than this is dropped rather than pasted into whatever has focus by then.
     var queueMaxAge: Double = 30.0
     /// The ring buffer silently drops audio past 300 s, so a stuck key is cut off well before that.
@@ -251,8 +253,16 @@ final class DictationPipeline {
         // so any error falls back to the raw capture.
         var input = pcm
         var enhanceMs = 0
+        var enhanceSkipNote = ""
         if enhanceAudioEnabled, let enhancer {
-            input = (try? await enhancer.enhance(pcm)) ?? pcm
+            do {
+                input = try await withDeadline(config.enhanceTimeout) { try await enhancer.enhance(pcm) }
+            } catch is DeadlineExceeded {
+                enhanceSkipNote = " enhance_skip=timeout"
+            } catch {
+                onLog?("enhance failed: \(error)")
+                enhanceSkipNote = " enhance_skip=error"
+            }
             enhanceMs = Int((clock() - t0) * 1000)
         }
         // After enhancement, so stt= is the transcription alone.
@@ -319,7 +329,7 @@ final class DictationPipeline {
             }
             cleanupMs = Int((clock() - cleanStart) * 1000)
         }
-        onLog?("dictation: engine=\(engineName) cleanupModel=\(cleanupModelName) stt=\(sttMs)ms bias=\(biasMs)ms enhance=\(enhanceMs)ms cleanup=\(cleanupMs)ms cleaned=\(cleaned) chars=\(final.count)\(skipNote)")
+        onLog?("dictation: engine=\(engineName) cleanupModel=\(cleanupModelName) stt=\(sttMs)ms bias=\(biasMs)ms enhance=\(enhanceMs)ms cleanup=\(cleanupMs)ms cleaned=\(cleaned) chars=\(final.count)\(enhanceSkipNote)\(skipNote)")
 
         if cleaned {
             onCleaned?(final)

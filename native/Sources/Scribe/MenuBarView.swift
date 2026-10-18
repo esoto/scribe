@@ -101,8 +101,9 @@ struct MenuBarView: View {
 
     private var statusText: String? {
         menuStatusText(
-            dictation.state, sttDownload: model.sttDownloadStatus, engineStatus: engineController.engineStatus,
-            hint: dictation.hint, cleanupStatus: cleanupModels.cleanupModelStatus,
+            dictation.state, sttDownload: model.sttDownloadStatus ?? model.enhancerDownloadStatus,
+            engineStatus: engineController.engineStatus, hint: dictation.hint,
+            cleanupStatus: cleanupModels.cleanupModelStatus,
             attention: attentionText(for: permissions.grants))
     }
 

@@ -1,3 +1,4 @@
+import FluidAudio
 import Foundation
 
 /// Single app-managed home for downloaded models. Deleting it resets all of them.
@@ -24,6 +25,12 @@ enum ModelStore {
     /// Removes the v3 directory an Ultra upgrade supersedes. Best-effort: a missing dir or failed delete must never fail the load that calls it.
     static func deleteSupersededParakeetV3(in base: URL = baseDirectory) {
         try? FileManager.default.removeItem(at: parakeetV3Directory(in: base))
+    }
+
+    /// Where `ModelHub` puts LocalVQE when handed `baseDirectory`: it appends the repo's folder name, which is read from
+    /// FluidAudio so this cannot drift from where the files really land.
+    static var localVqeDirectory: URL {
+        baseDirectory.appendingPathComponent(Repo.localVqe.folderName, isDirectory: true)
     }
 
     static var whisperDirectory: URL {

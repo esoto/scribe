@@ -919,4 +919,57 @@ final class PipelineTests: XCTestCase {
         let line = h.logs.value.last { $0.hasPrefix("dictation:") } ?? "<no dictation line: \(h.logs.value)>"
         XCTAssertTrue(line.contains(" enhance=0ms "), line)
     }
+
+    // MARK: - Enhancement is bounded
+
+    func testHangingEnhancerIsBoundedAndSttGetsTheRawCapture() {
+        let stt = FakeStt()
+        let paster = FakePaster()
+        let h = make(
+            stt: stt, paster: paster, config: PipelineConfig(enhanceTimeout: 0.05),
+            enhancer: FakeEnhancer(hang: true), enhanceEnabled: true)
+        dictateBounded(h)
+        XCTAssertEqual(stt.received, [VOICED])
+        XCTAssertEqual(paster.pasted.last, "hello there world")
+        XCTAssertEqual(h.states.value.last, .idle)
+        XCTAssertTrue(h.notices.value.isEmpty, "a skipped enhancement is not user-facing")
+        let line = h.logs.value.last { $0.hasPrefix("dictation:") } ?? "<no dictation line: \(h.logs.value)>"
+        XCTAssertTrue(line.contains(" enhance_skip=timeout"), line)
+    }
+
+    func testTimedOutEnhanceIsCancelledSoItStopsWorking() {
+        let cancelled = expectation(description: "enhancer told to stop")
+        let h = make(
+            config: PipelineConfig(enhanceTimeout: 0.05),
+            enhancer: FakeEnhancer(delay: 5.0, onCancel: { cancelled.fulfill() }), enhanceEnabled: true)
+        dictateBounded(h)
+        wait(for: [cancelled], timeout: 2.0)
+    }
+
+    func testEnhancerErrorLogsErrorAsTheSkipReasonAndTheCause() {
+        let h = make(
+            enhancer: FakeEnhancer(err: TestError(message: "model blew up")), enhanceEnabled: true)
+        dictate(h)
+        let line = h.logs.value.last { $0.hasPrefix("dictation:") } ?? "<no dictation line: \(h.logs.value)>"
+        XCTAssertTrue(line.contains(" enhance_skip=error"), line)
+        XCTAssertTrue(h.logs.value.contains("enhance failed: model blew up"), "\(h.logs.value)")
+    }
+
+    func testSuccessfulEnhancementLogsNoSkipReason() {
+        let h = make(enhancer: FakeEnhancer(), enhanceEnabled: true)
+        dictate(h)
+        let line = h.logs.value.last { $0.hasPrefix("dictation:") } ?? "<no dictation line: \(h.logs.value)>"
+        XCTAssertFalse(line.contains("enhance_skip"), line)
+    }
+
+    func testDisabledEnhancementLogsNoSkipReason() {
+        let h = make(enhancer: FakeEnhancer(hang: true))
+        dictateBounded(h)
+        let line = h.logs.value.last { $0.hasPrefix("dictation:") } ?? "<no dictation line: \(h.logs.value)>"
+        XCTAssertFalse(line.contains("enhance_skip"), line)
+    }
+
+    func testEnhanceTimeoutDefaultsToThreeSeconds() {
+        XCTAssertEqual(PipelineConfig().enhanceTimeout, 3.0)
+    }
 }

@@ -10,6 +10,14 @@ final class ModelStoreTests: XCTestCase {
         }
     }
 
+    // ModelHub appends the repo folder to the directory it is handed (the store's base), so this is where the
+    // LocalVQE files really land; the README documents the same path.
+    func testLocalVqeDirectoryIsTheStoreFolderModelHubFillsAndLivesInTheStore() {
+        XCTAssertEqual(
+            ModelStore.localVqeDirectory.path,
+            ModelStore.baseDirectory.appendingPathComponent("localvqe").path)
+    }
+
     // FluidAudio infers the model version from the directory name; keep the repo folder name.
     func testParakeetDirectoryKeepsRepoFolderName() {
         XCTAssertEqual(ModelStore.parakeetDirectory.lastPathComponent, "parakeet-ultra")

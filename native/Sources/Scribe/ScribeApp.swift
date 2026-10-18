@@ -12,6 +12,8 @@ final class AppModel: ObservableObject {
     let paster: Paster
     /// Parakeet Ultra download progress; same phase-1-init workaround as the cleanup controller's relay.
     private let sttProgressRelay = ProgressRelay()
+    /// Enhance Audio's model download progress; same workaround.
+    private let enhancerProgressRelay = ProgressRelay()
     let idleTracker: IdleTracker
     let dictionary: UserDictionaryStore
     let dictionaryModel: DictionaryModel
@@ -20,6 +22,7 @@ final class AppModel: ObservableObject {
     let settingsModel: SettingsModel
     let cleanupModels: CleanupModelController
     let engineController: EngineController
+    let enhancer: UnloadableEnhancer
     nonisolated let logger: FileLogger
 
     @Published private(set) var cleanupEnabled: Bool
@@ -31,6 +34,8 @@ final class AppModel: ObservableObject {
     @Published private(set) var launchAtLoginEnabled: Bool = LoginItem.isEnabled
     /// "Downloading Parakeet Ultra… NN%" while the STT model downloads (first launch after upgrade); nil otherwise.
     @Published private(set) var sttDownloadStatus: String?
+    /// "Downloading Enhance Audio… NN%" while its model downloads (first use after the toggle goes on); nil otherwise.
+    @Published private(set) var enhancerDownloadStatus: String?
     /// True until the launch preload ends. The download statuses cover only part of it: a load from disk reports nothing.
     @Published private(set) var startupPreloadInFlight = true
 
@@ -58,12 +63,18 @@ final class AppModel: ObservableObject {
         self.logger = logger
         let log: @Sendable (String) -> Void = { logger.log($0) }
 
+        // Before any download: ModelHub resolves the revision when a download starts.
+        LocalVQEEnhancer.pinModelRevision()
         let sttRelay = sttProgressRelay
         let engines: [String: UnloadableEngine] = [
             "parakeet": ParakeetEngine(
                 onDownloadProgress: { sttRelay.report(model: "Parakeet Ultra", fraction: $0) }, onLog: log),
             "whisper": WhisperEngine(onLog: log),
         ]
+        let enhancerRelay = enhancerProgressRelay
+        let enhancer = LocalVQEEnhancer(
+            onDownloadProgress: { enhancerRelay.report(model: "Enhance Audio", fraction: $0) }, onLog: log)
+        self.enhancer = enhancer
         let idleTracker = IdleTracker(unloadAfterMinutes: settings.idleUnloadMinutes)
         self.idleTracker = idleTracker
         let dictionary = UserDictionaryStore()
@@ -140,7 +151,7 @@ final class AppModel: ObservableObject {
                     onNotice: sinks.onNotice,
                     saveFailedAudio: sinks.saveFailedAudio,
                     cleanupEnabled: settings.cleanupEnabled,
-                    enhancer: LocalVQEEnhancer(),
+                    enhancer: enhancer,
                     enhanceAudioEnabled: settings.enhanceAudioEnabled,
                     onLog: log,
                     // Store is thread-safe and observe() is fire-and-forget: no main-actor hop.
@@ -189,6 +200,11 @@ final class AppModel: ObservableObject {
                 self?.sttDownloadStatus = fraction < 1 ? CleanupModelCatalog.statusText(label: label, fraction: fraction) : nil
             }
         }
+        enhancerProgressRelay.set { [weak self] label, fraction in
+            Task { @MainActor in
+                self?.enhancerDownloadStatus = fraction < 1 ? CleanupModelCatalog.statusText(label: label, fraction: fraction) : nil
+            }
+        }
 
         start()
     }
@@ -225,6 +241,8 @@ final class AppModel: ObservableObject {
         // Captured before the STT preload below: the controller re-checks it is still the current one afterwards.
         let cleaner = cleanupModels.cleaner
         let cleanupEnabled = self.cleanupEnabled
+        let enhancer = self.enhancer
+        let enhanceEnabled = self.enhanceAudioEnabled
         let logger = self.logger
         Task { [weak self] in
             let t0 = Date()
@@ -235,6 +253,8 @@ final class AppModel: ObservableObject {
             logger.log(
                 AppModel.startupLogLine(
                     sttLoaded: sttLoaded, cleanupLoaded: cleanupLoaded, elapsed: Date().timeIntervalSince(t0)))
+            // After the line above: an optional experiment must not hold up "models ready" or the setup window.
+            if enhanceEnabled { await enhancer.preload() }
         }
     }
 
@@ -268,6 +288,10 @@ final class AppModel: ObservableObject {
         if await cleanupModels.unloadIfResident() {
             unloadedAny = true
         }
+        if await enhancer.isLoaded {
+            await enhancer.unload()
+            unloadedAny = true
+        }
         if unloadedAny {
             logger.log("idle — unloaded models to reclaim memory")
         }
@@ -287,7 +311,13 @@ final class AppModel: ObservableObject {
         let cleanupModels = self.cleanupModels
         let cleaner = cleanupModels.cleaner
         let cleanupEnabled = self.cleanupEnabled
+        let enhancer = self.enhancer
+        let enhanceEnabled = self.enhanceAudioEnabled
         // LazyModel coalesces concurrent loads; an in-flight load can't be cancelled.
+        // Separate from the STT warm-up: enhance skips itself while cold, so it must not queue behind it.
+        if enhanceEnabled {
+            Task { await enhancer.preload() }
+        }
         Task {
             if await !engine.isLoaded {
                 await engine.preload()
@@ -320,6 +350,16 @@ final class AppModel: ObservableObject {
         enhanceAudioEnabled = on
         dictation.setEnhanceAudioEnabled(on)
         settings.enhanceAudioEnabled = on
+        let enhancer = self.enhancer
+        Task { [weak self] in
+            guard on else {
+                await enhancer.unload()
+                return
+            }
+            await enhancer.preload()
+            // A load can't be cancelled, so a toggle-off during it would otherwise leave the model resident.
+            if self?.enhanceAudioEnabled == false { await enhancer.unload() }
+        }
     }
 
     func setLaunchAtLogin(_ on: Bool) {
