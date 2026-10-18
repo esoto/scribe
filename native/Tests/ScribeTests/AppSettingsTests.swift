@@ -92,6 +92,17 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(AppSettings(defaults: defaults).cleanupModel, "gemma4")
     }
 
+    func testEnhanceAudioDefaultsOff() {
+        XCTAssertFalse(settings.enhanceAudioEnabled)
+    }
+
+    func testEnhanceAudioRoundTrips() {
+        settings.enhanceAudioEnabled = true
+        XCTAssertTrue(AppSettings(defaults: defaults).enhanceAudioEnabled)
+        settings.enhanceAudioEnabled = false
+        XCTAssertFalse(AppSettings(defaults: defaults).enhanceAudioEnabled)
+    }
+
     // MARK: - importToml
 
     private let sampleToml = """
