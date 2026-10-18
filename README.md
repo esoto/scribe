@@ -247,7 +247,7 @@ outside scribe's process. scribe manages them on demand:
 - **No notification when a dictation fails** → scribe only asks for
   notification permission from the Notifications row in Setup / Doctor;
   click Request there, or allow it in System Settings → Notifications.
-- **Enhance Audio is on but dictations sound unchanged** → the model loads in the background after you turn it on (status line shows the download); until it is loaded, scribe transcribes the raw capture. A denoise that takes longer than 3 s is skipped for that dictation (log: `enhance_skip=timeout`).
+- **Enhance Audio is on but seems to do nothing** → the model loads in the background after you turn it on (the menu's status line shows the download); until then scribe transcribes the raw capture and logs `enhance: model not loaded, raw audio used`. A denoise that takes longer than 3 s is skipped for that dictation (log: `enhance_skip=timeout`).
 - Logs: `~/Library/Logs/scribe/scribe.log`.
 
 ## Development
