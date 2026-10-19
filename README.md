@@ -47,8 +47,8 @@ everything re-downloads on next use.
 
 | Model | Size | Store subfolder |
 |---|---|---|
-| Gemma 3 4B (cleanup) | ~2.8 GB | `gemma/` |
-| Gemma 4 E4B (cleanup) | ~4.9 GB | `gemma/` |
+| Gemma 3 4B (cleanup) | ~3.0 GB | `gemma/` |
+| Gemma 4 E4B (cleanup) | ~5.2 GB | `gemma/` |
 | Gemma 4 E2B (cleanup) | ~3.6 GB | `gemma/` |
 | Apple Intelligence (cleanup) | none — built into macOS 26+ | — |
 | Parakeet Ultra (STT) | ~0.6 GB | `parakeet/` |
@@ -248,7 +248,7 @@ outside scribe's process. scribe manages them on demand:
   notification permission from the Notifications row in Setup / Doctor;
   click Request there, or allow it in System Settings → Notifications.
 - **Enhance Audio is on but seems to do nothing** → the model loads in the background after you turn it on (the menu's status line shows the download); until then scribe transcribes the raw capture and logs `enhance: model not loaded, raw audio used`. A denoise that takes longer than 3 s is skipped for that dictation (log: `enhance_skip=timeout`).
-- **"Not enough free disk space"** → the picked cleanup model needs the shown size plus ~0.5 GB headroom; free space or pick a smaller model.
+- **"Not enough free disk space"** → the status row shows the free space the picked cleanup model needs (its download plus ~0.5 GB headroom); free space or pick a smaller model.
 - Logs: `~/Library/Logs/scribe/scribe.log`.
 
 ## Development

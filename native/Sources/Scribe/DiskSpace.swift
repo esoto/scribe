@@ -2,7 +2,7 @@ import Foundation
 
 /// Free space on the models volume, and the message a download that won't fit shows instead of starting.
 enum DiskSpace {
-    /// Below this margin a download is refused even if the bytes "fit": the OS and the compile step need room.
+    /// Below this margin a download is refused even if the bytes "fit": catalog sizes are approximate and macOS needs working room.
     static let margin: Int64 = 500_000_000
 
     /// The models folder doesn't exist before the first download, and resource values throw for a missing path,
@@ -19,6 +19,6 @@ enum DiskSpace {
     /// nil when the download fits; otherwise the status-row text.
     static func shortfallMessage(label: String, needed: Int64, available: Int64?) -> String? {
         guard let available, available < needed + margin else { return nil }
-        return "Not enough free disk space — \(label) needs \(formatBytes(needed)), \(formatBytes(available)) free."
+        return "Not enough free disk space — \(label) needs \(formatBytes(needed + margin)), \(formatBytes(available)) free."
     }
 }

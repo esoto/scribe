@@ -14,9 +14,20 @@ final class UserFacingErrorsTests: XCTestCase {
     }
 
     func testMissingModelFilesPointAtTheModelsFolder() {
-        for message in ["No such file or directory", "model not found", "weights missing"] {
+        for message in ["No such file or directory", "Model file not found at /x/AudioEncoder.mlmodelc", "weights missing"] {
             XCTAssertEqual(UserFacingError.transcriptionNotice(engineMessage: message), missingNotice, message)
         }
+    }
+
+    /// WhisperKit wraps every Hub failure as "Model not found. …", including on a model already on disk.
+    func testWhisperKitHubFailuresAreNotAMissingModel() {
+        let wrapper = "modelsUnavailable(\"Model not found. Please check the model or repo name and try again. Error: "
+        XCTAssertEqual(UserFacingError.transcriptionNotice(engineMessage: wrapper + "httpStatusCode(503))"), logNotice)
+        XCTAssertEqual(UserFacingError.transcriptionNotice(engineMessage: wrapper + "authorizationRequired)"), logNotice)
+        XCTAssertEqual(
+            UserFacingError.transcriptionNotice(
+                engineMessage: wrapper + "downloadError(\"The Internet connection appears to be offline.\"))"),
+            offlineNotice)
     }
 
     func testOtherFailuresPointAtTheLog() {

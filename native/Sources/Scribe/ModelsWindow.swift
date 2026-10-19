@@ -55,6 +55,11 @@ func modelRows(
     }
 }
 
+/// The status row's spinner: only while something loads. A refusal or a failed load has nothing in flight.
+func statusRowShowsSpinner(pending: String?, progress: Double?) -> Bool {
+    pending != nil || progress != nil
+}
+
 /// Shown under the Dictionary window's "Learn new terms" toggle when the active model is gated off.
 func learningNote(fidelitySafe: Bool, learningOn: Bool) -> String? {
     guard learningOn, !fidelitySafe else { return nil }
@@ -91,7 +96,7 @@ struct ModelsPane: View {
                         ProgressView(value: fraction)
                             .progressViewStyle(.linear)
                             .frame(width: 140)
-                    } else {
+                    } else if statusRowShowsSpinner(pending: model.pendingCleanupModel, progress: model.cleanupModelProgress) {
                         ProgressView().controlSize(.small)
                     }
                     Text(status).font(.caption).foregroundStyle(.secondary)

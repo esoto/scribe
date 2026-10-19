@@ -45,7 +45,7 @@ final class ModelsWindowHelpersTests: XCTestCase {
 
     func testNotDownloadedRowShowsApproxSize() {
         let rows = modelRows(statuses: [:], active: "gemma3", pending: nil, appleIntelligenceReason: nil)
-        XCTAssertEqual(rows[1].detail, "Not downloaded · ~4.9 GB")
+        XCTAssertEqual(rows[1].detail, "Not downloaded · ~5.2 GB")
         XCTAssertFalse(rows[1].canDelete)
     }
 
@@ -84,5 +84,11 @@ final class ModelsWindowHelpersTests: XCTestCase {
         let rows = modelRows(
             statuses: [:], active: "appleIntelligence", pending: "gemma4", appleIntelligenceReason: "Turned off")
         XCTAssertEqual(rows.filter(\.canCancel).map(\.id), [])
+    }
+
+    func testStatusSpinnerOnlyWhileSomethingLoads() {
+        XCTAssertTrue(statusRowShowsSpinner(pending: "gemma4", progress: nil))
+        XCTAssertTrue(statusRowShowsSpinner(pending: nil, progress: 1.0), "the startup preload's Loading… line")
+        XCTAssertFalse(statusRowShowsSpinner(pending: nil, progress: nil), "a refusal or a failed load")
     }
 }

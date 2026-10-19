@@ -12,11 +12,16 @@ final class DiskSpaceTests: XCTestCase {
         XCTAssertNil(DiskSpace.shortfallMessage(label: "Gemma", needed: needed, available: needed + DiskSpace.margin))
     }
 
-    func testOneByteUnderTheMarginIsRefusedWithBothSizes() {
+    func testOneByteUnderTheMarginIsRefused() {
         let needed = 2 * gb
+        XCTAssertNotNil(DiskSpace.shortfallMessage(label: "Gemma", needed: needed, available: needed + DiskSpace.margin - 1))
+    }
+
+    /// Inside the margin the download alone would fit, so "needs" must include the headroom or the numbers contradict.
+    func testTheMessageNamesTheFreeSpaceTheCheckRequires() {
         XCTAssertEqual(
-            DiskSpace.shortfallMessage(label: "Gemma", needed: needed, available: needed + DiskSpace.margin - 1),
-            "Not enough free disk space — Gemma needs 2.0 GB, 2.5 GB free.")
+            DiskSpace.shortfallMessage(label: "Gemma", needed: 2 * gb, available: 2_200_000_000),
+            "Not enough free disk space — Gemma needs 2.5 GB, 2.2 GB free.")
     }
 
     func testUnknownFreeSpaceNeverBlocks() {
