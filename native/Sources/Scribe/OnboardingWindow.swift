@@ -2,6 +2,7 @@ import ApplicationServices
 import AVFoundation
 import AppKit
 import CoreGraphics
+import IOKit.hid
 import SwiftUI
 
 /// Thin TCC wrappers; excluded from unit tests. Verify manually. The logic consuming them is in `OnboardingState` and `PermissionsModel`.
@@ -36,6 +37,15 @@ enum TCC {
 
     static func inputMonitoringGranted() -> Bool {
         CGPreflightListenEventAccess()
+    }
+
+    /// IOHID answers "never asked" separately from "refused", which `CGPreflightListenEventAccess` cannot.
+    static func inputMonitoringStatus() -> TCCStatus {
+        switch IOHIDCheckAccess(kIOHIDRequestTypeListenEvent) {
+        case kIOHIDAccessTypeGranted: return .authorized
+        case kIOHIDAccessTypeDenied: return .denied
+        default: return .notDetermined
+        }
     }
 
     /// Adds scribe to the Input Monitoring list, unchecked.
@@ -159,7 +169,8 @@ struct OnboardingWindow: View {
             isNextStep: highlighted == grant,
             actions: OnboardingState.actions(
                 for: grant, granted: granted,
-                status: grant == .microphone ? permissions.microphoneStatus : nil),
+                status: grant == .microphone ? permissions.microphoneStatus
+                    : grant == .inputMonitoring ? permissions.inputMonitoringStatus : nil),
             voiceOverLabel: { OnboardingState.accessibilityLabel($0, for: grant) },
             perform: { action in
                 switch action {

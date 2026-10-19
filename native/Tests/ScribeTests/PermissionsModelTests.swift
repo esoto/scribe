@@ -270,6 +270,33 @@ final class PermissionsModelTests: XCTestCase {
         XCTAssertEqual(model.microphoneStatus, .denied)
     }
 
+    // MARK: - Input Monitoring tri-state
+
+    func testInputMonitoringStatusSeedsFromTheProbe() {
+        probe.inputMonitoringAnswer = .denied
+
+        XCTAssertEqual(makeModel().inputMonitoringStatus, .denied)
+    }
+
+    func testInputMonitoringStatusPublishesOnlyOnChange() {
+        let model = makeModel()
+        let publishes = countPublishes(model)
+
+        model.refreshGrants()
+        model.refreshGrants()
+        XCTAssertEqual(publishes(), 0)
+        XCTAssertEqual(model.inputMonitoringStatus, .notDetermined)
+
+        // Only the tri-state changes here; the boolean grant stays false, so this is the one publish.
+        probe.inputMonitoringAnswer = .authorized
+        model.refreshGrants()
+        XCTAssertEqual(publishes(), 1)
+        XCTAssertEqual(model.inputMonitoringStatus, .authorized)
+
+        model.refreshGrants()
+        XCTAssertEqual(publishes(), 1)
+    }
+
     // MARK: - Notifications
 
     func testNotificationsStartUndetermined() {
