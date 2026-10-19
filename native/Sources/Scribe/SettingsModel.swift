@@ -10,30 +10,35 @@ final class SettingsModel: ObservableObject {
     @Published private(set) var sounds: Bool
     @Published private(set) var idleUnloadMinutes: Double
     @Published private(set) var historySize: Int
+    @Published private(set) var restoreDelay: Double
 
     private let settings: AppSettings
     private let onHotkeyChanged: (HotKey) -> Void
     private let onHoldThresholdChanged: (Double) -> Void
     private let onIdleMinutesChanged: (Double) -> Void
     private let onHistorySizeChanged: (Int) -> Void
+    private let onRestoreDelayChanged: (Double) -> Void
 
     init(
         settings: AppSettings,
         onHotkeyChanged: @escaping (HotKey) -> Void,
         onHoldThresholdChanged: @escaping (Double) -> Void,
         onIdleMinutesChanged: @escaping (Double) -> Void,
-        onHistorySizeChanged: @escaping (Int) -> Void
+        onHistorySizeChanged: @escaping (Int) -> Void,
+        onRestoreDelayChanged: @escaping (Double) -> Void
     ) {
         self.settings = settings
         self.onHotkeyChanged = onHotkeyChanged
         self.onHoldThresholdChanged = onHoldThresholdChanged
         self.onIdleMinutesChanged = onIdleMinutesChanged
         self.onHistorySizeChanged = onHistorySizeChanged
+        self.onRestoreDelayChanged = onRestoreDelayChanged
         hotkey = settings.hotkey
         holdThreshold = settings.holdThreshold
         sounds = settings.sounds
         idleUnloadMinutes = settings.idleUnloadMinutes
         historySize = settings.historySize
+        restoreDelay = settings.restoreDelay
     }
 
     func setHotkey(_ key: HotKey) {
@@ -68,5 +73,12 @@ final class SettingsModel: ObservableObject {
         historySize = size
         settings.historySize = size
         onHistorySizeChanged(size)
+    }
+
+    func setRestoreDelay(_ seconds: Double) {
+        guard seconds != restoreDelay else { return }
+        restoreDelay = seconds
+        settings.restoreDelay = seconds
+        onRestoreDelayChanged(seconds)
     }
 }

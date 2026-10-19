@@ -9,6 +9,7 @@ final class SettingsModelTests: XCTestCase {
     private var thresholds: [Double] = []
     private var idleMinutes: [Double] = []
     private var historySizes: [Int] = []
+    private var restoreDelays: [Double] = []
     /// What `AppSettings` held at the moment each effect ran: the effect must see the persisted value.
     private var storedHotkeyAtEffect: [HotKey] = []
 
@@ -21,6 +22,7 @@ final class SettingsModelTests: XCTestCase {
         thresholds = []
         idleMinutes = []
         historySizes = []
+        restoreDelays = []
         storedHotkeyAtEffect = []
     }
 
@@ -42,7 +44,8 @@ final class SettingsModelTests: XCTestCase {
             },
             onHoldThresholdChanged: { [unowned self] in thresholds.append($0) },
             onIdleMinutesChanged: { [unowned self] in idleMinutes.append($0) },
-            onHistorySizeChanged: { [unowned self] in historySizes.append($0) })
+            onHistorySizeChanged: { [unowned self] in historySizes.append($0) },
+            onRestoreDelayChanged: { [unowned self] in restoreDelays.append($0) })
     }
 
     func testMirrorsTheDefaultsWhenNothingIsStored() {
@@ -53,6 +56,7 @@ final class SettingsModelTests: XCTestCase {
         XCTAssertTrue(model.sounds)
         XCTAssertEqual(model.idleUnloadMinutes, 15)
         XCTAssertEqual(model.historySize, 10)
+        XCTAssertEqual(model.restoreDelay, 2.0)
     }
 
     func testMirrorsWhatIsStored() {
@@ -61,6 +65,7 @@ final class SettingsModelTests: XCTestCase {
         settings.sounds = false
         settings.idleUnloadMinutes = 0
         settings.historySize = 25
+        settings.restoreDelay = 3.0
 
         let model = make()
 
@@ -69,6 +74,7 @@ final class SettingsModelTests: XCTestCase {
         XCTAssertFalse(model.sounds)
         XCTAssertEqual(model.idleUnloadMinutes, 0)
         XCTAssertEqual(model.historySize, 25)
+        XCTAssertEqual(model.restoreDelay, 3.0)
     }
 
     func testBuildingTheModelFiresNoEffects() {
@@ -78,6 +84,7 @@ final class SettingsModelTests: XCTestCase {
         XCTAssertEqual(thresholds, [])
         XCTAssertEqual(idleMinutes, [])
         XCTAssertEqual(historySizes, [])
+        XCTAssertEqual(restoreDelays, [])
     }
 
     func testSetHotkeyPersistsThenFiresOnceAndIgnoresARepeat() {
@@ -152,6 +159,25 @@ final class SettingsModelTests: XCTestCase {
         XCTAssertEqual(historySizes, [30])
     }
 
+    func testSetRestoreDelayPersistsAndFiresOnce() {
+        let model = make()
+
+        model.setRestoreDelay(5)
+        model.setRestoreDelay(5)
+
+        XCTAssertEqual(model.restoreDelay, 5)
+        XCTAssertEqual(settings.restoreDelay, 5)
+        XCTAssertEqual(restoreDelays, [5])
+    }
+
+    func testSettingTheStoredRestoreDelayAgainIsANoOp() {
+        let model = make()
+
+        model.setRestoreDelay(2.0)
+
+        XCTAssertEqual(restoreDelays, [])
+    }
+
     func testEachSetterLeavesTheOtherSettingsAlone() {
         let model = make()
 
@@ -160,6 +186,7 @@ final class SettingsModelTests: XCTestCase {
         XCTAssertEqual(hotkeys, [])
         XCTAssertEqual(idleMinutes, [])
         XCTAssertEqual(historySizes, [])
+        XCTAssertEqual(restoreDelays, [])
         XCTAssertEqual(settings.hotkey, .rightOption)
         XCTAssertEqual(settings.historySize, 10)
     }

@@ -188,7 +188,7 @@ Most of these have a control in **Settings…** (⌘,), the menu, or the Diction
 | `cleanupEnabled` | true | Gemma cleanup pass on/off (menu) |
 | `minWords` | 4 | utterances shorter than this skip cleanup |
 | `cleanupTimeout` | 6.0 | seconds before falling back to raw text |
-| `restoreDelay` | 2.0 | seconds before restoring the prior clipboard |
+| `restoreDelay` | 2.0 | seconds before restoring the prior clipboard (Settings) |
 | `energyGate` | 0.0005 | silence gate (anti-hallucination); speech ~0.001+ |
 | `sounds` | true | start/error sounds (Settings) |
 | `historySize` | 10 | menu history length (Settings) |
