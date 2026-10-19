@@ -201,8 +201,12 @@ final class AppModel: ObservableObject {
         dictation.onKeyDown = { [weak self] in self?.prepareForKeyDown() }
         sttProgressRelay.set { [weak self] label, fraction in
             Task { @MainActor in
-                self?.sttDownloadStatus = fraction < 1 ? CleanupModelCatalog.statusText(label: label, fraction: fraction) : nil
-                self?.sttDownloadFraction = fraction < 1 ? fraction : nil
+                guard let self else { return }
+                let status = fraction < 1 ? CleanupModelCatalog.statusText(label: label, fraction: fraction) : nil
+                // FluidAudio reports every received chunk; the status line and the glyph only change with the whole percent.
+                guard status != self.sttDownloadStatus else { return }
+                self.sttDownloadStatus = status
+                self.sttDownloadFraction = fraction < 1 ? fraction : nil
             }
         }
         enhancerProgressRelay.set { [weak self] label, fraction in

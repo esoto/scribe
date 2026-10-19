@@ -396,6 +396,13 @@ final class CleanupModelControllerTests: XCTestCase {
         XCTAssertEqual(c.cleanupModelStatus, "Loading Gemma 4 E4B…")
     }
 
+    func testAppleIntelligenceHasNothingToDownloadSoTheDiskIsNeverChecked() {
+        h.freeDiskBytes = 0
+        let c = h.makeController()
+
+        assertSwitchProceeds(c, to: .appleIntelligence)
+    }
+
     // MARK: - 4. revert
 
     func testRevertingMidLoadAbandonsTheSwitchAndUnloadsTheOrphan() async {
