@@ -46,10 +46,12 @@ final class PermissionsModelTests: XCTestCase {
             model.grants, GrantStatus(microphone: true, accessibility: true, inputMonitoring: false))
     }
 
-    func testInitDoesNotProbeInputMonitoring() {
-        // The hotkey install result decides it at launch; a preflight read would disagree with the real tap.
+    func testInitDoesNotProbeTheInputMonitoringGrantButReadsItsStatus() {
+        // The hotkey install result decides the grant at launch; a preflight read would disagree with the real tap.
+        // The tri-state only picks the row's buttons, so it is read straight away.
         _ = makeModel()
         XCTAssertFalse(probe.events.contains("probe-inputMonitoring"))
+        XCTAssertTrue(probe.events.contains("probe-inputMonitoringStatus"))
     }
 
     func testInitDoesNotFireReactions() {

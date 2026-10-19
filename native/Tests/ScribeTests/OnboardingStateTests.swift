@@ -1,3 +1,5 @@
+import AppKit
+import Combine
 import XCTest
 
 final class OnboardingStateTests: XCTestCase {
@@ -333,6 +335,39 @@ final class OnboardingStateTests: XCTestCase {
             "Couldn't start recording — 2 h ago")
     }
 
+    func testMicrophoneRowWithoutASavedUIDIsTheSystemDefault() {
+        let devices = [AudioInputDevice(id: "uid-1", name: "USB Mic")]
+        let row = OnboardingState.microphoneRow(selectedUID: nil, devices: devices)
+        XCTAssertEqual(row.detail, "System default input.")
+        XCTAssertFalse(row.disconnected)
+    }
+
+    func testMicrophoneRowNamesAListedDevice() {
+        let devices = [AudioInputDevice(id: "uid-1", name: "USB Mic"), AudioInputDevice(id: "uid-2", name: "Built-in")]
+        let row = OnboardingState.microphoneRow(selectedUID: "uid-2", devices: devices)
+        XCTAssertEqual(row.detail, "Built-in")
+        XCTAssertFalse(row.disconnected)
+    }
+
+    func testMicrophoneRowFlagsASavedUIDThatIsNoLongerListed() {
+        let devices = [AudioInputDevice(id: "uid-1", name: "USB Mic")]
+        let row = OnboardingState.microphoneRow(selectedUID: "unplugged", devices: devices)
+        XCTAssertEqual(row.detail, "Selected microphone — disconnected.")
+        XCTAssertTrue(row.disconnected)
+    }
+
+    func testMicrophoneRowWithNoDevicesFlagsASavedUID() {
+        XCTAssertTrue(OnboardingState.microphoneRow(selectedUID: "unplugged", devices: []).disconnected)
+    }
+
+    func testReopenOpensSetupWhenNothingIsVisible() {
+        XCTAssertTrue(OnboardingState.shouldOpenSetupOnReopen(hasVisibleWindows: false))
+    }
+
+    func testReopenLeavesAVisibleWindowAlone() {
+        XCTAssertFalse(OnboardingState.shouldOpenSetupOnReopen(hasVisibleWindows: true))
+    }
+
     func testGlyphRecordingValue() {
         XCTAssertEqual(glyphAccessibilityValue(.recording, progress: nil, needsAttention: false), "recording")
     }
@@ -369,5 +404,38 @@ final class OnboardingStateTests: XCTestCase {
 
     func testGlyphIdleFinishedDownloadIsIdle() {
         XCTAssertEqual(glyphAccessibilityValue(.idle, progress: 1.0, needsAttention: false), "idle")
+    }
+}
+
+/// Launching scribe again while it runs reaches the app as a reopen. With the menu bar item hidden behind the
+/// notch that was the only way back in, and it used to do nothing.
+@MainActor
+final class ScribeAppDelegateTests: XCTestCase {
+    private var posts = 0
+    private var subscription: AnyCancellable?
+
+    override func setUp() {
+        super.setUp()
+        posts = 0
+        subscription = NotificationCenter.default.publisher(for: .scribeReopen).sink { [unowned self] _ in posts += 1 }
+    }
+
+    override func tearDown() {
+        subscription = nil
+        super.tearDown()
+    }
+
+    func testReopenWithNoVisibleWindowPostsTheNotificationAndHandlesItItself() {
+        let handled = ScribeAppDelegate().applicationShouldHandleReopen(NSApplication.shared, hasVisibleWindows: false)
+
+        XCTAssertEqual(posts, 1)
+        XCTAssertFalse(handled)
+    }
+
+    func testReopenWithAVisibleWindowPostsNothing() {
+        let handled = ScribeAppDelegate().applicationShouldHandleReopen(NSApplication.shared, hasVisibleWindows: true)
+
+        XCTAssertEqual(posts, 0)
+        XCTAssertFalse(handled)
     }
 }

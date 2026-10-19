@@ -167,6 +167,18 @@ extension OnboardingState {
         return disconnected ? "\(selectedName) — disconnected." : selectedName
     }
 
+    /// Doctor: the Microphone row from the saved UID and the live device list. A saved UID that is no longer
+    /// listed has no name left to show, so the row names it by role.
+    static func microphoneRow(selectedUID: String?, devices: [AudioInputDevice]) -> (detail: String, disconnected: Bool) {
+        guard let selectedUID else {
+            return (microphoneRowDetail(selectedName: nil, disconnected: false), false)
+        }
+        guard let device = devices.first(where: { $0.id == selectedUID }) else {
+            return (microphoneRowDetail(selectedName: "Selected microphone", disconnected: true), true)
+        }
+        return (microphoneRowDetail(selectedName: device.name, disconnected: false), false)
+    }
+
     /// Doctor: the last problem scribe reported, with how long ago; nil means a quiet session.
     static func lastProblemDetail(_ notice: String?, at: Date?, now: Date) -> String {
         guard let notice, let at else { return "No problems this session." }
@@ -174,6 +186,11 @@ extension OnboardingState {
         let when = seconds < 60 ? "just now" : seconds < 3600 ? "\(seconds / 60) min ago" : "\(seconds / 3600) h ago"
         return "\(notice) — \(when)"
     }
+}
+
+extension OnboardingState {
+    /// A reopen with a window already on screen has nothing to add; with none, Setup is the way back in.
+    static func shouldOpenSetupOnReopen(hasVisibleWindows: Bool) -> Bool { !hasVisibleWindows }
 }
 
 /// VoiceOver value for the menu bar glyph, which otherwise reads as "white bullet" or "warning sign".

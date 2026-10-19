@@ -54,13 +54,15 @@ enum TCC {
     }
 }
 
-/// First-run and Doctor window: the three TCC grants, the models, and the optional notifications row.
-/// Polls the probes every 2 s while open.
+/// First-run and Doctor window: the three TCC grants, the models, the optional notifications row, and the
+/// Doctor rows (hotkey, microphone, last problem). Polls the probes every 2 s while open.
 struct OnboardingWindow: View {
     @ObservedObject var permissions: PermissionsModel
     /// Read for `sttDownloadStatus` and `startupPreloadInFlight`.
     @ObservedObject var model: AppModel
     @ObservedObject var cleanupModels: CleanupModelController
+    /// Read for the held-key state and the last notice.
+    @ObservedObject var dictation: DictationCoordinator
     @ObservedObject var settingsModel: SettingsModel
     @State private var testText: String = ""
     @FocusState private var testFieldFocused: Bool
@@ -105,6 +107,17 @@ struct OnboardingWindow: View {
                 )
                 modelsRow
                 notificationsRow
+            }
+
+            GroupBox("Doctor") {
+                VStack(spacing: 8) {
+                    hotkeyRow
+                    microphoneDoctorRow
+                    // The age in the row text only moves when the view rebuilds, and nothing else is publishing.
+                    TimelineView(.periodic(from: .now, by: 30)) { context in
+                        lastProblemRow(now: context.date)
+                    }
+                }
             }
 
             if testFieldVisible {
@@ -155,7 +168,11 @@ struct OnboardingWindow: View {
     // MARK: - Rows
 
     private enum RowIndicator {
-        case granted, missing, working, optionalOff
+        case granted, missing, working
+        /// Informational, never an error: an optional feature that is off, or a past problem.
+        case neutral(symbol: String)
+        /// ● while the dictation key is held, ◦ otherwise.
+        case holding(Bool)
     }
 
     private func permissionRow(_ grant: Grant, detail: String, systemImage: String) -> some View {
@@ -196,7 +213,7 @@ struct OnboardingWindow: View {
             title: "Notifications",
             detail: OnboardingState.notificationsDetail(permissions.notifications),
             systemImage: "bell",
-            indicator: authorized ? .granted : .optionalOff,
+            indicator: authorized ? .granted : .neutral(symbol: "bell.slash"),
             value: authorized ? "on" : "off",
             isNextStep: false,
             actions: OnboardingState.notificationsActions(permissions.notifications),
@@ -207,6 +224,39 @@ struct OnboardingWindow: View {
                 case .openSystemSettings: NSWorkspace.shared.open(OnboardingState.notificationsSettingsUrl)
                 }
             })
+    }
+
+    private var hotkeyRow: some View {
+        let holding = dictation.state == .recording
+        return row(
+            title: "Hotkey",
+            detail: OnboardingState.hotkeyRowDetail(holding: holding, key: settingsModel.hotkey.displayName),
+            systemImage: "keyboard",
+            indicator: .holding(holding),
+            value: holding ? "held" : "released",
+            isNextStep: false)
+    }
+
+    private var microphoneDoctorRow: some View {
+        let mic = OnboardingState.microphoneRow(selectedUID: model.microphoneUID, devices: model.microphones)
+        return row(
+            title: "Microphone",
+            detail: mic.detail,
+            systemImage: "mic",
+            indicator: mic.disconnected ? .missing : .granted,
+            value: mic.disconnected ? "disconnected" : "connected",
+            isNextStep: false)
+    }
+
+    private func lastProblemRow(now: Date) -> some View {
+        let notice = dictation.lastNotice
+        return row(
+            title: "Last problem",
+            detail: OnboardingState.lastProblemDetail(notice?.text, at: notice?.at, now: now),
+            systemImage: "exclamationmark.bubble",
+            indicator: notice == nil ? .granted : .neutral(symbol: "exclamationmark.triangle"),
+            value: notice == nil ? "none" : "reported",
+            isNextStep: false)
     }
 
     @ViewBuilder
@@ -274,8 +324,10 @@ struct OnboardingWindow: View {
             Image(systemName: "xmark.circle").foregroundStyle(.red).imageScale(.large)
         case .working:
             ProgressView().controlSize(.small)
-        case .optionalOff:
-            Image(systemName: "bell.slash").foregroundStyle(.secondary).imageScale(.large)
+        case .neutral(let symbol):
+            Image(systemName: symbol).foregroundStyle(.secondary).imageScale(.large)
+        case .holding(let down):
+            Text(down ? "●" : "◦").font(.title3).foregroundStyle(.secondary)
         }
     }
 
