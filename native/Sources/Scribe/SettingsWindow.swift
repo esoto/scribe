@@ -92,7 +92,7 @@ private struct GeneralPane: View {
                     Text(holdThresholdLabel(seconds)).tag(seconds)
                 }
             }
-            caption("Your previous clipboard comes back this long after a paste.")
+            caption("Your previous clipboard comes back this long after a paste — raise it if a slow app pastes the old one instead.")
 
             Toggle("Sounds", isOn: Binding(get: { settings.sounds }, set: { settings.setSounds($0) }))
             Toggle(
