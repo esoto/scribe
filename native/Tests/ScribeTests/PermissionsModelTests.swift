@@ -294,9 +294,20 @@ final class PermissionsModelTests: XCTestCase {
         model.refreshGrants()
         XCTAssertEqual(publishes(), 1)
         XCTAssertEqual(model.inputMonitoringStatus, .authorized)
+        XCTAssertFalse(model.grants.inputMonitoring)
 
         model.refreshGrants()
         XCTAssertEqual(publishes(), 1)
+    }
+
+    func testStatusForEachGrantPicksItsTriState() {
+        probe.microphoneDenied = true
+        probe.inputMonitoringAnswer = .authorized
+        let model = makeModel()
+
+        XCTAssertEqual(model.status(for: .microphone), .denied)
+        XCTAssertEqual(model.status(for: .inputMonitoring), .authorized)
+        XCTAssertNil(model.status(for: .accessibility))
     }
 
     // MARK: - Notifications

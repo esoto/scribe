@@ -158,7 +158,7 @@ extension OnboardingState {
 
     /// Doctor: the hotkey row shows the tap is alive while the key is physically held.
     static func hotkeyRowDetail(holding: Bool, key: String) -> String {
-        holding ? "Held — the tap sees \(key)." : "Hold \(key) to test the tap."
+        holding ? "Held — scribe sees \(key)." : "Hold \(key) to test it."
     }
 
     /// Doctor: the microphone row names the selected device; a stale selection says so.
@@ -171,6 +171,8 @@ extension OnboardingState {
     /// listed has no name left to show, so the row names it by role.
     static func microphoneRow(selectedUID: String?, devices: [AudioInputDevice]) -> (detail: String, disconnected: Bool) {
         guard let selectedUID else {
+            // A Mac mini or Studio has no built-in mic: with nothing plugged in there is no default input either.
+            if devices.isEmpty { return ("No input device connected.", true) }
             return (microphoneRowDetail(selectedName: nil, disconnected: false), false)
         }
         guard let device = devices.first(where: { $0.id == selectedUID }) else {

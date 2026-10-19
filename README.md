@@ -232,7 +232,9 @@ outside scribe's process. scribe manages them on demand:
   Setup / Doctor; the highlighted row is the one to fix.
 - **Hotkey does nothing** → Input Monitoring grant missing (common after
   replacing the app binary: re-toggle scribe in System Settings → Privacy &
-  Security → Input Monitoring, or use the setup window's Request button).
+  Security → Input Monitoring; the setup window's Open System Settings button
+  goes there). Hold the key with Setup / Doctor open: the Hotkey row reads
+  "Held" while you hold it.
   The log records only presses of the hotkey itself. If pressing it logs
   `flagsChanged keycode=61 ... -> down`, the tap is alive and the grant is
   fine. If it logs nothing, the key isn't reaching scribe as Right ⌥ (**61**):

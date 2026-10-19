@@ -72,6 +72,15 @@ final class PermissionsModel: ObservableObject {
 
     var grantsOk: Bool { grants.microphone && grants.accessibility && grants.inputMonitoring }
 
+    /// The tri-state that picks a Setup row's buttons; Accessibility only answers yes or no.
+    func status(for grant: Grant) -> TCCStatus? {
+        switch grant {
+        case .microphone: return microphoneStatus
+        case .inputMonitoring: return inputMonitoringStatus
+        case .accessibility: return nil
+        }
+    }
+
     private let probe: TCCProbing
     private let notificationAuthorizer: NotificationAuthorizing
     private let onMicrophoneGranted: () -> Void

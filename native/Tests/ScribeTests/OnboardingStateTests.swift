@@ -185,6 +185,8 @@ final class OnboardingStateTests: XCTestCase {
             OnboardingState.actions(for: .inputMonitoring, granted: false, status: .notDetermined), [.request])
         XCTAssertEqual(
             OnboardingState.actions(for: .inputMonitoring, granted: false, status: .denied), [.openSystemSettings])
+        XCTAssertEqual(
+            OnboardingState.actions(for: .inputMonitoring, granted: false, status: .authorized), [.openSystemSettings])
     }
 
     func testNotificationsAccessibilityLabelNamesNotifications() {
@@ -288,12 +290,12 @@ final class OnboardingStateTests: XCTestCase {
 
     func testHotkeyRowDetailWhileHeld() {
         XCTAssertEqual(
-            OnboardingState.hotkeyRowDetail(holding: true, key: "Right Option"), "Held — the tap sees Right Option.")
+            OnboardingState.hotkeyRowDetail(holding: true, key: "Right Option"), "Held — scribe sees Right Option.")
     }
 
     func testHotkeyRowDetailWhenIdle() {
         XCTAssertEqual(
-            OnboardingState.hotkeyRowDetail(holding: false, key: "Right Option"), "Hold Right Option to test the tap.")
+            OnboardingState.hotkeyRowDetail(holding: false, key: "Right Option"), "Hold Right Option to test it.")
     }
 
     func testMicrophoneRowDetailWithoutSelectionUsesSystemDefault() {
@@ -358,6 +360,12 @@ final class OnboardingStateTests: XCTestCase {
 
     func testMicrophoneRowWithNoDevicesFlagsASavedUID() {
         XCTAssertTrue(OnboardingState.microphoneRow(selectedUID: "unplugged", devices: []).disconnected)
+    }
+
+    func testMicrophoneRowWithNoDevicesAndNoSelectionSaysSo() {
+        let row = OnboardingState.microphoneRow(selectedUID: nil, devices: [])
+        XCTAssertEqual(row.detail, "No input device connected.")
+        XCTAssertTrue(row.disconnected)
     }
 
     func testReopenOpensSetupWhenNothingIsVisible() {

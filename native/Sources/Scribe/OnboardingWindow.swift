@@ -184,10 +184,7 @@ struct OnboardingWindow: View {
             indicator: granted ? .granted : .missing,
             value: granted ? "granted" : "not granted",
             isNextStep: highlighted == grant,
-            actions: OnboardingState.actions(
-                for: grant, granted: granted,
-                status: grant == .microphone ? permissions.microphoneStatus
-                    : grant == .inputMonitoring ? permissions.inputMonitoringStatus : nil),
+            actions: OnboardingState.actions(for: grant, granted: granted, status: permissions.status(for: grant)),
             voiceOverLabel: { OnboardingState.accessibilityLabel($0, for: grant) },
             perform: { action in
                 switch action {
@@ -240,7 +237,7 @@ struct OnboardingWindow: View {
     private var microphoneDoctorRow: some View {
         let mic = OnboardingState.microphoneRow(selectedUID: model.microphoneUID, devices: model.microphones)
         return row(
-            title: "Microphone",
+            title: "Input device",
             detail: mic.detail,
             systemImage: "mic",
             indicator: mic.disconnected ? .missing : .granted,
