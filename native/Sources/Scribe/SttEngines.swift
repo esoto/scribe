@@ -46,6 +46,11 @@ actor LazyModel<M> {
         model != nil
     }
 
+    /// The resident model, or nil. Unlike `get()` it never starts a load, for callers that must not wait on one.
+    func peek() -> M? {
+        model
+    }
+
     /// Best-effort warm-up; the failure is logged (nobody is awaiting it) and the next real get() retries.
     func preload() async {
         _ = await loadForPreload()

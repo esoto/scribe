@@ -128,6 +128,13 @@ private struct AudioPane: View {
                 }
             }
             caption("The built-in mic avoids the Bluetooth headset delay.")
+
+            Toggle(
+                "Enhance Audio — experimental",
+                isOn: Binding(get: { model.enhanceAudioEnabled }, set: { model.setEnhanceAudio($0) }))
+            caption(
+                "Lowered accuracy on synthetic noise in tests. Try it against your own background noise. "
+                    + "Downloads a ~19 MB model the first time.")
         }
         .padding(16)
     }

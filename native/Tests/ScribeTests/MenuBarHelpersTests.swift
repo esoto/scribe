@@ -27,6 +27,14 @@ final class MenuBarHelpersTests: XCTestCase {
         XCTAssertEqual(truncateLabel(long), String(repeating: "x", count: 39) + "\u{2026}")
     }
 
+    func testEnhancerDownloadShowsWhileIdleButNeverReplacesTranscribing() {
+        let dl = "Downloading Enhance Audio… 40%"
+        XCTAssertEqual(menuStatusText(.idle, sttDownload: nil, enhancerDownload: dl, cleanupStatus: nil, attention: nil), dl)
+        XCTAssertEqual(
+            menuStatusText(.processing, sttDownload: nil, enhancerDownload: dl, cleanupStatus: nil, attention: nil),
+            "Transcribing…")
+    }
+
     func testMenuStatusTextPrefersTheSttDownloadWhileIdleOrTranscribing() {
         let dl = "Downloading Parakeet Ultra… 42%"
         XCTAssertEqual(menuStatusText(.idle, sttDownload: dl, cleanupStatus: "Loading Gemma…", attention: nil), dl)

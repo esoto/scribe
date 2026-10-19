@@ -15,6 +15,8 @@ struct PipelineConfig {
     var minWords: Int = 4
     var cleanupTimeout: Double = 6.0
     var sttTimeout: Double = 20.0
+    /// Caps what an experimental denoise can add to a dictation; past it the raw capture is transcribed.
+    var enhanceTimeout: Double = 3.0
     /// A queued job older than this is dropped rather than pasted into whatever has focus by then.
     var queueMaxAge: Double = 30.0
     /// The ring buffer silently drops audio past 300 s, so a stuck key is cut off well before that.
@@ -79,9 +81,12 @@ final class DictationPipeline {
     private let onHint: (String) -> Void
     /// Fires after a paste that went through, never when the text only reached the clipboard.
     private let onPasted: () -> Void
+    /// Runs before STT when `enhanceAudioEnabled`; nil leaves the captured audio untouched.
+    private let enhancer: AudioEnhancer?
 
     private(set) var engineName: String
     var cleanupEnabled: Bool
+    var enhanceAudioEnabled: Bool
 
     private var downAt: Double?
     /// Per hold, not per pipeline: queued jobs outlive later key-downs, which would otherwise retarget them.
@@ -109,6 +114,8 @@ final class DictationPipeline {
         onNotice: @escaping (String) -> Void,
         saveFailedAudio: @escaping ([Float]) -> Void,
         cleanupEnabled: Bool = true,
+        enhancer: AudioEnhancer? = nil,
+        enhanceAudioEnabled: Bool = false,
         onLog: ((String) -> Void)? = nil,
         onCleaned: ((String) -> Void)? = nil,
         replacementPairs: @escaping () -> [ReplacementPair] = { [] },
@@ -130,6 +137,8 @@ final class DictationPipeline {
         self.onNotice = onNotice
         self.saveFailedAudio = saveFailedAudio
         self.cleanupEnabled = cleanupEnabled
+        self.enhancer = enhancer
+        self.enhanceAudioEnabled = enhanceAudioEnabled
         self.onLog = onLog
         self.onCleaned = onCleaned
         self.replacementPairs = replacementPairs
@@ -240,7 +249,24 @@ final class DictationPipeline {
         }
 
         let t0 = clock()
-        let sttStart = t0
+        // Enhancement is best-effort: a failed or slow denoise must not cost the dictation,
+        // so any error falls back to the raw capture.
+        var input = pcm
+        var enhanceMs = 0
+        var enhanceSkipNote = ""
+        if enhanceAudioEnabled, let enhancer {
+            do {
+                input = try await withDeadline(config.enhanceTimeout) { try await enhancer.enhance(pcm) }
+            } catch is DeadlineExceeded {
+                enhanceSkipNote = " enhance_skip=timeout"
+            } catch {
+                onLog?("enhance failed: \(error)")
+                enhanceSkipNote = " enhance_skip=error"
+            }
+            enhanceMs = Int((clock() - t0) * 1000)
+        }
+        // After enhancement, so stt= is the transcription alone.
+        let sttStart = clock()
         func failTranscription(_ notice: String, reason: String) {
             // The status row says "Error — check log", so the log has to say what failed.
             onLog?("stt failed (\(engineName)): \(reason)")
@@ -252,7 +278,8 @@ final class DictationPipeline {
         let raw: String
         do {
             let engine = stt
-            raw = Gates.normalize(try await withDeadline(config.sttTimeout) { try await engine.transcribe(pcm) })
+            let audio = input
+            raw = Gates.normalize(try await withDeadline(config.sttTimeout) { try await engine.transcribe(audio) })
         } catch let sttError as SttError {
             failTranscription("Transcription failed: \(sttError.message)", reason: sttError.message)
             return
@@ -302,7 +329,7 @@ final class DictationPipeline {
             }
             cleanupMs = Int((clock() - cleanStart) * 1000)
         }
-        onLog?("dictation: engine=\(engineName) cleanupModel=\(cleanupModelName) stt=\(sttMs)ms bias=\(biasMs)ms cleanup=\(cleanupMs)ms cleaned=\(cleaned) chars=\(final.count)\(skipNote)")
+        onLog?("dictation: engine=\(engineName) cleanupModel=\(cleanupModelName) stt=\(sttMs)ms bias=\(biasMs)ms enhance=\(enhanceMs)ms cleanup=\(cleanupMs)ms cleaned=\(cleaned) chars=\(final.count)\(enhanceSkipNote)\(skipNote)")
 
         if cleaned {
             onCleaned?(final)

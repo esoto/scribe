@@ -36,15 +36,16 @@ func attentionText(for grants: GrantStatus) -> String? {
 }
 
 /// Menu status line. While idle: a missing permission wins (dictation is broken until it's fixed), then an STT
-/// download, then an engine switch in progress or failed, then a transient hint from the last dictation, then a
-/// cleanup-model status. An STT model download wins while transcribing: a dictation made during the upgrade
-/// download waits on it, and "Transcribing…" alone would look like a hang.
+/// download, then an Enhance Audio download, then an engine switch in progress or failed, then a transient hint
+/// from the last dictation, then a cleanup-model status. An STT model download wins while transcribing: a dictation
+/// made during the upgrade download waits on it, and "Transcribing…" alone would look like a hang. Enhance Audio's
+/// never does: a dictation skips it while it loads.
 func menuStatusText(
-    _ state: PipelineState, sttDownload: String?, engineStatus: String? = nil, hint: String? = nil,
-    cleanupStatus: String?, attention: String?
+    _ state: PipelineState, sttDownload: String?, enhancerDownload: String? = nil, engineStatus: String? = nil,
+    hint: String? = nil, cleanupStatus: String?, attention: String?
 ) -> String? {
     switch state {
-    case .idle: return attention ?? sttDownload ?? engineStatus ?? hint ?? cleanupStatus
+    case .idle: return attention ?? sttDownload ?? enhancerDownload ?? engineStatus ?? hint ?? cleanupStatus
     case .recording: return "Recording…"
     case .processing: return sttDownload ?? "Transcribing…"
     case .error: return "Error — check log"
@@ -101,8 +102,9 @@ struct MenuBarView: View {
 
     private var statusText: String? {
         menuStatusText(
-            dictation.state, sttDownload: model.sttDownloadStatus, engineStatus: engineController.engineStatus,
-            hint: dictation.hint, cleanupStatus: cleanupModels.cleanupModelStatus,
+            dictation.state, sttDownload: model.sttDownloadStatus, enhancerDownload: model.enhancerDownloadStatus,
+            engineStatus: engineController.engineStatus, hint: dictation.hint,
+            cleanupStatus: cleanupModels.cleanupModelStatus,
             attention: attentionText(for: permissions.grants))
     }
 

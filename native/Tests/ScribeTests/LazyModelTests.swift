@@ -35,6 +35,24 @@ final class LazyModelTests: XCTestCase {
         XCTAssertEqual(factory.calls, 0)
     }
 
+    func testPeekReturnsTheResidentModelAndNeverStartsALoad() async throws {
+        let factory = CountingFactory()
+        let model = LazyModel(label: "test") { try await factory.make() }
+
+        let cold = await model.peek()
+        XCTAssertNil(cold)
+        XCTAssertEqual(factory.calls, 0)
+
+        _ = try await model.get()
+        let warm = await model.peek()
+        XCTAssertEqual(warm, "model-1")
+
+        await model.unload()
+        let unloaded = await model.peek()
+        XCTAssertNil(unloaded)
+        XCTAssertEqual(factory.calls, 1)
+    }
+
     func testGetLoadsOnceAcrossMultipleCalls() async throws {
         let factory = CountingFactory()
         let model = LazyModel(label: "test") { try await factory.make() }

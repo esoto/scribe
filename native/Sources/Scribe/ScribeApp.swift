@@ -12,6 +12,8 @@ final class AppModel: ObservableObject {
     let paster: Paster
     /// Parakeet Ultra download progress; same phase-1-init workaround as the cleanup controller's relay.
     private let sttProgressRelay = ProgressRelay()
+    /// Enhance Audio's model download progress; same workaround.
+    private let enhancerProgressRelay = ProgressRelay()
     let idleTracker: IdleTracker
     let dictionary: UserDictionaryStore
     let dictionaryModel: DictionaryModel
@@ -20,9 +22,11 @@ final class AppModel: ObservableObject {
     let settingsModel: SettingsModel
     let cleanupModels: CleanupModelController
     let engineController: EngineController
+    let enhancerLifecycle: EnhanceAudioLifecycle
     nonisolated let logger: FileLogger
 
     @Published private(set) var cleanupEnabled: Bool
+    @Published private(set) var enhanceAudioEnabled: Bool
     @Published private(set) var microphoneUID: String?
     // Stable snapshot: enumerating in the menu body re-ran slow CoreAudio queries on every hover
     // and broke click registration on the submenu.
@@ -30,6 +34,8 @@ final class AppModel: ObservableObject {
     @Published private(set) var launchAtLoginEnabled: Bool = LoginItem.isEnabled
     /// "Downloading Parakeet Ultra… NN%" while the STT model downloads (first launch after upgrade); nil otherwise.
     @Published private(set) var sttDownloadStatus: String?
+    /// "Downloading Enhance Audio… NN%" while its model downloads (first use after the toggle goes on); nil otherwise.
+    @Published private(set) var enhancerDownloadStatus: String?
     /// True until the launch preload ends. The download statuses cover only part of it: a load from disk reports nothing.
     @Published private(set) var startupPreloadInFlight = true
 
@@ -57,12 +63,18 @@ final class AppModel: ObservableObject {
         self.logger = logger
         let log: @Sendable (String) -> Void = { logger.log($0) }
 
+        // Before any download: ModelHub resolves the revision when a download starts.
+        LocalVQEEnhancer.pinModelRevision()
         let sttRelay = sttProgressRelay
         let engines: [String: UnloadableEngine] = [
             "parakeet": ParakeetEngine(
                 onDownloadProgress: { sttRelay.report(model: "Parakeet Ultra", fraction: $0) }, onLog: log),
             "whisper": WhisperEngine(onLog: log),
         ]
+        let enhancerRelay = enhancerProgressRelay
+        let enhancer = LocalVQEEnhancer(
+            onDownloadProgress: { enhancerRelay.report(model: "Enhance Audio", fraction: $0) }, onLog: log)
+        self.enhancerLifecycle = EnhanceAudioLifecycle(enhancer: enhancer, enabled: settings.enhanceAudioEnabled)
         let idleTracker = IdleTracker(unloadAfterMinutes: settings.idleUnloadMinutes)
         self.idleTracker = idleTracker
         let dictionary = UserDictionaryStore()
@@ -96,6 +108,7 @@ final class AppModel: ObservableObject {
         self.cleanupModels = cleanupModels
 
         self.cleanupEnabled = settings.cleanupEnabled
+        self.enhanceAudioEnabled = settings.enhanceAudioEnabled
         self.microphoneUID = settings.microphoneUID
 
         let config = PipelineConfig(
@@ -138,6 +151,8 @@ final class AppModel: ObservableObject {
                     onNotice: sinks.onNotice,
                     saveFailedAudio: sinks.saveFailedAudio,
                     cleanupEnabled: settings.cleanupEnabled,
+                    enhancer: enhancer,
+                    enhanceAudioEnabled: settings.enhanceAudioEnabled,
                     onLog: log,
                     // Store is thread-safe and observe() is fire-and-forget: no main-actor hop.
                     onCleaned: { [dictionary] text in dictionary.observe(cleanedText: text) },
@@ -183,6 +198,11 @@ final class AppModel: ObservableObject {
         sttProgressRelay.set { [weak self] label, fraction in
             Task { @MainActor in
                 self?.sttDownloadStatus = fraction < 1 ? CleanupModelCatalog.statusText(label: label, fraction: fraction) : nil
+            }
+        }
+        enhancerProgressRelay.set { [weak self] label, fraction in
+            Task { @MainActor in
+                self?.enhancerDownloadStatus = fraction < 1 ? CleanupModelCatalog.statusText(label: label, fraction: fraction) : nil
             }
         }
 
@@ -231,6 +251,8 @@ final class AppModel: ObservableObject {
             logger.log(
                 AppModel.startupLogLine(
                     sttLoaded: sttLoaded, cleanupLoaded: cleanupLoaded, elapsed: Date().timeIntervalSince(t0)))
+            // After the line above: an optional experiment must not hold up "models ready" or the setup window.
+            await self?.enhancerLifecycle.warmUp().value
         }
     }
 
@@ -264,6 +286,9 @@ final class AppModel: ObservableObject {
         if await cleanupModels.unloadIfResident() {
             unloadedAny = true
         }
+        if await enhancerLifecycle.unloadIfResident() {
+            unloadedAny = true
+        }
         if unloadedAny {
             logger.log("idle — unloaded models to reclaim memory")
         }
@@ -284,6 +309,8 @@ final class AppModel: ObservableObject {
         let cleaner = cleanupModels.cleaner
         let cleanupEnabled = self.cleanupEnabled
         // LazyModel coalesces concurrent loads; an in-flight load can't be cancelled.
+        // Separate from the STT warm-up: enhance skips itself while cold, so it must not queue behind it.
+        enhancerLifecycle.warmUp()
         Task {
             if await !engine.isLoaded {
                 await engine.preload()
@@ -310,6 +337,13 @@ final class AppModel: ObservableObject {
         cleanupEnabled = on
         dictation.setCleanupEnabled(on)
         settings.cleanupEnabled = on
+    }
+
+    func setEnhanceAudio(_ on: Bool) {
+        enhanceAudioEnabled = on
+        dictation.setEnhanceAudioEnabled(on)
+        settings.enhanceAudioEnabled = on
+        enhancerLifecycle.setEnabled(on)
     }
 
     func setLaunchAtLogin(_ on: Bool) {
