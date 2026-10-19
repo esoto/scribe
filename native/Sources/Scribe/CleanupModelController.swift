@@ -42,6 +42,7 @@ final class CleanupModelController: ObservableObject {
     private let onCleanerCommitted: (any CleanupModelBackend, String) -> Void
     private let notify: (String) -> Void
     private let touchIdle: () -> Void
+    private let freeDiskBytes: () -> Int64?
     private let failureStickySeconds: Double
     private let log: @Sendable (String) -> Void
 
@@ -74,6 +75,7 @@ final class CleanupModelController: ObservableObject {
         onCleanerCommitted: @escaping (any CleanupModelBackend, String) -> Void,
         notify: @escaping (String) -> Void,
         touchIdle: @escaping () -> Void,
+        freeDiskBytes: @escaping () -> Int64?,
         failureStickySeconds: Double = 10,
         log: @escaping @Sendable (String) -> Void
     ) {
@@ -87,6 +89,7 @@ final class CleanupModelController: ObservableObject {
         self.onCleanerCommitted = onCleanerCommitted
         self.notify = notify
         self.touchIdle = touchIdle
+        self.freeDiskBytes = freeDiskBytes
         self.failureStickySeconds = failureStickySeconds
         self.log = log
 
@@ -153,12 +156,21 @@ final class CleanupModelController: ObservableObject {
             cleanupModelStatus = nil
             cleanupModelProgress = nil
         case .begin:
+            let spec = CleanupModelCatalog.spec(id)
+            // Before touching any state: a refused download must leave the active model and a pending switch alone.
+            if modelStatuses[id]?.isDownloaded != true, let bytes = spec.approxDownloadBytes,
+                let message = DiskSpace.shortfallMessage(label: spec.label, needed: bytes, available: freeDiskBytes())
+            {
+                cleanupModelStatus = message
+                scheduleFailureClear()
+                log("cleanup model switch to \(name) refused: disk")
+                return
+            }
             cleanupSwitchTask?.cancel()
             failureClear?.cancel()
             failureClear = nil
             pendingCleanupModel = name
             let selection = CleanupModelCatalog.Selection.model(id)
-            let spec = CleanupModelCatalog.spec(id)
             let handoff = appleIntelligenceLost
             let log = self.log
             let newCleaner = makeBackend(selection, progressRelay, { handoff.fire() }, log)

@@ -248,6 +248,7 @@ outside scribe's process. scribe manages them on demand:
   notification permission from the Notifications row in Setup / Doctor;
   click Request there, or allow it in System Settings → Notifications.
 - **Enhance Audio is on but seems to do nothing** → the model loads in the background after you turn it on (the menu's status line shows the download); until then scribe transcribes the raw capture and logs `enhance: model not loaded, raw audio used`. A denoise that takes longer than 3 s is skipped for that dictation (log: `enhance_skip=timeout`).
+- **"Not enough free disk space"** → the picked cleanup model needs the shown size plus ~0.5 GB headroom; free space or pick a smaller model.
 - Logs: `~/Library/Logs/scribe/scribe.log`.
 
 ## Development

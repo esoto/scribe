@@ -28,6 +28,8 @@ final class CleanupModelControllerTests: XCTestCase {
         var snapshot = DictionarySnapshot(pairs: [], glossary: [])
         var initialBackendLoaded = false
         var failureStickySeconds: Double = 10
+        /// nil = unknown, which never blocks a download; tests set a number to simulate a full disk.
+        var freeDiskBytes: Int64?
         let statuses = Locked<[CleanupModelID: CleanupModelStore.Status]>([.gemma3: .downloaded(bytes: 100)])
         let statusComputations = Locked(0)
         let deletedRepos = Locked<[String]>([])
@@ -80,6 +82,7 @@ final class CleanupModelControllerTests: XCTestCase {
                 },
                 notify: { self.notifications.append($0) },
                 touchIdle: { self.touchIdleCalls += 1 },
+                freeDiskBytes: { self.freeDiskBytes },
                 failureStickySeconds: failureStickySeconds,
                 log: { line in logs.mutate { $0.append(line) } })
         }
@@ -319,6 +322,78 @@ final class CleanupModelControllerTests: XCTestCase {
         try? await Task.sleep(nanoseconds: 200_000_000)
 
         XCTAssertEqual(c.cleanupModelStatus, "Loading Gemma 4 E2B…", "the failure's clear must not wipe a newer status")
+    }
+
+    // MARK: - Disk preflight
+
+    private let gb: Int64 = 1_000_000_000
+
+    /// `beginSwitch` force-unwraps the switch task, so a refusal would crash the run; this fails an assertion instead.
+    private func assertSwitchProceeds(
+        _ c: CleanupModelController, to id: CleanupModelID, file: StaticString = #filePath, line: UInt = #line
+    ) {
+        c.switchCleanupModel(to: id)
+        XCTAssertEqual(h.backends.count, 2, "the switch should have built a backend", file: file, line: line)
+        XCTAssertEqual(c.pendingCleanupModel, id.rawValue, file: file, line: line)
+    }
+
+    func testASwitchTheDiskCannotHoldIsRefusedBeforeAnythingIsBuilt() async {
+        h.freeDiskBytes = gb
+        h.failureStickySeconds = 0.05
+        let c = h.makeController()
+
+        c.switchCleanupModel(to: .gemma4)
+
+        XCTAssertEqual(h.backends.count, 1, "only the init backend: a refused download builds nothing")
+        XCTAssertNil(c.cleanupSwitchTask)
+        XCTAssertNil(c.pendingCleanupModel)
+        XCTAssertEqual(c.activeCleanupModel, "gemma3")
+        XCTAssertTrue(c.cleaner === h.backends[0])
+        let status = c.cleanupModelStatus ?? ""
+        XCTAssertTrue(status.contains("Not enough free disk space"), status)
+        XCTAssertTrue(status.contains("Gemma 4 E4B"), status)
+        XCTAssertTrue(h.logs.value.contains("cleanup model switch to gemma4 refused: disk"), "\(h.logs.value)")
+        let cleared = await eventually { c.cleanupModelStatus == nil }
+        XCTAssertTrue(cleared, "the refusal clears after the sticky window like a failed load")
+    }
+
+    func testARefusalLeavesAPendingSwitchAlone() {
+        let c = h.makeController()
+        let (task, _) = beginSwitch(c, to: .gemma4)
+        h.freeDiskBytes = gb
+
+        c.switchCleanupModel(to: .gemma4e2b)
+
+        XCTAssertEqual(h.backends.count, 2, "the refused switch builds no backend")
+        XCTAssertEqual(c.pendingCleanupModel, "gemma4")
+        XCTAssertFalse(task.isCancelled, "a refusal must not cancel the switch already in flight")
+        XCTAssertTrue(c.cleanupSwitchTask == task)
+    }
+
+    func testAnAlreadyDownloadedModelSwitchesEvenWhenTheDiskIsShort() {
+        h.statuses.mutate { $0[.gemma4] = .downloaded(bytes: 100) }
+        h.freeDiskBytes = gb
+        let c = h.makeController()
+
+        assertSwitchProceeds(c, to: .gemma4)
+
+        XCTAssertEqual(c.cleanupModelStatus, "Loading Gemma 4 E4B…")
+    }
+
+    func testASwitchProceedsWhenFreeSpaceIsUnknown() {
+        h.freeDiskBytes = nil
+        let c = h.makeController()
+
+        assertSwitchProceeds(c, to: .gemma4)
+    }
+
+    func testASwitchProceedsWhenTheDiskHasRoom() {
+        h.freeDiskBytes = 100 * gb
+        let c = h.makeController()
+
+        assertSwitchProceeds(c, to: .gemma4)
+
+        XCTAssertEqual(c.cleanupModelStatus, "Loading Gemma 4 E4B…")
     }
 
     // MARK: - 4. revert

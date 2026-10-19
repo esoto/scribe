@@ -152,7 +152,8 @@ final class DictationPipeline {
         do {
             try recorder.arm()
         } catch {
-            onNotice("Failed to start recording: \(error)")
+            onLog?("recorder arm failed: \(error)")
+            onNotice(UserFacingError.recordingNotice(error: "\(error)"))
             return
         }
         isArmed = true
@@ -281,7 +282,8 @@ final class DictationPipeline {
             let audio = input
             raw = Gates.normalize(try await withDeadline(config.sttTimeout) { try await engine.transcribe(audio) })
         } catch let sttError as SttError {
-            failTranscription("Transcription failed: \(sttError.message)", reason: sttError.message)
+            failTranscription(
+                UserFacingError.transcriptionNotice(engineMessage: sttError.message), reason: sttError.message)
             return
         } catch is DeadlineExceeded {
             failTranscription(

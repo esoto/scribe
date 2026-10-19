@@ -294,8 +294,24 @@ final class PipelineTests: XCTestCase {
         dictate(h)
         XCTAssertEqual(paster.pasted, [])
         XCTAssertEqual(h.saved.value.count, 1)
-        XCTAssertFalse(h.notices.value.isEmpty)
+        XCTAssertEqual(
+            h.notices.value, [UserFacingError.transcriptionNotice(engineMessage: "dead")],
+            "the notice is the mapped next step, not the engine text")
         XCTAssertEqual(h.states.value.last, .error)
+    }
+
+    /// Engine errors can echo paths or model ids; the notice may reach Notification Center, so only the log gets them.
+    func testTranscriptionNoticeNeverEchoesTheEngineMessage() {
+        let message = "model /Users/x/secret not found"
+        let h = make(stt: FakeStt(err: SttError(message: message)))
+        dictate(h)
+        XCTAssertEqual(h.notices.value.count, 1)
+        let notice = h.notices.value.first ?? ""
+        XCTAssertFalse(notice.contains("/Users"), notice)
+        XCTAssertFalse(notice.contains("secret"), notice)
+        XCTAssertTrue(
+            h.logs.value.contains { $0.hasPrefix("stt failed") && $0.contains(message) },
+            "the reason must reach the log: \(h.logs.value)")
     }
 
     func testSttErrorIsTheTerminalStateForThatDictation() {
@@ -852,7 +868,9 @@ final class PipelineTests: XCTestCase {
         let h = make(recorder: recorder, stt: stt)
         h.pipeline.keyDown()
         XCTAssertFalse(h.states.value.contains(.recording))
-        XCTAssertFalse(h.notices.value.isEmpty)
+        XCTAssertEqual(h.notices.value, [UserFacingError.recordingNotice(error: "mic grant missing")])
+        XCTAssertFalse(h.notices.value.joined().contains("mic grant missing"), "\(h.notices.value)")
+        XCTAssertTrue(h.logs.value.contains("recorder arm failed: mic grant missing"), "\(h.logs.value)")
         h.clock.t += 1.0
         h.pipeline.keyUp()
         XCTAssertEqual(stt.calls, 0)

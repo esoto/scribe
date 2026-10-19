@@ -325,4 +325,28 @@ final class OnboardingStateTests: XCTestCase {
     func testGlyphIdleFinishedDownloadIsIdle() {
         XCTAssertEqual(glyphAccessibilityValue(.idle, progress: 1.0, needsAttention: false), "idle")
     }
+
+    func testGlyphIdleSttDownloadValueRoundsDownPercent() {
+        XCTAssertEqual(
+            glyphAccessibilityValue(.idle, progress: nil, sttProgress: 0.42, needsAttention: false),
+            "downloading, 42 percent")
+    }
+
+    func testGlyphValueCleanupDownloadBeatsSttDownload() {
+        XCTAssertEqual(
+            glyphAccessibilityValue(.idle, progress: 0.3, sttProgress: 0.9, needsAttention: false),
+            "downloading, 30 percent")
+    }
+
+    func testGlyphValueSttDownloadYieldsToNeedsAttentionAndActiveStates() {
+        XCTAssertEqual(
+            glyphAccessibilityValue(.idle, progress: nil, sttProgress: 0.42, needsAttention: true), "needs attention")
+        XCTAssertEqual(
+            glyphAccessibilityValue(.recording, progress: nil, sttProgress: 0.42, needsAttention: false), "recording")
+    }
+
+    func testGlyphFinishedSttDownloadIsIdle() {
+        XCTAssertEqual(
+            glyphAccessibilityValue(.idle, progress: nil, sttProgress: 1.0, needsAttention: false), "idle")
+    }
 }

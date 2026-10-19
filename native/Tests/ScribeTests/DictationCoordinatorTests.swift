@@ -278,7 +278,8 @@ final class DictationCoordinatorTests: XCTestCase {
 
         let delivered = await eventually { !notifier.delivered.isEmpty }
         XCTAssertTrue(delivered)
-        XCTAssertEqual(notifier.delivered.first?.body, "Failed to start recording: no mic")
+        XCTAssertEqual(notifier.delivered.first?.body, UserFacingError.recordingNotice(error: "no mic"))
+        XCTAssertFalse(notifier.delivered.first?.body.contains("no mic") ?? true, "the raw error stays out of the notification")
     }
 
     // MARK: - Failed audio

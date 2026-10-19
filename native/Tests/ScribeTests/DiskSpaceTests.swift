@@ -26,4 +26,11 @@ final class DiskSpaceTests: XCTestCase {
     func testAvailableReadsTheVolumeOfAnExistingDirectory() {
         XCTAssertGreaterThan(DiskSpace.available(at: URL(fileURLWithPath: NSTemporaryDirectory())) ?? 0, 0)
     }
+
+    /// The models folder doesn't exist until the first download; "unknown" there would skip the check exactly when it matters.
+    func testAvailableFallsBackToTheNearestExistingAncestor() {
+        let missing = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("scribe-\(UUID().uuidString)/models", isDirectory: true)
+        XCTAssertGreaterThan(DiskSpace.available(at: missing) ?? 0, 0)
+    }
 }
