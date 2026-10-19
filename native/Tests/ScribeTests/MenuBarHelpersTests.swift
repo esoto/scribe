@@ -148,4 +148,23 @@ final class MenuBarHelpersTests: XCTestCase {
         XCTAssertEqual(cleanupModelLabel("gemma3"), "Gemma 3 4B")
         XCTAssertEqual(cleanupModelLabel("custom"), "Custom model")
     }
+
+    func testSttDownloadPercentShowsWhileIdleWithNoCleanupDownload() {
+        XCTAssertEqual(menuBarGlyph(.idle, progress: nil, sttProgress: 0.42, needsAttention: false), "42%")
+        // A finished cleanup download hands the glyph to the speech-model download still running.
+        XCTAssertEqual(menuBarGlyph(.idle, progress: 1.0, sttProgress: 0.42, needsAttention: false), "42%")
+        // 1.0 means the speech model finished downloading.
+        XCTAssertEqual(menuBarGlyph(.idle, progress: nil, sttProgress: 1.0, needsAttention: false), glyphFor(.idle))
+    }
+
+    func testCleanupProgressWinsOverSttProgress() {
+        XCTAssertEqual(menuBarGlyph(.idle, progress: 0.3, sttProgress: 0.9, needsAttention: false), "30%")
+    }
+
+    func testSttProgressHiddenWhileRecordingOrWhenAttentionIsNeeded() {
+        XCTAssertEqual(menuBarGlyph(.recording, progress: nil, sttProgress: 0.42, needsAttention: false), glyphFor(.recording))
+        XCTAssertEqual(menuBarGlyph(.processing, progress: nil, sttProgress: 0.42, needsAttention: false), glyphFor(.processing))
+        XCTAssertEqual(menuBarGlyph(.error, progress: nil, sttProgress: 0.42, needsAttention: false), glyphFor(.error))
+        XCTAssertEqual(menuBarGlyph(.idle, progress: nil, sttProgress: 0.42, needsAttention: true), "\u{26A0}")
+    }
 }

@@ -68,7 +68,7 @@ Upgrading from a v3 install downloads Ultra on first launch (progress shows in t
 - **Engine** picker: Parakeet (fast, default) ↔ Whisper (better for
   Spanish-heavy dictation; loads on first switch).
 - **Settings…** (⌘,) has three tabs. **General** holds the hotkey, hold delay, sounds, Launch at Login, idle unload, and history size. **Audio** picks the microphone and holds the experimental **Enhance Audio** toggle (LocalVQE noise suppression before transcription — off by default because it lowered accuracy on synthetic noise in tests). **Models** downloads, switches, and deletes the cleanup model.
-- **Cleanup** toggle: off = verbatim transcription pasted raw.
+- **Cleanup (remove fillers)** toggle: off = verbatim transcription pasted raw.
 - **History**: the last 10 dictations by default (Settings › General), in
   memory only, never persisted; "· raw" marks one pasted without cleanup.
   Click one to copy it back to the clipboard.

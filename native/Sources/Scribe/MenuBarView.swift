@@ -12,15 +12,15 @@ func glyphFor(_ state: PipelineState) -> String {
     }
 }
 
-/// The menu-bar glyph: ⚠ while idle with a permission missing, a download percentage while a cleanup model
-/// is still downloading, otherwise the pipeline state symbol. The state wins while
-/// recording/processing/error, so a background download never hides the
-/// feedback that matters most.
-func menuBarGlyph(_ state: PipelineState, progress: Double?, needsAttention: Bool) -> String {
+/// The menu-bar glyph: ⚠ while idle with a permission missing, a download percentage while a model is still
+/// downloading (cleanup first, then the speech model), otherwise the pipeline state symbol. The state wins while
+/// recording/processing/error, so a background download never hides the feedback that matters most.
+func menuBarGlyph(_ state: PipelineState, progress: Double?, sttProgress: Double? = nil, needsAttention: Bool) -> String {
     guard state == .idle else { return glyphFor(state) }
     if needsAttention { return glyphFor(.error) }
-    guard let progress, progress < 1 else { return glyphFor(state) }
-    return "\(Int((progress * 100).rounded(.down)))%"
+    if let progress, progress < 1 { return "\(Int((progress * 100).rounded(.down)))%" }
+    if let sttProgress, sttProgress < 1 { return "\(Int((sttProgress * 100).rounded(.down)))%" }
+    return glyphFor(state)
 }
 
 /// The first missing permission, in Setup order, as the menu's status line; nil when all are granted.
@@ -133,7 +133,7 @@ struct MenuBarView: View {
         .pickerStyle(.inline)
 
         Toggle(
-            "Cleanup",
+            "Cleanup (remove fillers)",
             isOn: Binding(
                 get: { model.cleanupEnabled },
                 set: { model.setCleanupEnabled($0) }
