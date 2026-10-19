@@ -124,6 +124,7 @@ struct ModelsPane: View {
                             .buttonStyle(.borderless)
                             .disabled(!row.canDelete)
                             .help(row.canDelete ? "Delete the downloaded files" : "Nothing to delete, or the model is in use")
+                            .accessibilityLabel("Delete \(row.label)")
                         }
                     }
                 }
