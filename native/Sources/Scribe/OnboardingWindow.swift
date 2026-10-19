@@ -145,7 +145,7 @@ struct OnboardingWindow: View {
     // MARK: - Rows
 
     private enum RowIndicator {
-        case granted, missing, working
+        case granted, missing, working, optionalOff
     }
 
     private func permissionRow(_ grant: Grant, detail: String, systemImage: String) -> some View {
@@ -159,7 +159,7 @@ struct OnboardingWindow: View {
             isNextStep: highlighted == grant,
             actions: OnboardingState.actions(
                 for: grant, granted: granted,
-                microphoneStatus: grant == .microphone ? permissions.microphoneStatus : nil),
+                status: grant == .microphone ? permissions.microphoneStatus : nil),
             voiceOverLabel: { OnboardingState.accessibilityLabel($0, for: grant) },
             perform: { action in
                 switch action {
@@ -185,8 +185,8 @@ struct OnboardingWindow: View {
             title: "Notifications",
             detail: OnboardingState.notificationsDetail(permissions.notifications),
             systemImage: "bell",
-            indicator: authorized ? .granted : .missing,
-            value: authorized ? "granted" : "not granted",
+            indicator: authorized ? .granted : .optionalOff,
+            value: authorized ? "on" : "off",
             isNextStep: false,
             actions: OnboardingState.notificationsActions(permissions.notifications),
             voiceOverLabel: OnboardingState.notificationsAccessibilityLabel,
@@ -263,6 +263,8 @@ struct OnboardingWindow: View {
             Image(systemName: "xmark.circle").foregroundStyle(.red).imageScale(.large)
         case .working:
             ProgressView().controlSize(.small)
+        case .optionalOff:
+            Image(systemName: "bell.slash").foregroundStyle(.secondary).imageScale(.large)
         }
     }
 

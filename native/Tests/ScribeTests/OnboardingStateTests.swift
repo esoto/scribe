@@ -143,50 +143,46 @@ final class OnboardingStateTests: XCTestCase {
         let statuses: [TCCStatus?] = [nil, .notDetermined, .denied, .authorized]
         for grant in Grant.allCases {
             for status in statuses {
-                XCTAssertEqual(OnboardingState.actions(for: grant, granted: true, microphoneStatus: status), [])
+                XCTAssertEqual(OnboardingState.actions(for: grant, granted: true, status: status), [])
             }
         }
     }
 
     func testActionsMicrophoneNotDeterminedOffersOnlyRequest() {
-        let result = OnboardingState.actions(for: .microphone, granted: false, microphoneStatus: .notDetermined)
+        let result = OnboardingState.actions(for: .microphone, granted: false, status: .notDetermined)
         XCTAssertEqual(result, [.request])
     }
 
     func testActionsMicrophoneDeniedOffersOnlyOpenSystemSettings() {
-        let result = OnboardingState.actions(for: .microphone, granted: false, microphoneStatus: .denied)
+        let result = OnboardingState.actions(for: .microphone, granted: false, status: .denied)
         XCTAssertEqual(result, [.openSystemSettings])
     }
 
-    func testActionsMicrophoneAuthorizedButNotGrantedOffersNothing() {
-        let result = OnboardingState.actions(for: .microphone, granted: false, microphoneStatus: .authorized)
-        XCTAssertEqual(result, [])
+    func testActionsMicrophoneAuthorizedButNotGrantedOffersOpenSystemSettings() {
+        let result = OnboardingState.actions(for: .microphone, granted: false, status: .authorized)
+        XCTAssertEqual(result, [.openSystemSettings])
     }
 
     func testActionsMicrophoneWithoutProbeOffersBoth() {
-        let result = OnboardingState.actions(for: .microphone, granted: false, microphoneStatus: nil)
+        let result = OnboardingState.actions(for: .microphone, granted: false, status: nil)
         XCTAssertEqual(result, [.request, .openSystemSettings])
     }
 
     func testActionsAccessibilityNotGrantedOffersBoth() {
-        let result = OnboardingState.actions(for: .accessibility, granted: false, microphoneStatus: nil)
+        let result = OnboardingState.actions(for: .accessibility, granted: false, status: nil)
         XCTAssertEqual(result, [.request, .openSystemSettings])
     }
 
     func testActionsInputMonitoringNotGrantedOffersBoth() {
-        let result = OnboardingState.actions(for: .inputMonitoring, granted: false, microphoneStatus: nil)
+        let result = OnboardingState.actions(for: .inputMonitoring, granted: false, status: nil)
         XCTAssertEqual(result, [.request, .openSystemSettings])
     }
 
-    func testActionsIgnoreMicrophoneStatusForOtherGrants() {
-        let statuses: [TCCStatus?] = [.notDetermined, .denied, .authorized]
-        for grant in [Grant.accessibility, .inputMonitoring] {
-            for status in statuses {
-                XCTAssertEqual(
-                    OnboardingState.actions(for: grant, granted: false, microphoneStatus: status),
-                    [.request, .openSystemSettings])
-            }
-        }
+    func testInputMonitoringUsesTheTriStateWhenGiven() {
+        XCTAssertEqual(
+            OnboardingState.actions(for: .inputMonitoring, granted: false, status: .notDetermined), [.request])
+        XCTAssertEqual(
+            OnboardingState.actions(for: .inputMonitoring, granted: false, status: .denied), [.openSystemSettings])
     }
 
     func testNotificationsAccessibilityLabelNamesNotifications() {
@@ -286,6 +282,55 @@ final class OnboardingStateTests: XCTestCase {
 
     func testNotificationsActionsAuthorized() {
         XCTAssertEqual(OnboardingState.notificationsActions(.authorized), [])
+    }
+
+    func testHotkeyRowDetailWhileHeld() {
+        XCTAssertEqual(
+            OnboardingState.hotkeyRowDetail(holding: true, key: "Right Option"), "Held — the tap sees Right Option.")
+    }
+
+    func testHotkeyRowDetailWhenIdle() {
+        XCTAssertEqual(
+            OnboardingState.hotkeyRowDetail(holding: false, key: "Right Option"), "Hold Right Option to test the tap.")
+    }
+
+    func testMicrophoneRowDetailWithoutSelectionUsesSystemDefault() {
+        XCTAssertEqual(
+            OnboardingState.microphoneRowDetail(selectedName: nil, disconnected: false), "System default input.")
+    }
+
+    func testMicrophoneRowDetailNamesConnectedDevice() {
+        XCTAssertEqual(OnboardingState.microphoneRowDetail(selectedName: "USB Mic", disconnected: false), "USB Mic")
+    }
+
+    func testMicrophoneRowDetailSaysWhenSelectedDeviceIsDisconnected() {
+        XCTAssertEqual(
+            OnboardingState.microphoneRowDetail(selectedName: "USB Mic", disconnected: true), "USB Mic — disconnected.")
+    }
+
+    func testLastProblemDetailQuietSession() {
+        XCTAssertEqual(OnboardingState.lastProblemDetail(nil, at: nil, now: Date()), "No problems this session.")
+    }
+
+    func testLastProblemDetailWithinAMinuteIsJustNow() {
+        let at = Date(timeIntervalSince1970: 1_000)
+        XCTAssertEqual(
+            OnboardingState.lastProblemDetail("Couldn't start recording", at: at, now: at.addingTimeInterval(10)),
+            "Couldn't start recording — just now")
+    }
+
+    func testLastProblemDetailUnderAnHourIsMinutes() {
+        let at = Date(timeIntervalSince1970: 1_000)
+        XCTAssertEqual(
+            OnboardingState.lastProblemDetail("Couldn't start recording", at: at, now: at.addingTimeInterval(300)),
+            "Couldn't start recording — 5 min ago")
+    }
+
+    func testLastProblemDetailAnHourOrMoreIsHours() {
+        let at = Date(timeIntervalSince1970: 1_000)
+        XCTAssertEqual(
+            OnboardingState.lastProblemDetail("Couldn't start recording", at: at, now: at.addingTimeInterval(7200)),
+            "Couldn't start recording — 2 h ago")
     }
 
     func testGlyphRecordingValue() {

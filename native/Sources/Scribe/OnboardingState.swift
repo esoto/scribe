@@ -88,15 +88,17 @@ enum PermissionAction: Equatable {
 }
 
 extension OnboardingState {
-    /// Which buttons a Setup row offers. "Request" is dead once the system has an answer, so a denied microphone
-    /// gets only the System Settings route; the two boolean probes keep both until granted.
-    static func actions(for grant: Grant, granted: Bool, microphoneStatus: TCCStatus?) -> [PermissionAction] {
+    /// Which buttons a Setup row offers. "Request" is dead once the system has an answer, so a denied grant gets
+    /// only the System Settings route. `status` is the tri-state probe where one exists (microphone, Input
+    /// Monitoring); Accessibility only answers yes or no and keeps both buttons until granted. A status of
+    /// `.authorized` with `granted == false` means the system says yes but the live check (the hotkey tap) says
+    /// no — re-toggling in System Settings is the known fix, so that is the one button offered.
+    static func actions(for grant: Grant, granted: Bool, status: TCCStatus?) -> [PermissionAction] {
         guard !granted else { return [] }
-        if grant == .microphone, let microphoneStatus {
-            switch microphoneStatus {
+        if let status {
+            switch status {
             case .notDetermined: return [.request]
-            case .denied: return [.openSystemSettings]
-            case .authorized: return []
+            case .denied, .authorized: return [.openSystemSettings]
             }
         }
         return [.request, .openSystemSettings]
@@ -153,6 +155,25 @@ extension OnboardingState {
     }
 
     static let notificationsSettingsUrl = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension")!
+
+    /// Doctor: the hotkey row shows the tap is alive while the key is physically held.
+    static func hotkeyRowDetail(holding: Bool, key: String) -> String {
+        holding ? "Held — the tap sees \(key)." : "Hold \(key) to test the tap."
+    }
+
+    /// Doctor: the microphone row names the selected device; a stale selection says so.
+    static func microphoneRowDetail(selectedName: String?, disconnected: Bool) -> String {
+        guard let selectedName else { return "System default input." }
+        return disconnected ? "\(selectedName) — disconnected." : selectedName
+    }
+
+    /// Doctor: the last problem scribe reported, with how long ago; nil means a quiet session.
+    static func lastProblemDetail(_ notice: String?, at: Date?, now: Date) -> String {
+        guard let notice, let at else { return "No problems this session." }
+        let seconds = Int(now.timeIntervalSince(at))
+        let when = seconds < 60 ? "just now" : seconds < 3600 ? "\(seconds / 60) min ago" : "\(seconds / 3600) h ago"
+        return "\(notice) — \(when)"
+    }
 }
 
 /// VoiceOver value for the menu bar glyph, which otherwise reads as "white bullet" or "warning sign".
