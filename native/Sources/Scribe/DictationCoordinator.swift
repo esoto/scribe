@@ -21,6 +21,11 @@ struct UserNotifier: Notifier {
     }
 }
 
+/// Good news ("Gemma 4 E4B is ready.") is delivered like any notice but is not the Doctor's last problem.
+enum NoticeKind {
+    case problem, info
+}
+
 /// The slice of `HotkeyMonitor` the coordinator drives; the real one installs a `CGEventTap`.
 protocol HotkeyMonitoring: AnyObject {
     var onModifierEvent: ((String) -> Void)? { get set }
@@ -56,7 +61,8 @@ final class DictationCoordinator: ObservableObject {
     @Published private(set) var state: PipelineState = .idle
     /// A short verdict on the last dictation ("Pasted raw — …"), cleared after `hintSeconds` or by the next key-down.
     @Published private(set) var hint: String?
-    /// The latest notice and when it was raised, for the Doctor's "Last problem" row. Kept even when delivery fails.
+    /// The latest problem notice and when it was raised, for the Doctor's "Last problem" row. Kept even when
+    /// delivery fails; good news never replaces it.
     @Published private(set) var lastNotice: (text: String, at: Date)?
 
     /// Key-down work that isn't about recording (idle touch, availability refresh, model warm-up).
@@ -266,8 +272,9 @@ final class DictationCoordinator: ObservableObject {
         }
     }
 
-    func notify(_ message: String) {
-        lastNotice = (message, Date())
+    /// Every caller but the cleanup model's "ready" message reports a problem, hence the default.
+    func notify(_ message: String, kind: NoticeKind = .problem) {
+        if kind == .problem { lastNotice = (message, Date()) }
         notifier.deliver(title: "scribe", body: message) { [log] error in
             log("notification delivery failed: \(message) (\(error))")
         }

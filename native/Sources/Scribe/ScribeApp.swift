@@ -102,7 +102,7 @@ final class AppModel: ObservableObject {
             appleIntelligenceUnavailableReason: { AppleIntelligence.unavailableReason },
             dictionarySnapshot: { dictionary.snapshot },
             onCleanerCommitted: { lateDictation.pipeline.setCleaner($0, name: $1) },
-            notify: { lateDictation.notify($0) },
+            notify: { lateDictation.notify($0, kind: $1) },
             touchIdle: { idleTracker.touch(now: ProcessInfo.processInfo.systemUptime) },
             log: log)
         self.cleanupModels = cleanupModels

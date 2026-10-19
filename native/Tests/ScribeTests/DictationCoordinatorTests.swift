@@ -312,6 +312,24 @@ final class DictationCoordinatorTests: XCTestCase {
         XCTAssertEqual(c.lastNotice?.text, "hello")
     }
 
+    func testGoodNewsIsDeliveredButDoesNotReplaceTheLastProblem() {
+        let c = make()
+
+        c.notify("Transcription failed")
+        c.notify("Gemma 4 E4B is ready.", kind: .info)
+
+        XCTAssertEqual(c.lastNotice?.text, "Transcription failed")
+        XCTAssertEqual(notifier.delivered.map { $0.body }, ["Transcription failed", "Gemma 4 E4B is ready."])
+    }
+
+    func testGoodNewsAloneLeavesTheSessionQuiet() {
+        let c = make()
+
+        c.notify("Gemma 4 E4B is ready.", kind: .info)
+
+        XCTAssertNil(c.lastNotice)
+    }
+
     func testRecordingFailureSurfacesAsANotification() async {
         recorder = FakeRecorder(armError: TestError(message: "no mic"))
         let c = make()
