@@ -126,6 +126,10 @@ out *differently each time* ("Hetzner" produced Headstar, Hatsner, Heftner
 and Headsnar in one sitting), so add a pair for whichever spelling you see
 most; add a second if another variant keeps showing up.
 
+**Fix a Word…** (History submenu) skips the guessing: pick the dictation,
+click the word scribe misheard — several in a row for a phrase — type
+what you said, and the pair is added for you. Only the pair is stored.
+
 Replacements are applied directly to the transcript, not by the cleanup
 model, so they hold **on every dictation** — including ones too short to be
 cleaned (under `minWords`), with cleanup switched off, and when cleanup

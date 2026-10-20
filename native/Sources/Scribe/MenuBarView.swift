@@ -147,6 +147,10 @@ struct MenuBarView: View {
             if items.isEmpty {
                 Text("(empty)")
             } else {
+                Button("Fix a Word…") {
+                    openFixWordWindow(openWindow)
+                }
+                Divider()
                 ForEach(items) { record in
                     Button {
                         model.copyToClipboard(record.final)
