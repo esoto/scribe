@@ -42,4 +42,20 @@ final class VoiceCommandTests: XCTestCase {
             XCTAssertFalse(command.logName.contains(" "))
         }
     }
+
+    func testEveryPhraseInTheTableMatchesItsCommand() {
+        let table: [(String, VoiceCommand)] = [
+            ("enter", .pressReturn), ("press enter", .pressReturn), ("send it", .pressReturn),
+            ("send that", .pressReturn), ("enviar", .pressReturn), ("envíalo", .pressReturn),
+            ("mándalo", .pressReturn), ("presiona enter", .pressReturn),
+            ("new line", .newLine), ("newline", .newLine), ("line break", .newLine),
+            ("nueva línea", .newLine), ("línea nueva", .newLine), ("salto de línea", .newLine),
+            ("new paragraph", .newParagraph), ("nuevo párrafo", .newParagraph), ("párrafo nuevo", .newParagraph),
+            ("scratch that", .undo), ("undo that", .undo), ("undo", .undo),
+            ("borra eso", .undo), ("deshacer", .undo), ("deshace eso", .undo),
+        ]
+        for (phrase, command) in table {
+            XCTAssertEqual(VoiceCommand.match(phrase), command, phrase)
+        }
+    }
 }

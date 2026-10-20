@@ -77,7 +77,7 @@ final class DictationPipeline {
     /// Read fresh each dictation; applied deterministically here, not via the cleanup prompt.
     private let replacementPairs: () -> [ReplacementPair]
     private let saveFailedAudio: ([Float]) -> Void
-    /// A short verdict on the last dictation for the status row; fires only for degradations, never for the user's own choices.
+    /// A short verdict on the last dictation for the status row: a degradation, or the command that ran — never a plain user choice like disabled cleanup.
     private let onHint: (String) -> Void
     /// Fires after a paste that went through, never when the text only reached the clipboard.
     private let onPasted: () -> Void
@@ -86,7 +86,7 @@ final class DictationPipeline {
     private let onStats: ((DictationStat) -> Void)?
     /// Runs before STT when `enhanceAudioEnabled`; nil leaves the captured audio untouched.
     private let enhancer: AudioEnhancer?
-    /// Presses Return and ⌘Z for voice commands; nil leaves a matched command to fail loudly rather than paste its words.
+    /// Presses Return and ⌘Z for voice commands; nil makes those two fail loudly rather than paste their words.
     private let keyPresser: KeyPressing?
 
     private(set) var engineName: String
@@ -400,7 +400,7 @@ final class DictationPipeline {
             onNotice(guarded.notice)
         } catch {
             onLog?("voice command failed (\(command.logName)): \(error)")
-            onNotice("Command failed — see log")
+            onNotice("Command failed — check log")
         }
     }
 

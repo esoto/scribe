@@ -112,7 +112,7 @@ func postKey(_ key: SyntheticKey) throws {
     keyUp.post(tap: .cghidEventTap)
 }
 
-/// Posts a synthetic ⌘V.
+/// Paster's injected poster, kept by name so its call site is unchanged.
 func postCmdV() throws {
     try postKey(.commandV)
 }

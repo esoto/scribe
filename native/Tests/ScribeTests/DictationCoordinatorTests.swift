@@ -697,4 +697,13 @@ final class DictationCoordinatorTests: XCTestCase {
 
         XCTAssertTrue(c.pipeline.enhanceAudioEnabled)
     }
+
+    func testSetVoiceCommandsEnabledReachesThePipeline() {
+        let c = make()
+        XCTAssertTrue(c.pipeline.voiceCommandsEnabled)
+
+        c.setVoiceCommandsEnabled(false)
+
+        XCTAssertFalse(c.pipeline.voiceCommandsEnabled)
+    }
 }

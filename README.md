@@ -72,12 +72,12 @@ Upgrading from a v3 install downloads Ultra on first launch (progress shows in t
 - **Voice commands** (Settings › General, on by default): say one of these
   as the whole utterance and scribe acts instead of pasting — "enter" /
   "send it" presses Return; "new line" and "new paragraph" insert breaks;
-  "scratch that" / "undo" sends ⌘Z (best-effort: terminals ignore it).
+  "scratch that" / "undo" sends ⌘Z (best-effort: terminals ignore it). ⌘Z assumes a QWERTY-family layout.
   Spanish: "enviar" / "envíalo", "nueva línea", "nuevo párrafo", "borra
-  eso" / "deshacer". Only the entire utterance counts, so "add a new line
+  eso" / "deshacer". Also accepted: "press enter", "send that", "newline", "line break", "undo that"; "mándalo", "presiona enter", "línea nueva", "salto de línea", "párrafo nuevo", "deshace eso". Only the entire utterance counts, so "add a new line
   after the title" is still text. Spoken punctuation ("comma", "period")
   is not a command: transcription and cleanup already punctuate. Return
-  goes to whatever has focus — in a terminal it runs the line.
+  goes to whatever has focus — in a terminal it runs the line, and a pasted break can too in a shell without bracketed paste.
 - **History**: the last 10 dictations by default (Settings › General), in
   memory only, never persisted; "· raw" marks one pasted without cleanup.
   Click one to copy it back to the clipboard; Option-click copies what the
