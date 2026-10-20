@@ -24,7 +24,11 @@ enum FixFromHistory {
     static func heardPhrase(words: [String], selected: Set<Int>) -> String? {
         guard let lo = selected.min(), let hi = selected.max(), lo >= 0, hi < words.count, isContiguous(selected)
         else { return nil }
-        let phrase = TermReplacer.trimEdges(words[lo...hi].joined(separator: " "))
+        var run = words[lo...hi]
+        // A punctuation-only end token would leave its separating space behind once trimmed.
+        while let first = run.first, TermReplacer.trimEdges(first).isEmpty { run.removeFirst() }
+        while let last = run.last, TermReplacer.trimEdges(last).isEmpty { run.removeLast() }
+        let phrase = TermReplacer.trimEdges(run.joined(separator: " "))
         return phrase.isEmpty ? nil : phrase
     }
 

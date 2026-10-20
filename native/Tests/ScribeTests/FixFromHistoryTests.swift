@@ -14,6 +14,7 @@ final class FixFromHistoryTests: XCTestCase {
         let dictations = [
             "deploy with cuber, netties tonight", "deploy with cuber — netties tonight", "¿headsner? sí",
             "we hit 50% on headsner", "ship it to headsner— then rest", "so, deploy to headsner. — tonight!",
+            "I think ... we should", "wait ... ? no",
         ]
         for raw in dictations {
             let words = FixFromHistory.words(in: raw)
@@ -37,6 +38,8 @@ final class FixFromHistoryTests: XCTestCase {
         XCTAssertNil(FixFromHistory.heardPhrase(words: words, selected: [-1]))
         XCTAssertEqual(FixFromHistory.heardPhrase(words: ["with", "cuber,", "netties."], selected: [1, 2]), "cuber, netties")
         XCTAssertNil(FixFromHistory.heardPhrase(words: ["?"], selected: [0]))
+        XCTAssertEqual(FixFromHistory.heardPhrase(words: ["think", "..."], selected: [0, 1]), "think")
+        XCTAssertNil(FixFromHistory.heardPhrase(words: ["...", "?"], selected: [0, 1]))
     }
 
     func testTogglingExtendsOrRestartsTheRun() {

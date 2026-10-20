@@ -84,6 +84,8 @@ struct FixWordWindow: View {
     /// History is not observable, so re-read it whenever a window comes forward. Word indices belong to the record
     /// they were picked in, so a change of shown record (newest moved, or the pick aged out) drops them.
     private func reload() {
+        // A half-made pick on the newest dictation must survive a newer one landing while the window is open.
+        if selectedRecord == nil, !selectedWords.isEmpty { selectedRecord = record?.id }
         let shown = record?.id
         records = history.items()
         if record?.id != shown {
