@@ -7,9 +7,9 @@ enum URLCommand: Equatable {
 
     static let scheme = "scribe"
 
-    /// `scribe://paste-last` and `scribe:paste-last` both parse; a query, fragment, user or extra path refuses.
+    /// `scribe://paste-last` and `scribe:paste-last` both parse; a query, fragment, user, port or extra path refuses.
     static func parse(_ url: URL) -> URLCommand? {
-        guard url.scheme?.lowercased() == scheme, url.query == nil, url.fragment == nil, url.user == nil
+        guard url.scheme?.lowercased() == scheme, url.query == nil, url.fragment == nil, url.user == nil, url.port == nil
         else { return nil }
         let verb: String
         if let host = url.host, !host.isEmpty {
@@ -38,5 +38,12 @@ extension URLCommand {
     static func outcome(for url: URL, enabled: Bool) -> URLOutcome {
         guard let command = parse(url) else { return .ignored }
         return enabled ? .run(command) : .refusedOff
+    }
+}
+
+extension URLCommand {
+    /// Fixed text: everything after the scheme is the opener's, and scribe.log is what users attach to reports.
+    static func ignoredLogLine(for url: URL) -> String {
+        url.isFileURL ? "url ignored: a file was opened" : "url ignored: not a scribe:// command"
     }
 }

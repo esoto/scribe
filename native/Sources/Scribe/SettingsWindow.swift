@@ -98,7 +98,7 @@ private struct GeneralPane: View {
             Toggle(
                 "Allow scribe:// URLs",
                 isOn: Binding(get: { settings.urlSchemeEnabled }, set: { settings.setURLSchemeEnabled($0) }))
-            caption("Lets Raycast, Stream Deck or a foot pedal open scribe://paste-last. Off by default: any app can open a URL.")
+            caption("Lets Raycast, Stream Deck or a foot pedal open scribe://paste-last. Off by default: while it is on, any app, or a web page you allow, can paste your last dictation into the app that has focus.")
             Toggle(
                 "Launch at Login",
                 isOn: Binding(get: { model.launchAtLoginEnabled }, set: { model.setLaunchAtLogin($0) }))
