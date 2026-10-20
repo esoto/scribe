@@ -33,6 +33,7 @@ final class PipelineTests: XCTestCase {
         let logs: Box<String>
         /// "pasted" and "hint: <text>" in the order the sinks fired.
         let cues: Box<String>
+        let stats: Box<DictationStat>
     }
 
     private func makeSyncRunner() -> (@escaping () async -> Void) -> Void {
@@ -59,6 +60,7 @@ final class PipelineTests: XCTestCase {
         let cleanedTexts = Box<String>()
         let logs = Box<String>()
         let cues = Box<String>()
+        let stats = Box<DictationStat>()
         let pipeline = DictationPipeline(
             recorder: recorder,
             stt: stt,
@@ -78,11 +80,12 @@ final class PipelineTests: XCTestCase {
             onCleaned: { cleanedTexts.append($0) },
             replacementPairs: { pairs },
             onHint: { cues.append("hint: \($0)") },
-            onPasted: { cues.append("pasted") }
+            onPasted: { cues.append("pasted") },
+            onStats: { stats.append($0) }
         )
         return Harness(
             pipeline: pipeline, clock: clock, states: states, notices: notices, saved: saved,
-            cleanedTexts: cleanedTexts, logs: logs, cues: cues)
+            cleanedTexts: cleanedTexts, logs: logs, cues: cues, stats: stats)
     }
 
     private func dictate(_ h: Harness, hold: Double = 1.0) {
@@ -989,5 +992,49 @@ final class PipelineTests: XCTestCase {
 
     func testEnhanceTimeoutDefaultsToThreeSeconds() {
         XCTAssertEqual(PipelineConfig().enhanceTimeout, 3.0)
+    }
+
+    // MARK: - Stats
+
+    func testStatsRecordACleanedDictation() {
+        let clock = FakeClock()
+        // 0.25 is exact in binary; 0.2 would make the millisecond truncation read 199.
+        let h = make(stt: FakeStt(onTranscribe: { clock.t += 0.25 }), clock: clock)
+        dictate(h)
+        XCTAssertEqual(h.stats.value.count, 1)
+        let stat = h.stats.value.first
+        XCTAssertEqual(stat?.words, 3, "counted on what was pasted, not on the raw transcript")
+        XCTAssertEqual(stat?.cleaned, true)
+        XCTAssertEqual(stat?.rawFallback, false)
+        XCTAssertEqual(stat?.sttMs, 250)
+        XCTAssertNotNil(stat?.cleanupMs)
+    }
+
+    func testStatsRecordARawFallback() {
+        let h = make(cleaner: FakeCleaner(hang: true), config: PipelineConfig(cleanupTimeout: 0.05))
+        dictateBounded(h)
+        XCTAssertEqual(h.stats.value.count, 1)
+        let stat = h.stats.value.first
+        XCTAssertEqual(stat?.cleaned, false)
+        XCTAssertEqual(stat?.rawFallback, true)
+        XCTAssertNotNil(stat?.cleanupMs, "the cleanup attempt ran, so its time counts")
+        XCTAssertEqual(stat?.words, 5, "the raw transcript is what was pasted")
+    }
+
+    func testStatsRecordAShortDictationWithoutCleanup() {
+        let h = make(stt: FakeStt(text: "hi there"))
+        dictate(h)
+        XCTAssertEqual(h.stats.value.count, 1)
+        let stat = h.stats.value.first
+        XCTAssertNil(stat?.cleanupMs, "cleanup never ran, so there is no cleanup time to report")
+        XCTAssertEqual(stat?.rawFallback, false, "skipping a short utterance is not a fallback")
+        XCTAssertEqual(stat?.cleaned, false)
+        XCTAssertEqual(stat?.words, 2)
+    }
+
+    func testStatsSkipFailedTranscriptions() {
+        let h = make(stt: FakeStt(err: SttError(message: "boom")))
+        dictate(h)
+        XCTAssertTrue(h.stats.value.isEmpty)
     }
 }

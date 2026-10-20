@@ -81,6 +81,9 @@ final class DictationPipeline {
     private let onHint: (String) -> Void
     /// Fires after a paste that went through, never when the text only reached the clipboard.
     private let onPasted: () -> Void
+    /// One call per dictation that produced text, before the paste, so a paste that fails still counts.
+    /// A failed or empty transcription records nothing.
+    private let onStats: ((DictationStat) -> Void)?
     /// Runs before STT when `enhanceAudioEnabled`; nil leaves the captured audio untouched.
     private let enhancer: AudioEnhancer?
 
@@ -120,7 +123,8 @@ final class DictationPipeline {
         onCleaned: ((String) -> Void)? = nil,
         replacementPairs: @escaping () -> [ReplacementPair] = { [] },
         onHint: @escaping (String) -> Void = { _ in },
-        onPasted: @escaping () -> Void = {}
+        onPasted: @escaping () -> Void = {},
+        onStats: ((DictationStat) -> Void)? = nil
     ) {
         self.recorder = recorder
         self.stt = stt
@@ -144,6 +148,7 @@ final class DictationPipeline {
         self.replacementPairs = replacementPairs
         self.onHint = onHint
         self.onPasted = onPasted
+        self.onStats = onStats
     }
 
     // MARK: - Public API
@@ -314,11 +319,14 @@ final class DictationPipeline {
         var final = transcript
         var cleaned = false
         var cleanupMs = 0
+        // cleanupMs is 0 both when cleanup never ran and when it ran instantly; only this tells them apart.
+        var cleanupRan = false
         var skipNote = ""
         var cleanupSkip: CleanupSkip?
         if let cleaner,
             Gates.shouldClean(transcript, enabled: cleanupEnabled, minWords: config.minWords)
         {
+            cleanupRan = true
             let cleanStart = clock()
             switch await tryClean(transcript, cleaner: cleaner) {
             case .success(let out):
@@ -332,6 +340,9 @@ final class DictationPipeline {
             cleanupMs = Int((clock() - cleanStart) * 1000)
         }
         onLog?("dictation: engine=\(engineName) cleanupModel=\(cleanupModelName) stt=\(sttMs)ms bias=\(biasMs)ms enhance=\(enhanceMs)ms cleanup=\(cleanupMs)ms cleaned=\(cleaned) chars=\(final.count)\(enhanceSkipNote)\(skipNote)")
+        onStats?(DictationStat(
+            words: final.split(whereSeparator: { $0.isWhitespace }).count, cleaned: cleaned,
+            rawFallback: cleanupSkip != nil, sttMs: sttMs, cleanupMs: cleanupRan ? cleanupMs : nil))
 
         if cleaned {
             onCleaned?(final)

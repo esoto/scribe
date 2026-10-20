@@ -17,6 +17,7 @@ final class AppModel: ObservableObject {
     let idleTracker: IdleTracker
     let dictionary: UserDictionaryStore
     let dictionaryModel: DictionaryModel
+    let statsModel: StatsModel
     let permissions: PermissionsModel
     let dictation: DictationCoordinator
     let settingsModel: SettingsModel
@@ -82,6 +83,8 @@ final class AppModel: ObservableObject {
         self.idleTracker = idleTracker
         let dictionary = UserDictionaryStore()
         self.dictionary = dictionary
+        let stats = StatsStore()
+        self.statsModel = StatsModel(store: stats)
 
         // The sub-models call into each other (permissions ↔ coordinator, cleanup → coordinator); this ref
         // closes those loops once the coordinator exists.
@@ -163,7 +166,9 @@ final class AppModel: ObservableObject {
                     onCleaned: { [dictionary] text in dictionary.observe(cleanedText: text) },
                     replacementPairs: { [dictionary] in dictionary.allPairs },
                     onHint: sinks.onHint,
-                    onPasted: sinks.onPasted
+                    onPasted: sinks.onPasted,
+                    // The store hops to its own queue, so no main-actor hop here.
+                    onStats: { stats.record($0) }
                 )
                 pipeline.setCleaner(cleanupModels.cleaner, name: cleanupModels.activeCleanupModel)
                 return pipeline
