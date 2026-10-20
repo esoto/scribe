@@ -198,6 +198,10 @@ Most of these have a control in **Settings…** (⌘,), the menu, or the Diction
 | `cleanupModelPath` | _(unset)_ | local MLX model folder to use for cleanup instead of stock Gemma; when set, overrides `cleanupModel` and disables switching in **Settings › Models** |
 | `vocabularyBiasingEnabled` | false | acoustic vocabulary biasing for Parakeet (experimental) (Dictionary window) |
 | `enhanceAudioEnabled` | false | LocalVQE noise suppression before transcription — experimental (Settings › Audio) |
+| `voiceCommandsEnabled` | true | whole-utterance voice commands ("enter", "new line", …) — see Usage (Settings) |
+| `urlSchemeEnabled` | false | allow `scribe://` URLs from other apps (Settings) |
+| `hudEnabled` | true | the recording pill above the Dock (Settings) |
+| `hotkeyMode` | `hold` | `hold` \| `hold_or_latch` — double-tap to latch a recording (Settings) |
 | `microphoneUID` | _(unset)_ | input device UID; unset follows the system default input (Settings) |
 
 **Custom cleanup model:** point `cleanupModelPath` at any local MLX model

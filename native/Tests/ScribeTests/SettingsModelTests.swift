@@ -190,4 +190,55 @@ final class SettingsModelTests: XCTestCase {
         XCTAssertEqual(settings.hotkey, .rightOption)
         XCTAssertEqual(settings.historySize, 10)
     }
+
+    // MARK: - 1.4 settings
+
+    func testOneFourSettingsMirrorDefaultsAndStoredValues() {
+        var model = make()
+        XCTAssertTrue(model.voiceCommandsEnabled)
+        XCTAssertFalse(model.urlSchemeEnabled)
+        XCTAssertTrue(model.hudEnabled)
+        XCTAssertEqual(model.hotkeyMode, .hold)
+
+        settings.voiceCommandsEnabled = false
+        settings.urlSchemeEnabled = true
+        settings.hudEnabled = false
+        settings.hotkeyMode = .holdOrLatch
+        model = make()
+        XCTAssertFalse(model.voiceCommandsEnabled)
+        XCTAssertTrue(model.urlSchemeEnabled)
+        XCTAssertFalse(model.hudEnabled)
+        XCTAssertEqual(model.hotkeyMode, .holdOrLatch)
+    }
+
+    func testOneFourSettersPersistAndRunTheirEffectOncePerChange() {
+        var voice: [Bool] = []
+        var hud: [Bool] = []
+        var modes: [HotkeyMode] = []
+        let settings = self.settings!
+        let model = SettingsModel(
+            settings: settings,
+            onHotkeyChanged: { _ in }, onHoldThresholdChanged: { _ in }, onIdleMinutesChanged: { _ in },
+            onHistorySizeChanged: { _ in }, onRestoreDelayChanged: { _ in },
+            onVoiceCommandsChanged: { voice.append($0) },
+            onHudEnabledChanged: { hud.append($0) },
+            onHotkeyModeChanged: { modes.append($0) })
+
+        model.setVoiceCommandsEnabled(false)
+        model.setVoiceCommandsEnabled(false)
+        model.setURLSchemeEnabled(true)
+        model.setURLSchemeEnabled(true)
+        model.setHudEnabled(false)
+        model.setHotkeyMode(.holdOrLatch)
+        model.setHotkeyMode(.holdOrLatch)
+
+        XCTAssertEqual(voice, [false])
+        XCTAssertEqual(hud, [false])
+        XCTAssertEqual(modes, [.holdOrLatch])
+        XCTAssertFalse(settings.voiceCommandsEnabled)
+        XCTAssertTrue(settings.urlSchemeEnabled)
+        XCTAssertFalse(settings.hudEnabled)
+        XCTAssertEqual(settings.hotkeyMode, .holdOrLatch)
+        XCTAssertTrue(model.urlSchemeEnabled)
+    }
 }
