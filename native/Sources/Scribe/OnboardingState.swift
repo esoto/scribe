@@ -156,7 +156,9 @@ extension OnboardingState {
 }
 
 /// VoiceOver value for the menu bar glyph, which otherwise reads as "white bullet" or "warning sign".
-func glyphAccessibilityValue(_ state: PipelineState, progress: Double?, needsAttention: Bool) -> String {
+func glyphAccessibilityValue(
+    _ state: PipelineState, progress: Double?, sttProgress: Double? = nil, needsAttention: Bool
+) -> String {
     switch state {
     case .recording: return "recording"
     case .processing: return "transcribing"
@@ -164,6 +166,7 @@ func glyphAccessibilityValue(_ state: PipelineState, progress: Double?, needsAtt
     case .idle:
         if needsAttention { return "needs attention" }
         if let progress, progress < 1 { return "downloading, \(Int((progress * 100).rounded(.down))) percent" }
+        if let sttProgress, sttProgress < 1 { return "downloading, \(Int((sttProgress * 100).rounded(.down))) percent" }
         return "idle"
     }
 }

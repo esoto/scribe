@@ -65,7 +65,7 @@ enum CleanupModelCatalog {
             repoID: "mlx-community/gemma-3-4b-it-qat-4bit",
             revision: "3d9ef289111449933c22761961f16a5df237ce2a",  // 2026-10-14
             extraEOSTokens: ["<end_of_turn>"]),
-        approxDownloadBytes: 2_800_000_000, fidelitySafe: false)
+        approxDownloadBytes: 3_030_000_000, fidelitySafe: false)
 
     /// Plain 4-bit PTQ build. NOT the QAT-OptiQ build: that one answered the
     /// haiku injection case and peaks at 6.8 GB (2026-10-10 benchmark).
@@ -75,9 +75,9 @@ enum CleanupModelCatalog {
             repoID: "mlx-community/gemma-4-e4b-it-4bit",
             revision: "475b9088d29754a3379866cf5aeb6b41acd313c2",  // 2026-10-14
             extraEOSTokens: ["<turn|>"]),
-        approxDownloadBytes: 4_900_000_000, fidelitySafe: true)
+        approxDownloadBytes: 5_180_000_000, fidelitySafe: true)
 
-    /// Smaller sibling of E4B (2.3B effective vs 4.5B; 3.6 GB vs 4.9 GB) and
+    /// Smaller sibling of E4B (2.3B effective vs 4.5B; 3.6 GB vs 5.2 GB) and
     /// the fastest local model measured (~330 ms vs E4B's ~460 ms). Keeps
     /// every word with learned vocabulary (DictionaryFidelityTests), so it is
     /// fidelity-safe — but golden is 8/10, so it stays opt-in, never the
@@ -88,7 +88,7 @@ enum CleanupModelCatalog {
             repoID: "mlx-community/gemma-4-e2b-it-4bit",
             revision: "238767527555cb75a05732a84dff5d6ba0dd6809",  // 2026-10-14
             extraEOSTokens: ["<turn|>"]),
-        approxDownloadBytes: 3_600_000_000, fidelitySafe: true)
+        approxDownloadBytes: 3_580_000_000, fidelitySafe: true)
 
     static let appleIntelligence = CleanupModelSpec(
         id: .appleIntelligence, label: "Apple Intelligence",
