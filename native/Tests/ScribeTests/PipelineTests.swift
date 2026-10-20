@@ -52,6 +52,8 @@ final class PipelineTests: XCTestCase {
         frontmost: @escaping () -> pid_t? = { nil },
         enhancer: AudioEnhancer? = nil,
         enhanceEnabled: Bool = false,
+        keyPresser: KeyPressing? = nil,
+        voiceCommands: Bool = true,
         clock: FakeClock = FakeClock()
     ) -> Harness {
         let states = Box<PipelineState>()
@@ -76,6 +78,8 @@ final class PipelineTests: XCTestCase {
             saveFailedAudio: { saved.append($0) },
             enhancer: enhancer,
             enhanceAudioEnabled: enhanceEnabled,
+            keyPresser: keyPresser,
+            voiceCommandsEnabled: voiceCommands,
             onLog: { logs.append($0) },
             onCleaned: { cleanedTexts.append($0) },
             replacementPairs: { pairs },
@@ -1036,5 +1040,133 @@ final class PipelineTests: XCTestCase {
         let h = make(stt: FakeStt(err: SttError(message: "boom")))
         dictate(h)
         XCTAssertTrue(h.stats.value.isEmpty)
+    }
+
+    func testStatsSkipVoiceCommands() {
+        let h = make(stt: FakeStt(text: "enter"), keyPresser: FakeKeyPresser())
+        dictate(h)
+        XCTAssertTrue(h.stats.value.isEmpty, "a command is not a dictation")
+    }
+
+    // MARK: - Voice commands
+
+    func testWholeUtteranceReturnCommandPressesReturnInTheKeyDownApp() {
+        let presser = FakeKeyPresser()
+        let paster = FakePaster()
+        let cleaner = FakeCleaner()
+        let hist = History(maxLen: 10)
+        let h = make(
+            stt: FakeStt(text: "Send it."), cleaner: cleaner, paster: paster, history: hist,
+            frontmost: { 42 }, keyPresser: presser)
+        dictate(h)
+        XCTAssertEqual(presser.pressed, [.returnKey])
+        XCTAssertEqual(presser.targets, [42])
+        XCTAssertEqual(paster.pasted, [])
+        XCTAssertEqual(cleaner.calls, 0)
+        XCTAssertTrue(hist.items().isEmpty, "a command is not a dictation")
+        XCTAssertEqual(h.cues.value, ["pasted", "hint: Return sent"])
+        XCTAssertTrue(h.logs.value.contains { $0.contains("command=return") }, "\(h.logs.value)")
+        XCTAssertFalse(h.logs.value.contains { $0.contains("Send it") }, "the log must not echo the utterance")
+        XCTAssertEqual(h.states.value.last, .idle)
+    }
+
+    func testACommandIsNeverOfferedToTheDictionaryHarvester() {
+        let h = make(stt: FakeStt(text: "enter"), keyPresser: FakeKeyPresser())
+        dictate(h)
+        XCTAssertEqual(h.cleanedTexts.value, [])
+    }
+
+    func testNewLineAndNewParagraphPasteBreaks() {
+        let lineKeys = FakeKeyPresser()
+        let linePaster = FakePaster()
+        let line = make(stt: FakeStt(text: "new line"), paster: linePaster, keyPresser: lineKeys)
+        dictate(line)
+        XCTAssertEqual(linePaster.pasted, ["\n"])
+        XCTAssertEqual(lineKeys.pressed, [])
+        XCTAssertEqual(line.cues.value, ["pasted", "hint: New line"])
+
+        let paragraphKeys = FakeKeyPresser()
+        let paragraphPaster = FakePaster()
+        let paragraph = make(stt: FakeStt(text: "Nuevo párrafo."), paster: paragraphPaster, keyPresser: paragraphKeys)
+        dictate(paragraph)
+        XCTAssertEqual(paragraphPaster.pasted, ["\n\n"])
+        XCTAssertEqual(paragraphKeys.pressed, [])
+        XCTAssertEqual(paragraph.cues.value, ["pasted", "hint: New paragraph"])
+    }
+
+    func testBreaksAreHandedTheKeyDownApp() {
+        let paster = FakePaster()
+        let h = make(stt: FakeStt(text: "new line"), paster: paster, frontmost: { 9 }, keyPresser: FakeKeyPresser())
+        dictate(h)
+        XCTAssertEqual(paster.targets, [9])
+    }
+
+    func testUndoSendsCommandZ() {
+        let presser = FakeKeyPresser()
+        let paster = FakePaster()
+        let h = make(stt: FakeStt(text: "scratch that"), paster: paster, keyPresser: presser)
+        dictate(h)
+        XCTAssertEqual(presser.pressed, [.commandZ])
+        XCTAssertEqual(paster.pasted, [])
+        XCTAssertEqual(h.cues.value, ["pasted", "hint: Undo sent"])
+    }
+
+    func testCommandsOffMakesThePhraseOrdinaryText() {
+        let presser = FakeKeyPresser()
+        let paster = FakePaster()
+        let h = make(stt: FakeStt(text: "Send it."), paster: paster, keyPresser: presser, voiceCommands: false)
+        dictate(h)
+        XCTAssertEqual(paster.pasted, ["Send it."])
+        XCTAssertEqual(presser.pressed, [])
+    }
+
+    func testTheCommandSwitchAppliesFromTheNextDictation() {
+        let presser = FakeKeyPresser()
+        let paster = FakePaster()
+        let h = make(stt: FakeStt(text: "enter"), paster: paster, keyPresser: presser)
+        h.pipeline.voiceCommandsEnabled = false
+        dictate(h)
+        XCTAssertEqual(paster.pasted, ["enter"])
+        XCTAssertEqual(presser.pressed, [])
+
+        h.pipeline.voiceCommandsEnabled = true
+        dictate(h)
+        XCTAssertEqual(paster.pasted, ["enter"], "the second dictation acted instead of pasting")
+        XCTAssertEqual(presser.pressed, [.returnKey])
+    }
+
+    func testCommandInsideASentenceIsText() {
+        let presser = FakeKeyPresser()
+        let cleaner = FakeCleaner()
+        let h = make(stt: FakeStt(text: "please send it to the team tomorrow"), cleaner: cleaner, keyPresser: presser)
+        dictate(h)
+        XCTAssertEqual(cleaner.calls, 1)
+        XCTAssertEqual(presser.pressed, [])
+    }
+
+    func testCommandGuardFailureBecomesItsNotice() {
+        let presser = FakeKeyPresser(err: PasteGuardError(notice: "Focus changed — Return not sent"))
+        let h = make(stt: FakeStt(text: "enter"), keyPresser: presser)
+        dictate(h)
+        XCTAssertEqual(h.notices.value, ["Focus changed — Return not sent"])
+        XCTAssertEqual(h.cues.value, [])
+        XCTAssertEqual(h.states.value.last, .idle)
+    }
+
+    func testCommandWithoutAPresserFailsLoudly() {
+        let h = make(stt: FakeStt(text: "enter"), keyPresser: nil)
+        dictate(h)
+        XCTAssertEqual(h.notices.value, ["Command failed — see log"])
+        XCTAssertTrue(h.logs.value.contains { $0.hasPrefix("voice command failed (return)") }, "\(h.logs.value)")
+        XCTAssertEqual(h.cues.value, [])
+    }
+
+    func testABreakThePasterRefusesFailsLoudly() {
+        let paster = FakePaster(err: PasteError(message: "secure input"))
+        let h = make(stt: FakeStt(text: "new line"), paster: paster, keyPresser: FakeKeyPresser())
+        dictate(h)
+        XCTAssertEqual(h.notices.value, ["Command failed — see log"])
+        XCTAssertTrue(h.logs.value.contains { $0.hasPrefix("voice command failed (new_line)") }, "\(h.logs.value)")
+        XCTAssertEqual(h.cues.value, [])
     }
 }

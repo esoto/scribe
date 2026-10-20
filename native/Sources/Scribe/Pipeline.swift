@@ -86,10 +86,13 @@ final class DictationPipeline {
     private let onStats: ((DictationStat) -> Void)?
     /// Runs before STT when `enhanceAudioEnabled`; nil leaves the captured audio untouched.
     private let enhancer: AudioEnhancer?
+    /// Presses Return and ⌘Z for voice commands; nil leaves a matched command to fail loudly rather than paste its words.
+    private let keyPresser: KeyPressing?
 
     private(set) var engineName: String
     var cleanupEnabled: Bool
     var enhanceAudioEnabled: Bool
+    var voiceCommandsEnabled: Bool
 
     private var downAt: Double?
     /// Per hold, not per pipeline: queued jobs outlive later key-downs, which would otherwise retarget them.
@@ -119,6 +122,8 @@ final class DictationPipeline {
         cleanupEnabled: Bool = true,
         enhancer: AudioEnhancer? = nil,
         enhanceAudioEnabled: Bool = false,
+        keyPresser: KeyPressing? = nil,
+        voiceCommandsEnabled: Bool = true,
         onLog: ((String) -> Void)? = nil,
         onCleaned: ((String) -> Void)? = nil,
         replacementPairs: @escaping () -> [ReplacementPair] = { [] },
@@ -143,6 +148,8 @@ final class DictationPipeline {
         self.cleanupEnabled = cleanupEnabled
         self.enhancer = enhancer
         self.enhanceAudioEnabled = enhanceAudioEnabled
+        self.keyPresser = keyPresser
+        self.voiceCommandsEnabled = voiceCommandsEnabled
         self.onLog = onLog
         self.onCleaned = onCleaned
         self.replacementPairs = replacementPairs
@@ -311,6 +318,13 @@ final class DictationPipeline {
             return
         }
 
+        if voiceCommandsEnabled, let command = VoiceCommand.match(raw) {
+            // Before replacements and cleanup: a command is not text. Nothing of it is pasted, kept or harvested.
+            onLog?("dictation: engine=\(engineName) stt=\(sttMs)ms command=\(command.logName)")
+            runCommand(command, target: target)
+            return
+        }
+
         // Applied before cleanup (model reads what was said) and after (cleanup may recase it).
         // Unconditional so it also covers too-short, disabled, and gated-out cleanup.
         let pairs = replacementPairs()
@@ -368,6 +382,31 @@ final class DictationPipeline {
             at: Date(),
             durationMs: durationMs
         ))
+    }
+
+    /// Return and ⌘Z go through the key presser; the breaks go through the paster, so the focus guard and the
+    /// clipboard restore apply to them like to any dictation.
+    private func runCommand(_ command: VoiceCommand, target: pid_t?) {
+        do {
+            switch command {
+            case .pressReturn: try press(.returnKey, target: target)
+            case .undo: try press(.commandZ, target: target)
+            case .newLine: try paster.paste("\n", target: target)
+            case .newParagraph: try paster.paste("\n\n", target: target)
+            }
+            onPasted()
+            onHint(command.hint)
+        } catch let guarded as PasteGuardError {
+            onNotice(guarded.notice)
+        } catch {
+            onLog?("voice command failed (\(command.logName)): \(error)")
+            onNotice("Command failed — see log")
+        }
+    }
+
+    private func press(_ key: SyntheticKey, target: pid_t?) throws {
+        guard let keyPresser else { throw PasteError(message: "no key presser configured") }
+        try keyPresser.press(key, target: target)
     }
 
     /// The failure case is any gate/error that means "use raw", with the reason it was hit.
