@@ -20,6 +20,7 @@ final class CleanupModelControllerTests: XCTestCase {
         var factoryCalls: [FactoryCall] = []
         var committed: [(backend: any CleanupModelBackend, name: String)] = []
         var notifications: [String] = []
+        var noticeKinds: [NoticeKind] = []
         var touchIdleCalls = 0
         /// `backends[0].unloadCalls` seen inside each commit callback: the old model must still be loaded then.
         var previousUnloadsAtCommit: [Int] = []
@@ -80,7 +81,10 @@ final class CleanupModelControllerTests: XCTestCase {
                     self.committed.append((backend, name))
                     self.previousUnloadsAtCommit.append(self.backends[0].unloadCalls)
                 },
-                notify: { self.notifications.append($0) },
+                notify: { message, kind in
+                    self.notifications.append(message)
+                    self.noticeKinds.append(kind)
+                },
                 touchIdle: { self.touchIdleCalls += 1 },
                 freeDiskBytes: { self.freeDiskBytes },
                 failureStickySeconds: failureStickySeconds,
@@ -570,6 +574,7 @@ final class CleanupModelControllerTests: XCTestCase {
         await task.value
 
         XCTAssertEqual(h.notifications, ["Gemma 4 E4B is ready."])
+        XCTAssertEqual(h.noticeKinds, [.info])
         XCTAssertNil(c.cleanupModelProgress)
         XCTAssertNil(c.cleanupModelStatus)
     }
@@ -661,6 +666,7 @@ final class CleanupModelControllerTests: XCTestCase {
         XCTAssertFalse(c.appleIntelligenceAvailable)
         XCTAssertEqual(c.appleIntelligenceUnavailableReason, "Apple Intelligence is still downloading")
         XCTAssertEqual(h.notifications, ["Apple Intelligence is unavailable — switching cleanup to Gemma 3 4B…"])
+        XCTAssertEqual(h.noticeKinds, [.problem])
         XCTAssertEqual(h.factoryCalls.count, 2)
         XCTAssertEqual(h.factoryCalls[1].selection, .model(.gemma3))
         XCTAssertEqual(c.pendingCleanupModel, "gemma3")

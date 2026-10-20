@@ -270,6 +270,66 @@ final class DictationCoordinatorTests: XCTestCase {
         XCTAssertEqual(logs.value, ["notification delivery failed: hello (denied)"])
     }
 
+    func testLastNoticeIsNilAtStart() {
+        XCTAssertNil(make().lastNotice)
+    }
+
+    func testNotifyRecordsTheTextAndWhenItWasRaised() throws {
+        let c = make()
+        let before = Date()
+
+        c.notify("Failed to start recording: no mic")
+
+        let notice = try XCTUnwrap(c.lastNotice)
+        XCTAssertEqual(notice.text, "Failed to start recording: no mic")
+        XCTAssertTrue(notice.at >= before && notice.at <= Date())
+    }
+
+    func testASecondNoticeReplacesTheFirst() {
+        let c = make()
+
+        c.notify("first")
+        c.notify("second")
+
+        XCTAssertEqual(c.lastNotice?.text, "second")
+    }
+
+    func testNoticeFromThePipelineIsRecorded() async {
+        let c = make()
+
+        sinks.onNotice("Transcription failed")
+
+        let recorded = await eventually { c.lastNotice?.text == "Transcription failed" }
+        XCTAssertTrue(recorded)
+    }
+
+    func testLastNoticeIsRecordedEvenWhenDeliveryFails() {
+        notifier.deliveryError = TestError(message: "denied")
+        let c = make()
+
+        c.notify("hello")
+
+        XCTAssertEqual(c.lastNotice?.text, "hello")
+    }
+
+    func testGoodNewsIsDeliveredButDoesNotReplaceTheLastProblem() {
+        let c = make()
+
+        c.notify("Transcription failed")
+        c.notify("Gemma 4 E4B is ready.", kind: .info)
+
+        XCTAssertEqual(c.lastNotice?.text, "Transcription failed")
+        XCTAssertEqual(notifier.delivered.map { $0.body }, ["Transcription failed", "Gemma 4 E4B is ready."])
+    }
+
+    func testGoodNewsAloneLeavesTheSessionQuiet() {
+        let c = make()
+
+        c.notify("Gemma 4 E4B is ready.", kind: .info)
+
+        XCTAssertNil(c.lastNotice)
+    }
+
     func testRecordingFailureSurfacesAsANotification() async {
         recorder = FakeRecorder(armError: TestError(message: "no mic"))
         let c = make()

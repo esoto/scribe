@@ -8,6 +8,7 @@ protocol TCCProbing {
     func microphoneStatus() -> TCCStatus
     func accessibilityGranted() -> Bool
     func inputMonitoringGranted() -> Bool
+    func inputMonitoringStatus() -> TCCStatus
     func requestMicrophone() async -> Bool
     func requestAccessibility()
     func requestInputMonitoring()
@@ -19,6 +20,7 @@ struct LiveTCCProbe: TCCProbing {
     func microphoneStatus() -> TCCStatus { TCC.microphoneStatus() }
     func accessibilityGranted() -> Bool { TCC.accessibilityGranted() }
     func inputMonitoringGranted() -> Bool { TCC.inputMonitoringGranted() }
+    func inputMonitoringStatus() -> TCCStatus { TCC.inputMonitoringStatus() }
     func requestMicrophone() async -> Bool { await TCC.requestMicrophone() }
     func requestAccessibility() { TCC.requestAccessibility() }
     func requestInputMonitoring() { TCC.requestInputMonitoring() }
@@ -64,9 +66,20 @@ final class PermissionsModel: ObservableObject {
     @Published private(set) var grants: GrantStatus
     /// Microphone alone distinguishes "never asked" from "refused"; only the first can still show a prompt.
     @Published private(set) var microphoneStatus: TCCStatus
+    /// Drives the Input Monitoring row's buttons only; the grant itself is the hotkey tap's install result.
+    @Published private(set) var inputMonitoringStatus: TCCStatus
     @Published private(set) var notifications: NotificationAuthorization = .notDetermined
 
     var grantsOk: Bool { grants.microphone && grants.accessibility && grants.inputMonitoring }
+
+    /// The tri-state that picks a Setup row's buttons; Accessibility only answers yes or no.
+    func status(for grant: Grant) -> TCCStatus? {
+        switch grant {
+        case .microphone: return microphoneStatus
+        case .inputMonitoring: return inputMonitoringStatus
+        case .accessibility: return nil
+        }
+    }
 
     private let probe: TCCProbing
     private let notificationAuthorizer: NotificationAuthorizing
@@ -89,6 +102,7 @@ final class PermissionsModel: ObservableObject {
             microphone: probe.microphoneGranted(), accessibility: probe.accessibilityGranted(),
             inputMonitoring: false)
         microphoneStatus = probe.microphoneStatus()
+        inputMonitoringStatus = probe.inputMonitoringStatus()
     }
 
     /// Re-reads all probes. A false→true flip on mic or Input Monitoring reacts without a restart.
@@ -99,6 +113,7 @@ final class PermissionsModel: ObservableObject {
             inputMonitoring: probe.inputMonitoringGranted())
         let change = GrantChange(from: grants, to: fresh)
         let freshMicrophoneStatus = probe.microphoneStatus()
+        let freshInputMonitoringStatus = probe.inputMonitoringStatus()
 
         // Publish only on change: each write rebuilds the menu bar and closes any open submenu.
         if change.publish {
@@ -106,6 +121,9 @@ final class PermissionsModel: ObservableObject {
         }
         if freshMicrophoneStatus != microphoneStatus {
             microphoneStatus = freshMicrophoneStatus
+        }
+        if freshInputMonitoringStatus != inputMonitoringStatus {
+            inputMonitoringStatus = freshInputMonitoringStatus
         }
         if change.microphoneNewlyGranted {
             onMicrophoneGranted()

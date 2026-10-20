@@ -46,10 +46,12 @@ final class PermissionsModelTests: XCTestCase {
             model.grants, GrantStatus(microphone: true, accessibility: true, inputMonitoring: false))
     }
 
-    func testInitDoesNotProbeInputMonitoring() {
-        // The hotkey install result decides it at launch; a preflight read would disagree with the real tap.
+    func testInitDoesNotProbeTheInputMonitoringGrantButReadsItsStatus() {
+        // The hotkey install result decides the grant at launch; a preflight read would disagree with the real tap.
+        // The tri-state only picks the row's buttons, so it is read straight away.
         _ = makeModel()
         XCTAssertFalse(probe.events.contains("probe-inputMonitoring"))
+        XCTAssertTrue(probe.events.contains("probe-inputMonitoringStatus"))
     }
 
     func testInitDoesNotFireReactions() {
@@ -268,6 +270,44 @@ final class PermissionsModelTests: XCTestCase {
         await model.request(.microphone)
 
         XCTAssertEqual(model.microphoneStatus, .denied)
+    }
+
+    // MARK: - Input Monitoring tri-state
+
+    func testInputMonitoringStatusSeedsFromTheProbe() {
+        probe.inputMonitoringAnswer = .denied
+
+        XCTAssertEqual(makeModel().inputMonitoringStatus, .denied)
+    }
+
+    func testInputMonitoringStatusPublishesOnlyOnChange() {
+        let model = makeModel()
+        let publishes = countPublishes(model)
+
+        model.refreshGrants()
+        model.refreshGrants()
+        XCTAssertEqual(publishes(), 0)
+        XCTAssertEqual(model.inputMonitoringStatus, .notDetermined)
+
+        // Only the tri-state changes here; the boolean grant stays false, so this is the one publish.
+        probe.inputMonitoringAnswer = .authorized
+        model.refreshGrants()
+        XCTAssertEqual(publishes(), 1)
+        XCTAssertEqual(model.inputMonitoringStatus, .authorized)
+        XCTAssertFalse(model.grants.inputMonitoring)
+
+        model.refreshGrants()
+        XCTAssertEqual(publishes(), 1)
+    }
+
+    func testStatusForEachGrantPicksItsTriState() {
+        probe.microphoneDenied = true
+        probe.inputMonitoringAnswer = .authorized
+        let model = makeModel()
+
+        XCTAssertEqual(model.status(for: .microphone), .denied)
+        XCTAssertEqual(model.status(for: .inputMonitoring), .authorized)
+        XCTAssertNil(model.status(for: .accessibility))
     }
 
     // MARK: - Notifications

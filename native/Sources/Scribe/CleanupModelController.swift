@@ -40,7 +40,7 @@ final class CleanupModelController: ObservableObject {
     private let readAppleIntelligenceUnavailableReason: () -> String?
     private let dictionarySnapshot: () -> DictionarySnapshot
     private let onCleanerCommitted: (any CleanupModelBackend, String) -> Void
-    private let notify: (String) -> Void
+    private let notify: (String, NoticeKind) -> Void
     private let touchIdle: () -> Void
     private let freeDiskBytes: () -> Int64?
     private let failureStickySeconds: Double
@@ -73,7 +73,7 @@ final class CleanupModelController: ObservableObject {
         appleIntelligenceUnavailableReason: @escaping () -> String?,
         dictionarySnapshot: @escaping () -> DictionarySnapshot,
         onCleanerCommitted: @escaping (any CleanupModelBackend, String) -> Void,
-        notify: @escaping (String) -> Void,
+        notify: @escaping (String, NoticeKind) -> Void,
         touchIdle: @escaping () -> Void,
         freeDiskBytes: @escaping () -> Int64?,
         failureStickySeconds: Double = 10,
@@ -219,7 +219,7 @@ final class CleanupModelController: ObservableObject {
                 log("switched cleanup model to \(name)")
                 if self.cleanupModelDidDownload {
                     self.cleanupModelDidDownload = false
-                    self.notify("\(spec.label) is ready.")
+                    self.notify("\(spec.label) is ready.", .info)
                 }
                 // The switch counts as activity: without this a model that
                 // just finished loading can be idle-unloaded within 60 s.
@@ -261,7 +261,9 @@ final class CleanupModelController: ObservableObject {
         didFallbackFromAppleIntelligence = true
         let target = CleanupModelCatalog.fallbackID(isDownloaded: { self.modelStatuses[$0]?.isDownloaded ?? false })
         log("apple intelligence unavailable — switching cleanup to \(target.rawValue)")
-        notify("Apple Intelligence is unavailable — switching cleanup to \(CleanupModelCatalog.spec(target).label)…")
+        notify(
+            "Apple Intelligence is unavailable — switching cleanup to \(CleanupModelCatalog.spec(target).label)…",
+            .problem)
         switchCleanupModel(to: target)
     }
 

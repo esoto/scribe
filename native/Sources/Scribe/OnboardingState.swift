@@ -88,15 +88,17 @@ enum PermissionAction: Equatable {
 }
 
 extension OnboardingState {
-    /// Which buttons a Setup row offers. "Request" is dead once the system has an answer, so a denied microphone
-    /// gets only the System Settings route; the two boolean probes keep both until granted.
-    static func actions(for grant: Grant, granted: Bool, microphoneStatus: TCCStatus?) -> [PermissionAction] {
+    /// Which buttons a Setup row offers. "Request" is dead once the system has an answer, so a denied grant gets
+    /// only the System Settings route. `status` is the tri-state probe where one exists (microphone, Input
+    /// Monitoring); Accessibility only answers yes or no and keeps both buttons until granted. A status of
+    /// `.authorized` with `granted == false` means the system says yes but the live check (the hotkey tap) says
+    /// no — re-toggling in System Settings is the known fix, so that is the one button offered.
+    static func actions(for grant: Grant, granted: Bool, status: TCCStatus?) -> [PermissionAction] {
         guard !granted else { return [] }
-        if grant == .microphone, let microphoneStatus {
-            switch microphoneStatus {
+        if let status {
+            switch status {
             case .notDetermined: return [.request]
-            case .denied: return [.openSystemSettings]
-            case .authorized: return []
+            case .denied, .authorized: return [.openSystemSettings]
             }
         }
         return [.request, .openSystemSettings]
@@ -153,6 +155,44 @@ extension OnboardingState {
     }
 
     static let notificationsSettingsUrl = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension")!
+
+    /// Doctor: the hotkey row shows the tap is alive while the key is physically held.
+    static func hotkeyRowDetail(holding: Bool, key: String) -> String {
+        holding ? "Held — scribe sees \(key)." : "Hold \(key) to test it."
+    }
+
+    /// Doctor: the microphone row names the selected device; a stale selection says so.
+    static func microphoneRowDetail(selectedName: String?, disconnected: Bool) -> String {
+        guard let selectedName else { return "System default input." }
+        return disconnected ? "\(selectedName) — disconnected." : selectedName
+    }
+
+    /// Doctor: the Microphone row from the saved UID and the live device list. A saved UID that is no longer
+    /// listed has no name left to show, so the row names it by role.
+    static func microphoneRow(selectedUID: String?, devices: [AudioInputDevice]) -> (detail: String, disconnected: Bool) {
+        guard let selectedUID else {
+            // A Mac mini or Studio has no built-in mic: with nothing plugged in there is no default input either.
+            if devices.isEmpty { return ("No input device connected.", true) }
+            return (microphoneRowDetail(selectedName: nil, disconnected: false), false)
+        }
+        guard let device = devices.first(where: { $0.id == selectedUID }) else {
+            return (microphoneRowDetail(selectedName: "Selected microphone", disconnected: true), true)
+        }
+        return (microphoneRowDetail(selectedName: device.name, disconnected: false), false)
+    }
+
+    /// Doctor: the last problem scribe reported, with how long ago; nil means a quiet session.
+    static func lastProblemDetail(_ notice: String?, at: Date?, now: Date) -> String {
+        guard let notice, let at else { return "No problems this session." }
+        let seconds = Int(now.timeIntervalSince(at))
+        let when = seconds < 60 ? "just now" : seconds < 3600 ? "\(seconds / 60) min ago" : "\(seconds / 3600) h ago"
+        return "\(notice) — \(when)"
+    }
+}
+
+extension OnboardingState {
+    /// A reopen with a window already on screen has nothing to add; with none, Setup is the way back in.
+    static func shouldOpenSetupOnReopen(hasVisibleWindows: Bool) -> Bool { !hasVisibleWindows }
 }
 
 /// VoiceOver value for the menu bar glyph, which otherwise reads as "white bullet" or "warning sign".

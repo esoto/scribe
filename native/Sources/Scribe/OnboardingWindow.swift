@@ -2,6 +2,7 @@ import ApplicationServices
 import AVFoundation
 import AppKit
 import CoreGraphics
+import IOKit.hid
 import SwiftUI
 
 /// Thin TCC wrappers; excluded from unit tests. Verify manually. The logic consuming them is in `OnboardingState` and `PermissionsModel`.
@@ -38,19 +39,30 @@ enum TCC {
         CGPreflightListenEventAccess()
     }
 
+    /// IOHID answers "never asked" separately from "refused", which `CGPreflightListenEventAccess` cannot.
+    static func inputMonitoringStatus() -> TCCStatus {
+        switch IOHIDCheckAccess(kIOHIDRequestTypeListenEvent) {
+        case kIOHIDAccessTypeGranted: return .authorized
+        case kIOHIDAccessTypeDenied: return .denied
+        default: return .notDetermined
+        }
+    }
+
     /// Adds scribe to the Input Monitoring list, unchecked.
     static func requestInputMonitoring() {
         CGRequestListenEventAccess()
     }
 }
 
-/// First-run and Doctor window: the three TCC grants, the models, and the optional notifications row.
-/// Polls the probes every 2 s while open.
+/// First-run and Doctor window: the three TCC grants, the models, the optional notifications row, and the
+/// Doctor rows (hotkey, microphone, last problem). Polls the probes every 2 s while open.
 struct OnboardingWindow: View {
     @ObservedObject var permissions: PermissionsModel
     /// Read for `sttDownloadStatus` and `startupPreloadInFlight`.
     @ObservedObject var model: AppModel
     @ObservedObject var cleanupModels: CleanupModelController
+    /// Read for the held-key state and the last notice.
+    @ObservedObject var dictation: DictationCoordinator
     @ObservedObject var settingsModel: SettingsModel
     @State private var testText: String = ""
     @FocusState private var testFieldFocused: Bool
@@ -95,6 +107,17 @@ struct OnboardingWindow: View {
                 )
                 modelsRow
                 notificationsRow
+            }
+
+            GroupBox("Doctor") {
+                VStack(spacing: 8) {
+                    hotkeyRow
+                    microphoneDoctorRow
+                    // The age in the row text only moves when the view rebuilds, and nothing else is publishing.
+                    TimelineView(.periodic(from: .now, by: 30)) { context in
+                        lastProblemRow(now: context.date)
+                    }
+                }
             }
 
             if testFieldVisible {
@@ -146,6 +169,10 @@ struct OnboardingWindow: View {
 
     private enum RowIndicator {
         case granted, missing, working
+        /// Informational, never an error: an optional feature that is off, or a past problem.
+        case neutral(symbol: String)
+        /// ● while the dictation key is held, ◦ otherwise.
+        case holding(Bool)
     }
 
     private func permissionRow(_ grant: Grant, detail: String, systemImage: String) -> some View {
@@ -157,9 +184,7 @@ struct OnboardingWindow: View {
             indicator: granted ? .granted : .missing,
             value: granted ? "granted" : "not granted",
             isNextStep: highlighted == grant,
-            actions: OnboardingState.actions(
-                for: grant, granted: granted,
-                microphoneStatus: grant == .microphone ? permissions.microphoneStatus : nil),
+            actions: OnboardingState.actions(for: grant, granted: granted, status: permissions.status(for: grant)),
             voiceOverLabel: { OnboardingState.accessibilityLabel($0, for: grant) },
             perform: { action in
                 switch action {
@@ -185,8 +210,8 @@ struct OnboardingWindow: View {
             title: "Notifications",
             detail: OnboardingState.notificationsDetail(permissions.notifications),
             systemImage: "bell",
-            indicator: authorized ? .granted : .missing,
-            value: authorized ? "granted" : "not granted",
+            indicator: authorized ? .granted : .neutral(symbol: "bell.slash"),
+            value: authorized ? "on" : "off",
             isNextStep: false,
             actions: OnboardingState.notificationsActions(permissions.notifications),
             voiceOverLabel: OnboardingState.notificationsAccessibilityLabel,
@@ -196,6 +221,39 @@ struct OnboardingWindow: View {
                 case .openSystemSettings: NSWorkspace.shared.open(OnboardingState.notificationsSettingsUrl)
                 }
             })
+    }
+
+    private var hotkeyRow: some View {
+        let holding = dictation.state == .recording
+        return row(
+            title: "Hotkey",
+            detail: OnboardingState.hotkeyRowDetail(holding: holding, key: settingsModel.hotkey.displayName),
+            systemImage: "keyboard",
+            indicator: .holding(holding),
+            value: holding ? "held" : "released",
+            isNextStep: false)
+    }
+
+    private var microphoneDoctorRow: some View {
+        let mic = OnboardingState.microphoneRow(selectedUID: model.microphoneUID, devices: model.microphones)
+        return row(
+            title: "Input device",
+            detail: mic.detail,
+            systemImage: "mic",
+            indicator: mic.disconnected ? .missing : .granted,
+            value: mic.disconnected ? "disconnected" : "connected",
+            isNextStep: false)
+    }
+
+    private func lastProblemRow(now: Date) -> some View {
+        let notice = dictation.lastNotice
+        return row(
+            title: "Last problem",
+            detail: OnboardingState.lastProblemDetail(notice?.text, at: notice?.at, now: now),
+            systemImage: "exclamationmark.bubble",
+            indicator: notice == nil ? .granted : .neutral(symbol: "exclamationmark.triangle"),
+            value: notice == nil ? "none" : "reported",
+            isNextStep: false)
     }
 
     @ViewBuilder
@@ -263,6 +321,10 @@ struct OnboardingWindow: View {
             Image(systemName: "xmark.circle").foregroundStyle(.red).imageScale(.large)
         case .working:
             ProgressView().controlSize(.small)
+        case .neutral(let symbol):
+            Image(systemName: symbol).foregroundStyle(.secondary).imageScale(.large)
+        case .holding(let down):
+            Text(down ? "●" : "◦").font(.title3).foregroundStyle(.secondary)
         }
     }
 

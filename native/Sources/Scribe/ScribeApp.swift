@@ -104,7 +104,7 @@ final class AppModel: ObservableObject {
             appleIntelligenceUnavailableReason: { AppleIntelligence.unavailableReason },
             dictionarySnapshot: { dictionary.snapshot },
             onCleanerCommitted: { lateDictation.pipeline.setCleaner($0, name: $1) },
-            notify: { lateDictation.notify($0) },
+            notify: { lateDictation.notify($0, kind: $1) },
             touchIdle: { idleTracker.touch(now: ProcessInfo.processInfo.systemUptime) },
             freeDiskBytes: { DiskSpace.available(at: ModelStore.baseDirectory) },
             log: log)
@@ -386,6 +386,7 @@ let onboardingWindowID = "onboarding"
 
 @main
 struct ScribeApp: App {
+    @NSApplicationDelegateAdaptor(ScribeAppDelegate.self) private var appDelegate
     @StateObject private var model = AppModel()
 
     var body: some Scene {
@@ -400,7 +401,7 @@ struct ScribeApp: App {
         Window("scribe setup", id: onboardingWindowID) {
             OnboardingWindow(
                 permissions: model.permissions, model: model, cleanupModels: model.cleanupModels,
-                settingsModel: model.settingsModel)
+                dictation: model.dictation, settingsModel: model.settingsModel)
         }
 
         Window("scribe dictionary", id: dictionaryWindowID) {
@@ -464,6 +465,24 @@ private struct MenuBarLabel: View {
             guard !OnboardingState.missing(permissions.grants).isEmpty else { return }
             openOnboarding(openWindow)
         }
+        .onReceive(NotificationCenter.default.publisher(for: .scribeReopen)) { _ in
+            openOnboarding(openWindow)
+        }
+    }
+}
+
+extension Notification.Name {
+    static let scribeReopen = Notification.Name("dev.esoto.scribe.reopen")
+}
+
+/// With the menu bar item hidden behind the notch, launching scribe again from Spotlight or Finder did nothing.
+/// Only a view can reach `openWindow`, so this posts and `MenuBarLabel` opens Setup.
+final class ScribeAppDelegate: NSObject, NSApplicationDelegate {
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
+        if OnboardingState.shouldOpenSetupOnReopen(hasVisibleWindows: hasVisibleWindows) {
+            NotificationCenter.default.post(name: .scribeReopen, object: nil)
+        }
+        return false
     }
 }
 

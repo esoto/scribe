@@ -438,6 +438,8 @@ final class FakeTCCProbe: TCCProbing {
     var microphone = false
     var accessibility = false
     var inputMonitoring = false
+    /// What the Input Monitoring tri-state reads. Separate from the boolean `inputMonitoring` grant, as on the system.
+    var inputMonitoringAnswer: TCCStatus = .notDetermined
     /// What the mic prompt does to the mic grant when it resolves.
     var microphoneGrantedByRequest = false
     /// The user has already answered "Don't Allow": the tri-state reads denied rather than notDetermined.
@@ -465,6 +467,11 @@ final class FakeTCCProbe: TCCProbing {
     func inputMonitoringGranted() -> Bool {
         events.append("probe-inputMonitoring")
         return inputMonitoring
+    }
+
+    func inputMonitoringStatus() -> TCCStatus {
+        events.append("probe-inputMonitoringStatus")
+        return inputMonitoringAnswer
     }
 
     func requestMicrophone() async -> Bool {
