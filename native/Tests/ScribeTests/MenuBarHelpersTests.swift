@@ -167,4 +167,15 @@ final class MenuBarHelpersTests: XCTestCase {
         XCTAssertEqual(menuBarGlyph(.error, progress: nil, sttProgress: 0.42, needsAttention: false), glyphFor(.error))
         XCTAssertEqual(menuBarGlyph(.idle, progress: nil, sttProgress: 0.42, needsAttention: true), "\u{26A0}")
     }
+
+    func testHistoryRawRowLabelNamesTheActionAndShowsTheRawText() {
+        let record = DictationRecord(
+            raw: "so um hello there world", final: "Hello there world.", engine: "parakeet", cleaned: true,
+            at: Date(), durationMs: 10)
+        XCTAssertEqual(historyRawRowLabel(record), "Copy raw · so um hello there world")
+        let long = DictationRecord(
+            raw: String(repeating: "x", count: 50), final: "f", engine: "parakeet", cleaned: false, at: Date(),
+            durationMs: 10)
+        XCTAssertEqual(historyRawRowLabel(long), "Copy raw · " + String(repeating: "x", count: 29) + "\u{2026}")
+    }
 }

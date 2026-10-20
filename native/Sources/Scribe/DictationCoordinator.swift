@@ -89,6 +89,10 @@ final class DictationCoordinator: ObservableObject {
     private let hintSeconds: Double
     private let failedAudioURL: URL
     private let log: @Sendable (String) -> Void
+    /// The guarded paste with no key-down app: only Accessibility is checked.
+    private let repaste: (String) throws -> Void
+    /// The menu is still closing when its action fires; ⌘V waits this long so it lands in the user's app.
+    private let repasteDelay: Double
 
     init(
         recorder: RecorderPreparing,
@@ -105,6 +109,8 @@ final class DictationCoordinator: ObservableObject {
         errorStickySeconds: Double = 5,
         hintSeconds: Double = 4,
         failedAudioURL: URL = FileLogger.logsDirectory.appendingPathComponent("last_failed.wav"),
+        repaste: @escaping (String) throws -> Void = { _ in },
+        repasteDelay: Double = 0.2,
         log: @escaping @Sendable (String) -> Void
     ) {
         self.recorder = recorder
@@ -119,6 +125,8 @@ final class DictationCoordinator: ObservableObject {
         self.errorStickySeconds = errorStickySeconds
         self.hintSeconds = hintSeconds
         self.failedAudioURL = failedAudioURL
+        self.repaste = repaste
+        self.repasteDelay = repasteDelay
         self.log = log
 
         // The pipeline calls these from its own threads; each hops to the main actor.
@@ -298,6 +306,24 @@ final class DictationCoordinator: ObservableObject {
 
     func playPasteCue() {
         if soundsEnabled() { playSound("Tink") }
+    }
+
+    /// History → Paste Again, and `scribe://paste-last`. Guard failures read like a dictation's.
+    func pasteAgain(_ text: String) {
+        let delay = repasteDelay
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1e9))
+            guard let self else { return }
+            do {
+                try self.repaste(text)
+                self.playPasteCue()
+            } catch let guarded as PasteGuardError {
+                self.notify(guarded.notice)
+            } catch {
+                self.log("paste again failed: \(error)")
+                self.notify("Paste failed — press ⌘V to paste manually")
+            }
+        }
     }
 
     func saveFailedAudio(_ pcm: [Float]) {

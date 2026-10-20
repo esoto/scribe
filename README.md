@@ -71,7 +71,12 @@ Upgrading from a v3 install downloads Ultra on first launch (progress shows in t
 - **Cleanup (remove fillers)** toggle: off = verbatim transcription pasted raw.
 - **History**: the last 10 dictations by default (Settings › General), in
   memory only, never persisted; "· raw" marks one pasted without cleanup.
-  Click one to copy it back to the clipboard.
+  Click one to copy it back to the clipboard; Option-click copies what the
+  engine heard before cleanup. **Paste Again** re-pastes the last dictation
+  into the app that has focus.
+- **Automation**: with **Allow scribe:// URLs** on (Settings › General, off
+  by default), `open scribe://paste-last` pastes the last dictation. No
+  parameters are accepted, so a URL can never carry text into scribe.
 - **Dictionary**: your vocabulary and corrections, fed to the cleanup pass
   so names and jargon come out spelled right — see below.
 - If cleanup ever misbehaves (timeout, length/language sanity gates), the
@@ -202,6 +207,7 @@ Most of these have a control in **Settings…** (⌘,), the menu, or the Diction
 | `cleanupModelPath` | _(unset)_ | local MLX model folder to use for cleanup instead of stock Gemma; when set, overrides `cleanupModel` and disables switching in **Settings › Models** |
 | `vocabularyBiasingEnabled` | false | acoustic vocabulary biasing for Parakeet (experimental) (Dictionary window) |
 | `enhanceAudioEnabled` | false | LocalVQE noise suppression before transcription — experimental (Settings › Audio) |
+| `urlSchemeEnabled` | false | allow `scribe://` URLs from other apps (Settings) |
 | `microphoneUID` | _(unset)_ | input device UID; unset follows the system default input (Settings) |
 
 **Custom cleanup model:** point `cleanupModelPath` at any local MLX model

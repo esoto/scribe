@@ -40,6 +40,8 @@ final class DictationCoordinatorTests: XCTestCase {
         soundsEnabled = true
         microphoneGranted = true
         pipelineClock = FakeClock()
+        repasted = []
+        repasteError = nil
         directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     }
 
@@ -47,6 +49,9 @@ final class DictationCoordinatorTests: XCTestCase {
         try? FileManager.default.removeItem(at: directory)
         super.tearDown()
     }
+
+    private var repasted: [String] = []
+    private var repasteError: Error?
 
     private func make(
         config: PipelineConfig = PipelineConfig(),
@@ -94,7 +99,43 @@ final class DictationCoordinatorTests: XCTestCase {
             errorStickySeconds: errorStickySeconds,
             hintSeconds: hintSeconds,
             failedAudioURL: failedAudioURL ?? directory.appendingPathComponent("last_failed.wav"),
+            repaste: { [unowned self] text in
+                if let repasteError { throw repasteError }
+                repasted.append(text)
+            },
+            repasteDelay: 0,
             log: { [logs] in logs!.append($0) })
+    }
+
+    // MARK: - Paste Again
+
+    func testPasteAgainGoesThroughTheGuardedPasteAndPlaysTheCue() async {
+        let c = make()
+        c.pasteAgain("hello again")
+        let done = await eventually { [unowned self] in repasted == ["hello again"] }
+        XCTAssertTrue(done)
+        XCTAssertEqual(sounds.value, ["Tink"])
+        XCTAssertEqual(notifier.delivered.count, 0)
+    }
+
+    func testPasteAgainGuardFailureBecomesItsNotice() async {
+        repasteError = PasteGuardError(notice: "Accessibility is off — text copied, press ⌘V")
+        let c = make()
+        c.pasteAgain("hello again")
+        let notified = await eventually { [unowned self] in notifier.delivered.count == 1 }
+        XCTAssertTrue(notified)
+        XCTAssertEqual(notifier.delivered.first?.body, "Accessibility is off — text copied, press ⌘V")
+        XCTAssertEqual(sounds.value, [])
+    }
+
+    func testPasteAgainOtherFailureIsLoggedAndAsksForManualPaste() async {
+        repasteError = TestError(message: "no event")
+        let c = make()
+        c.pasteAgain("hello again")
+        let notified = await eventually { [unowned self] in notifier.delivered.count == 1 }
+        XCTAssertTrue(notified)
+        XCTAssertEqual(notifier.delivered.first?.body, "Paste failed — press ⌘V to paste manually")
+        XCTAssertTrue(logs.value.contains { $0.hasPrefix("paste again failed:") })
     }
 
     // MARK: - State, error stickiness and sounds

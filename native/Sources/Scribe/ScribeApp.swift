@@ -371,6 +371,15 @@ final class AppModel: ObservableObject {
     func copyToClipboard(_ text: String) {
         pasteboard.set(text)
     }
+
+    /// History → Paste Again and `scribe://paste-last`: the last dictation, through the same guard as a dictation.
+    func pasteLastDictation() {
+        guard let last = history.items().first else {
+            dictation.notify("Nothing to paste — no dictation yet")
+            return
+        }
+        dictation.pasteAgain(last.final)
+    }
 }
 
 /// Same phase-1-init workaround as ProgressRelay, for the AFM-lost signal.
