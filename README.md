@@ -126,16 +126,16 @@ out *differently each time* ("Hetzner" produced Headstar, Hatsner, Heftner
 and Headsnar in one sitting), so add a pair for whichever spelling you see
 most; add a second if another variant keeps showing up.
 
-**Fix a Word…** (History submenu) skips the guessing: pick the dictation,
-click the word scribe misheard — several in a row for a phrase — type
-what you said, and the pair is added for you. Only the pair is stored.
-
 Replacements are applied directly to the transcript, not by the cleanup
 model, so they hold **on every dictation** — including ones too short to be
 cleaned (under `minWords`), with cleanup switched off, and when cleanup
 times out or trips its gates. Matching is whole-word and case-insensitive,
 punctuation is preserved, and the replacement is pasted verbatim, so
 `camel` fixes "Camel," but leaves `camelCase` alone.
+
+**Fix a Word…** (History submenu) skips the guessing: pick the dictation,
+click the word scribe misheard — several in a row for a phrase — type
+what you said, and the pair is added for you. Only the pair is stored.
 
 **Heard but not matched.** Matching is exact, so one pair catches one
 spelling — and a mangled name comes back differently every time. The editor

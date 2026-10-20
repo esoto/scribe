@@ -30,7 +30,7 @@ struct FixWordWindow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("scribe fix a word").font(.title2.bold())
-            Text("Click the word scribe misheard — several in a row for a phrase — and type what you said. From now on every dictation gets the fix.")
+            Text("Click the word scribe misheard — several in a row for a phrase — and type what you said. From now on, scribe fixes that spelling in every dictation.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
             if records.isEmpty {
@@ -44,10 +44,13 @@ struct FixWordWindow: View {
                         Text(truncateLabel(r.raw, n: 48)).tag(Optional(r.id))
                     }
                 }
-                WordChips(words: words, selected: selectedWords) { index in
-                    selectedWords = FixFromHistory.toggling(index, in: selectedWords)
-                    confirmation = nil
+                ScrollView {
+                    WordChips(words: words, selected: selectedWords) { index in
+                        selectedWords = FixFromHistory.toggling(index, in: selectedWords)
+                        confirmation = nil
+                    }
                 }
+                .frame(maxHeight: 220)
                 HStack {
                     Text(heard.map { "\u{201C}\($0)\u{201D} →" } ?? "Pick a word")
                         .foregroundStyle(heard == nil ? Color.secondary : Color.primary)
@@ -56,13 +59,14 @@ struct FixWordWindow: View {
                     Button("Add Fix", action: fix)
                         .keyboardShortcut(.defaultAction)
                         .disabled(!canFix)
+                        .accessibilityHint(heard.map { "Adds a replacement for \u{201C}\($0)\u{201D}" } ?? "Pick a word first")
                 }
                 if let confirmation {
                     Text(confirmation).font(.caption).foregroundStyle(.secondary)
                 }
                 Text(atPairCap(dictionary.replacementPairs.count)
-                    ? "The dictionary is full — remove a replacement to add another."
-                    : "Stored in the Dictionary as words, never the dictation.")
+                    ? "The Dictionary is full — remove a replacement to add another."
+                    : "Only the words you pick and your fix are stored.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -70,23 +74,37 @@ struct FixWordWindow: View {
         .padding(24)
         .frame(width: 480)
         .onAppear {
-            records = history.items()
+            reload()
             WindowActivation.shared.windowAppeared()
         }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in reload() }
         .onDisappear { WindowActivation.shared.windowDisappeared() }
+    }
+
+    /// History is not observable, so re-read it whenever a window comes forward. Word indices belong to the record
+    /// they were picked in, so a change of shown record (newest moved, or the pick aged out) drops them.
+    private func reload() {
+        let shown = record?.id
+        records = history.items()
+        if record?.id != shown {
+            selectedRecord = nil
+            selectedWords = []
+            confirmation = nil
+        }
     }
 
     private func fix() {
         guard let heard, canFix else { return }
         let fixed = replacement.trimmingCharacters(in: .whitespacesAndNewlines)
         dictionary.addReplacementPair(original: heard, replacement: fixed)
-        confirmation = "Added: \(pairRowLabel(heard, fixed))"
+        let message = "Added: \(pairRowLabel(heard, fixed))"
+        confirmation = message
+        AccessibilityNotification.Announcement(message).post()
         selectedWords = []
         replacement = ""
     }
 }
 
-/// The words as toggle chips, wrapping onto as many lines as they need.
 private struct WordChips: View {
     let words: [String]
     let selected: Set<Int>
@@ -98,7 +116,7 @@ private struct WordChips: View {
                 Button {
                     toggle(index)
                 } label: {
-                    Text(word)
+                    Text(FixFromHistory.chipLabel(word))
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)
                         .background(
@@ -110,6 +128,8 @@ private struct WordChips: View {
                 .accessibilityAddTraits(selected.contains(index) ? .isSelected : [])
             }
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Words scribe heard")
     }
 }
 
@@ -123,7 +143,7 @@ private struct FlowLayout: Layout {
         var y: CGFloat = 0
         var rowHeight: CGFloat = 0
         for view in subviews {
-            let size = view.sizeThatFits(.unspecified)
+            let size = view.sizeThatFits(ProposedViewSize(width: width, height: nil))
             if x > 0, x + size.width > width {
                 x = 0
                 y += rowHeight + spacing
@@ -136,17 +156,18 @@ private struct FlowLayout: Layout {
     }
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let fit = ProposedViewSize(width: bounds.width, height: nil)
         var x = bounds.minX
         var y = bounds.minY
         var rowHeight: CGFloat = 0
         for view in subviews {
-            let size = view.sizeThatFits(.unspecified)
+            let size = view.sizeThatFits(fit)
             if x > bounds.minX, x + size.width > bounds.maxX {
                 x = bounds.minX
                 y += rowHeight + spacing
                 rowHeight = 0
             }
-            view.place(at: CGPoint(x: x, y: y), proposal: .unspecified)
+            view.place(at: CGPoint(x: x, y: y), proposal: fit)
             x += size.width + spacing
             rowHeight = max(rowHeight, size.height)
         }

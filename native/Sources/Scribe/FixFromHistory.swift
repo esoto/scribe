@@ -3,12 +3,15 @@ import Foundation
 /// Pure helpers for Fix a Word: a dictation's raw transcript as clickable words, and the "heard as" phrase a
 /// contiguous selection of them makes.
 enum FixFromHistory {
-    /// Whitespace-split tokens with edge punctuation removed — what the matcher compares. Punctuation-only tokens drop.
+    /// Split exactly as `TermReplacer.apply` splits (raw is already whitespace-normalised), so chip i is matcher token i.
     static func words(in raw: String) -> [String] {
-        raw.split(whereSeparator: { $0.isWhitespace }).compactMap { token in
-            let core = token.trimmingCharacters(in: .punctuationCharacters)
-            return core.isEmpty ? nil : core
-        }
+        raw.split(separator: " ").map(String.init)
+    }
+
+    /// The token without the matcher's edge punctuation, or the token itself when nothing would be left.
+    static func chipLabel(_ token: String) -> String {
+        let core = TermReplacer.trimEdges(token)
+        return core.isEmpty ? token : core
     }
 
     static func isContiguous(_ selected: Set<Int>) -> Bool {
@@ -16,11 +19,13 @@ enum FixFromHistory {
         return selected.count == hi - lo + 1
     }
 
-    /// nil unless the selection is non-empty, in range and contiguous: a pair matches a phrase, not scattered words.
+    /// nil unless the selection is non-empty, in range and contiguous. Only the outer ends lose punctuation: the
+    /// matcher strips a window's ends, so "cuber, netties" must keep its comma to fire.
     static func heardPhrase(words: [String], selected: Set<Int>) -> String? {
         guard let lo = selected.min(), let hi = selected.max(), lo >= 0, hi < words.count, isContiguous(selected)
         else { return nil }
-        return words[lo...hi].joined(separator: " ")
+        let phrase = TermReplacer.trimEdges(words[lo...hi].joined(separator: " "))
+        return phrase.isEmpty ? nil : phrase
     }
 
     /// A click toggles a word; one that would break the run restarts the selection at that word.
@@ -38,6 +43,6 @@ enum FixFromHistory {
     static func canFix(heard: String?, replacement: String, pairCount: Int) -> Bool {
         guard let heard, !atPairCap(pairCount) else { return false }
         let fix = replacement.trimmingCharacters(in: .whitespacesAndNewlines)
-        return !fix.isEmpty && fix.lowercased() != heard.lowercased()
+        return !fix.isEmpty && fix != heard
     }
 }
