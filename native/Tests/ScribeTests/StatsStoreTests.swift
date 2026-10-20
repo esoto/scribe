@@ -198,7 +198,6 @@ final class StatsStoreTests: XCTestCase {
         s.dictations = 1
         s.words = 10
         XCTAssertEqual(statsCountsLine(s), "1 dictation · 10 words · under a minute of typing")
-        s.dictations = 1
         s.words = 20
         XCTAssertEqual(statsCountsLine(s), "1 dictation · 20 words · ≈ 1 min of typing")
         s.dictations = 12

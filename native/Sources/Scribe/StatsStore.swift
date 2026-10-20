@@ -105,7 +105,8 @@ final class StatsStore: @unchecked Sendable {
     func record(_ stat: DictationStat, at date: Date = Date(), calendar: Calendar = StatsStore.keyCalendar) {
         let key = Self.dayKey(date, calendar: calendar)
         // By calendar age, not entry count: light use must not keep a year of days the pane never shows.
-        let oldestKept = Self.dayKey(daysBefore: Self.keepDays - 1, date, calendar: calendar) ?? key
+        // An empty fallback keeps every day: a nil step (never seen for real dates) must not wipe the history.
+        let oldestKept = Self.dayKey(daysBefore: Self.keepDays - 1, date, calendar: calendar) ?? ""
         queue.async {
             // Zero-padded yyyy-MM-dd keys compare as dates.
             self.days.removeAll { $0.day < oldestKept }
