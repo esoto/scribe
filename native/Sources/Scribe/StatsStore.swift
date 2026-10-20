@@ -71,28 +71,49 @@ final class StatsStore: @unchecked Sendable {
         loadLocked()
     }
 
+    /// Includes days older than any window the pane shows, so Reset stays reachable for them.
+    var isEmpty: Bool { queue.sync { days.isEmpty } }
+
+    /// Fires on the store's queue. A handler that reads the store must hop off it first (as `StatsModel` does):
+    /// the accessors use `queue.sync`, which traps when called from that same queue.
     var onChange: (() -> Void)? {
         get { queue.sync { changeHandler } }
         set { queue.sync { changeHandler = newValue } }
     }
 
+    /// Gregorian whatever the user's calendar setting, so keys stay yyyy-MM-dd and survive a change of that setting;
+    /// the current time zone, so "today" matches the clock in the menu bar.
+    static var keyCalendar: Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = .current
+        return calendar
+    }
+
     /// Calendar day in the given time zone, so "today" matches the clock in the menu bar.
-    static func dayKey(_ date: Date, calendar: Calendar = .current) -> String {
+    static func dayKey(_ date: Date, calendar: Calendar = StatsStore.keyCalendar) -> String {
         let c = calendar.dateComponents([.year, .month, .day], from: date)
         return String(format: "%04d-%02d-%02d", c.year ?? 0, c.month ?? 0, c.day ?? 0)
     }
 
-    func record(_ stat: DictationStat, at date: Date = Date(), calendar: Calendar = .current) {
+    /// The key `offset` calendar days before `date`. Steps back from noon: Greenland skips 23:00 at its DST change,
+    /// and stepping from 23:30 into that gap lands on the next day, dropping a day from the window.
+    static func dayKey(daysBefore offset: Int, _ date: Date, calendar: Calendar) -> String? {
+        let noon = calendar.date(bySettingHour: 12, minute: 0, second: 0, of: date) ?? date
+        return calendar.date(byAdding: .day, value: -offset, to: noon).map { dayKey($0, calendar: calendar) }
+    }
+
+    func record(_ stat: DictationStat, at date: Date = Date(), calendar: Calendar = StatsStore.keyCalendar) {
         let key = Self.dayKey(date, calendar: calendar)
+        // By calendar age, not entry count: light use must not keep a year of days the pane never shows.
+        let oldestKept = Self.dayKey(daysBefore: Self.keepDays - 1, date, calendar: calendar) ?? key
         queue.async {
+            // Zero-padded yyyy-MM-dd keys compare as dates.
+            self.days.removeAll { $0.day < oldestKept }
             let index: Int
             if let existing = self.days.firstIndex(where: { $0.day == key }) {
                 index = existing
             } else {
                 self.days.append(DayStats(day: key))
-                if self.days.count > Self.keepDays {
-                    self.days.removeFirst(self.days.count - Self.keepDays)
-                }
                 index = self.days.count - 1
             }
             self.days[index].dictations += 1
@@ -119,10 +140,8 @@ final class StatsStore: @unchecked Sendable {
     }
 
     /// The last `window` calendar days ending today (1 = today only).
-    func summary(days window: Int, now: Date = Date(), calendar: Calendar = .current) -> StatsSummary {
-        let keys = Set((0..<max(1, window)).compactMap { offset -> String? in
-            calendar.date(byAdding: .day, value: -offset, to: now).map { Self.dayKey($0, calendar: calendar) }
-        })
+    func summary(days window: Int, now: Date = Date(), calendar: Calendar = StatsStore.keyCalendar) -> StatsSummary {
+        let keys = Set((0..<max(1, window)).compactMap { Self.dayKey(daysBefore: $0, now, calendar: calendar) })
         let selected = queue.sync { days.filter { keys.contains($0.day) } }
         let stt = selected.flatMap(\.sttMs)
         let cleanup = selected.flatMap(\.cleanupMs)

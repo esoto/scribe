@@ -37,10 +37,15 @@ final class StatsStoreTests: XCTestCase {
         XCTAssertEqual(today.rawFallbacks, 1)
         XCTAssertEqual(today.sttP50, 150)
         XCTAssertEqual(today.sttP95, 250)
-        // Cleanup that never ran contributes no latency sample.
         XCTAssertEqual(today.cleanupP50, 500)
         XCTAssertEqual(today.cleanupP95, 6000)
         XCTAssertEqual(today.rawFallbackPercent, 50)
+    }
+
+    func testADictationWithoutCleanupAddsNoCleanupSample() {
+        let store = makeStore()
+        store.record(stat(cleaned: false, cleanup: nil), at: noon, calendar: calendar)
+        XCTAssertNil(store.summary(days: 1, now: noon, calendar: calendar).cleanupP50)
     }
 
     func testWindowsSelectWholeCalendarDays() {
@@ -55,6 +60,13 @@ final class StatsStoreTests: XCTestCase {
         XCTAssertEqual(store.summary(days: 0, now: noon, calendar: calendar).words, 1)
     }
 
+    func testSevenDayWindowEndsSixDaysBack() {
+        let store = makeStore()
+        store.record(stat(words: 1), at: daysAgo(6), calendar: calendar)
+        store.record(stat(words: 10), at: daysAgo(7), calendar: calendar)
+        XCTAssertEqual(store.summary(days: 7, now: noon, calendar: calendar).words, 1)
+    }
+
     func testEmptySummaryHasNoPercentiles() {
         let s = makeStore().summary(days: 7, now: noon, calendar: calendar)
         XCTAssertEqual(s.dictations, 0)
@@ -62,6 +74,24 @@ final class StatsStoreTests: XCTestCase {
         XCTAssertNil(s.cleanupP95)
         XCTAssertNil(s.rawFallbackPercent)
         XCTAssertEqual(s.typingMinutesReplaced, 0)
+    }
+
+    func testIsEmptyCountsDaysOutsideEveryWindow() {
+        let store = makeStore()
+        XCTAssertTrue(store.isEmpty)
+        store.record(stat(), at: daysAgo(40), calendar: calendar)
+        XCTAssertFalse(store.isEmpty)
+        store.reset()
+        XCTAssertTrue(store.isEmpty)
+    }
+
+    @MainActor
+    func testResetStaysAvailableForDaysOutsideTheMonth() {
+        let store = makeStore()
+        store.record(stat(), at: daysAgo(40), calendar: calendar)
+        let model = StatsModel(store: store, now: { [noon] in noon })
+        XCTAssertEqual(model.month.dictations, 0)
+        XCTAssertFalse(model.isEmpty, "a 40-day-old dictation is still on disk, so Reset must stay enabled")
     }
 
     func testPersistsAcrossInstancesAndResets() {
@@ -85,14 +115,35 @@ final class StatsStoreTests: XCTestCase {
         XCTAssertEqual(store.summary(days: 365, now: noon, calendar: calendar).dictations, StatsStore.keepDays)
     }
 
-    func testLatencySamplesStopAtTheCapButCountsContinue() {
+    func testRetentionIsNinetyCalendarDaysNotNinetyEntries() {
+        let store = makeStore()
+        store.record(stat(), at: daysAgo(200), calendar: calendar)
+        store.record(stat(), at: noon, calendar: calendar)
+        XCTAssertEqual(store.summary(days: 365, now: noon, calendar: calendar).dictations, 1)
+    }
+
+    func testLatencySamplesStopAtTheCapButCountsContinue() throws {
         let store = makeStore()
         for _ in 0..<(StatsStore.maxSamplesPerDay + 5) {
             store.record(stat(words: 1), at: noon, calendar: calendar)
         }
         let s = store.summary(days: 1, now: noon, calendar: calendar)
         XCTAssertEqual(s.dictations, StatsStore.maxSamplesPerDay + 5)
-        XCTAssertEqual(s.sttP50, 200)
+        // summary drained the queue, so the file is current.
+        let json = try JSONSerialization.jsonObject(with: Data(contentsOf: fileURL)) as? [String: Any]
+        let day = (json?["days"] as? [[String: Any]])?.first
+        XCTAssertEqual((day?["sttMs"] as? [Int])?.count, StatsStore.maxSamplesPerDay)
+        XCTAssertEqual((day?["cleanupMs"] as? [Int])?.count, StatsStore.maxSamplesPerDay)
+    }
+
+    func testFileHoldsOnlyTheDayKeyAndIntegers() throws {
+        let store = makeStore()
+        store.record(stat(), at: noon, calendar: calendar)
+        _ = store.summary(days: 1, now: noon, calendar: calendar)
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: fileURL)) as? [String: Any])
+        XCTAssertEqual(Set(json.keys), ["version", "days"])
+        let day = try XCTUnwrap((json["days"] as? [[String: Any]])?.first)
+        XCTAssertEqual(Set(day.keys), ["day", "dictations", "words", "cleaned", "rawFallbacks", "sttMs", "cleanupMs"])
     }
 
     func testOnChangeFiresAfterAWrite() {
@@ -124,11 +175,29 @@ final class StatsStoreTests: XCTestCase {
         XCTAssertEqual(StatsStore.dayKey(noon, calendar: utc), "2023-11-14")
     }
 
+    func testKeysAreGregorianInTheCurrentZone() {
+        XCTAssertEqual(StatsStore.keyCalendar.identifier, .gregorian)
+        XCTAssertEqual(StatsStore.keyCalendar.timeZone, TimeZone.current)
+    }
+
+    func testWindowKeepsTheDayBeforeALateEveningDSTGap() {
+        var nuuk = Calendar(identifier: .gregorian)
+        nuuk.timeZone = TimeZone(identifier: "America/Nuuk")!
+        let store = makeStore()
+        let saturday = nuuk.date(from: DateComponents(year: 2024, month: 3, day: 30, hour: 12))!
+        let sundayLate = nuuk.date(from: DateComponents(year: 2024, month: 3, day: 31, hour: 23, minute: 30))!
+        store.record(stat(words: 7), at: saturday, calendar: nuuk)
+        XCTAssertEqual(store.summary(days: 7, now: sundayLate, calendar: nuuk).words, 7)
+    }
+
     // MARK: - Pane text
 
     func testCountsLine() {
         var s = StatsSummary(days: 1, dictations: 0, words: 0, cleaned: 0, rawFallbacks: 0)
         XCTAssertEqual(statsCountsLine(s), "No dictations")
+        s.dictations = 1
+        s.words = 10
+        XCTAssertEqual(statsCountsLine(s), "1 dictation · 10 words · under a minute of typing")
         s.dictations = 1
         s.words = 20
         XCTAssertEqual(statsCountsLine(s), "1 dictation · 20 words · ≈ 1 min of typing")

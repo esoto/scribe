@@ -6,6 +6,7 @@ final class StatsModel: ObservableObject {
     @Published private(set) var today: StatsSummary
     @Published private(set) var week: StatsSummary
     @Published private(set) var month: StatsSummary
+    @Published private(set) var isEmpty: Bool
 
     private let store: StatsStore
     private let now: () -> Date
@@ -17,6 +18,7 @@ final class StatsModel: ObservableObject {
         today = store.summary(days: 1, now: at)
         week = store.summary(days: 7, now: at)
         month = store.summary(days: 30, now: at)
+        isEmpty = store.isEmpty
         store.onChange = { [weak self] in
             Task { @MainActor in self?.refresh() }
         }
@@ -28,6 +30,8 @@ final class StatsModel: ObservableObject {
         if fresh.0 != today { today = fresh.0 }
         if fresh.1 != week { week = fresh.1 }
         if fresh.2 != month { month = fresh.2 }
+        let empty = store.isEmpty
+        if empty != isEmpty { isEmpty = empty }
     }
 
     func reset() { store.reset() }
@@ -37,7 +41,9 @@ final class StatsModel: ObservableObject {
 func statsCountsLine(_ s: StatsSummary) -> String {
     guard s.dictations > 0 else { return "No dictations" }
     let dictations = s.dictations == 1 ? "1 dictation" : "\(s.dictations) dictations"
-    return "\(dictations) · \(s.words) words · ≈ \(s.typingMinutesReplaced) min of typing"
+    let minutes = s.typingMinutesReplaced
+    let typing = minutes == 0 ? "under a minute of typing" : "≈ \(minutes) min of typing"
+    return "\(dictations) · \(s.words) words · \(typing)"
 }
 
 /// Medians first, then the slow tail; nil when nothing was transcribed.
@@ -64,13 +70,13 @@ struct StatsPane: View {
             statsBlock("Today", model.today)
             statsBlock("Last 7 days", model.week)
             statsBlock("Last 30 days", model.month)
-            Text("Counts and timings only — no text is kept. The raw rate says whether the cleanup model or its timeout is costing you words.")
+            Text("Counts and timings only — no text is kept. Typing time assumes 40 words a minute. The raw rate says whether the cleanup model or its timeout is costing you words.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             HStack {
                 Spacer()
                 Button("Reset Stats") { model.reset() }
-                    .disabled(model.month.dictations == 0)
+                    .disabled(model.isEmpty)
             }
         }
         .padding(16)
