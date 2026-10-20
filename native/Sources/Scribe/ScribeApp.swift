@@ -180,7 +180,8 @@ final class AppModel: ObservableObject {
             onHotkeyChanged: { dictation.setHotkey($0) },
             onHoldThresholdChanged: { dictation.pipeline.setHoldThreshold($0) },
             onIdleMinutesChanged: { idleTracker.setUnloadAfterMinutes($0) },
-            onHistorySizeChanged: { history.setMaxLen($0) })
+            onHistorySizeChanged: { history.setMaxLen($0) },
+            onRestoreDelayChanged: { paster.setRestoreDelay($0) })
 
         let parakeet = engines["parakeet"] as? ParakeetEngine
         self.dictionaryModel = DictionaryModel(

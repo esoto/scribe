@@ -226,4 +226,15 @@ final class PasteCoreTests: XCTestCase {
 
         XCTAssertEqual(pb.items, copied)
     }
+
+    func test_setRestoreDelay_applies_to_the_next_paste() throws {
+        let pb = FakePasteboard()
+        let sched = FakeScheduler()
+        let paster = Paster(pasteboard: pb, postCmdV: {}, schedule: sched.schedule, restoreDelay: 2.0)
+
+        paster.setRestoreDelay(0.5)
+        try paster.paste("hola")
+
+        XCTAssertEqual(sched.delays, [0.5])
+    }
 }

@@ -39,13 +39,27 @@ func glossaryRowDetail(count: Int, lastSeen: Date, now: Date = Date()) -> String
 
 /// Mutations go through `DictionaryModel`, which forwards to `UserDictionaryStore`.
 struct DictionaryWindow: View {
+    private enum AddField { case original, replacement }
+
     @ObservedObject var model: DictionaryModel
     @ObservedObject var cleanupModels: CleanupModelController
     @State private var newOriginal = ""
     @State private var newReplacement = ""
+    @FocusState private var addFocus: AddField?
 
     private var replacementTargets: [String] {
         distinctReplacementTargets(model.replacementPairs)
+    }
+
+    private func addPair() {
+        guard canAddPair(original: newOriginal, replacement: newReplacement),
+            !atPairCap(model.replacementPairs.count)
+        else { return }
+        model.addReplacementPair(original: newOriginal, replacement: newReplacement)
+        newOriginal = ""
+        newReplacement = ""
+        // Back to the first field: adding several pairs in a row should not need the mouse.
+        addFocus = .original
     }
 
     var body: some View {
@@ -93,21 +107,22 @@ struct DictionaryWindow: View {
                                 }
                                 .buttonStyle(.borderless)
                                 .help("Remove this replacement")
+                                .accessibilityLabel("Remove replacement \(pair.original)")
                             }
                         }
                     }
                     HStack {
                         TextField("Heard as…", text: $newOriginal)
+                            .focused($addFocus, equals: .original)
+                            .onSubmit(addPair)
                         TextField("Replace with…", text: $newReplacement)
-                        Button("Add") {
-                            model.addReplacementPair(
-                                original: newOriginal, replacement: newReplacement)
-                            newOriginal = ""
-                            newReplacement = ""
-                        }
-                        .disabled(
-                            !canAddPair(original: newOriginal, replacement: newReplacement)
-                                || atPairCap(model.replacementPairs.count))
+                            .focused($addFocus, equals: .replacement)
+                            .onSubmit(addPair)
+                        Button("Add", action: addPair)
+                            .keyboardShortcut(.defaultAction)
+                            .disabled(
+                                !canAddPair(original: newOriginal, replacement: newReplacement)
+                                    || atPairCap(model.replacementPairs.count))
                     }
                     Text(atPairCap(model.replacementPairs.count)
                         ? "Remove one to add another."
@@ -151,6 +166,7 @@ struct DictionaryWindow: View {
                                         }
                                         .buttonStyle(.borderless)
                                         .help("Ignore this word")
+                                        .accessibilityLabel("Ignore \(entry.term)")
                                     }
                                 }
                             }
@@ -184,6 +200,7 @@ struct DictionaryWindow: View {
                                         }
                                         .buttonStyle(.borderless)
                                         .help("Forget this term")
+                                        .accessibilityLabel("Forget \(entry.term)")
                                     }
                                 }
                             }

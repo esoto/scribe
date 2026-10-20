@@ -188,7 +188,7 @@ Most of these have a control in **Settings…** (⌘,), the menu, or the Diction
 | `cleanupEnabled` | true | Gemma cleanup pass on/off (menu) |
 | `minWords` | 4 | utterances shorter than this skip cleanup |
 | `cleanupTimeout` | 6.0 | seconds before falling back to raw text |
-| `restoreDelay` | 2.0 | seconds before restoring the prior clipboard |
+| `restoreDelay` | 2.0 | seconds before restoring the prior clipboard (Settings) |
 | `energyGate` | 0.0005 | silence gate (anti-hallucination); speech ~0.001+ |
 | `sounds` | true | start/error sounds (Settings) |
 | `historySize` | 10 | menu history length (Settings) |
@@ -239,7 +239,7 @@ outside scribe's process. scribe manages them on demand:
   an external keyboard may report its Option key as 58 (Left ⌥), which won't
   match. Pick **Right ⌘** or **F13** in Settings › General instead — it
   takes effect immediately, no relaunch.
-- **Old clipboard contents got pasted** → increase `restoreDelay`.
+- **Old clipboard contents got pasted** → raise **Restore clipboard after** in Settings › General (the `restoreDelay` key).
 - **Transcription failed** → the audio was saved to
   `~/Library/Logs/scribe/last_failed.wav`. For a few seconds the status
   row shows "Error — check log"; the log names the cause, and

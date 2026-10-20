@@ -10,7 +10,7 @@ final class Paster {
     private let pasteboard: PasteboardLike
     private let postCmdV: () throws -> Void
     private let schedule: (Double, @escaping () -> Void) -> Void
-    private let restoreDelay: Double
+    private var restoreDelay: Double
     /// The user's clipboard and the changeCount of our last set. While the clipboard still shows our own
     /// paste, a new dictation must not snapshot it in place of the user's content.
     private var pending: (items: [PasteboardItemData], setCount: Int)?
@@ -29,9 +29,14 @@ final class Paster {
         self.restoreDelay = restoreDelay
     }
 
+    /// Settings change at runtime; the next paste schedules its restore with the new delay.
+    func setRestoreDelay(_ seconds: Double) {
+        lock.withLock { restoreDelay = seconds }
+    }
+
     /// `target` is GuardedPaster's concern; the default keeps direct callers unchanged.
     func paste(_ text: String, target: pid_t? = nil) throws {
-        let (saved, setCount) = lock.withLock {
+        let (saved, setCount, delay) = lock.withLock {
             let saved: [PasteboardItemData]?
             if let pending, pasteboard.changeCount() == pending.setCount {
                 saved = pending.items
@@ -41,7 +46,7 @@ final class Paster {
             pasteboard.setTransient(text)
             let setCount = pasteboard.changeCount()
             pending = saved.map { ($0, setCount) }
-            return (saved, setCount)
+            return (saved, setCount, restoreDelay)
         }
 
         do {
@@ -51,7 +56,7 @@ final class Paster {
         }
 
         if let saved {
-            schedule(restoreDelay) { [weak self] in
+            schedule(delay) { [weak self] in
                 self?.restore(saved: saved, setCount: setCount)
             }
         }

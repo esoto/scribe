@@ -11,6 +11,7 @@ func openSettingsWindow(_ openWindow: OpenWindowAction) {
 
 let holdThresholdChoices: [Double] = (1...10).map { Double($0) / 10 }
 let idleUnloadChoices: [Double] = [0, 5, 15, 30, 60]
+let restoreDelayChoices: [Double] = [0.5, 1, 2, 3, 5]
 
 /// A value set outside the fixed list (`defaults write`) stays selectable; a picker with no matching tag shows blank.
 func pickerChoices(_ fixed: [Double], including current: Double) -> [Double] {
@@ -82,6 +83,16 @@ private struct GeneralPane: View {
                     Text(holdThresholdLabel(seconds)).tag(seconds)
                 }
             }
+
+            Picker(
+                "Restore clipboard after",
+                selection: Binding(get: { settings.restoreDelay }, set: { settings.setRestoreDelay($0) })
+            ) {
+                ForEach(pickerChoices(restoreDelayChoices, including: settings.restoreDelay), id: \.self) { seconds in
+                    Text(holdThresholdLabel(seconds)).tag(seconds)
+                }
+            }
+            caption("Your previous clipboard comes back this long after a paste — raise it if a slow app pastes the old one instead.")
 
             Toggle("Sounds", isOn: Binding(get: { settings.sounds }, set: { settings.setSounds($0) }))
             Toggle(
