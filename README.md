@@ -79,6 +79,12 @@ Upgrading from a v3 install downloads Ultra on first launch (progress shows in t
   the app that has focus (`-g` keeps that app in front). No parameters are
   accepted, so a URL can never carry text into scribe. While it is on, any
   app, or a web page you allow, can paste your last dictation the same way.
+- **Stats** (Settings › Stats): dictations and words today / 7 days / 30
+  days, median and slowest-5% transcription and cleanup times, and how
+  often cleanup came back raw — that last number tells you whether the
+  model or `cleanupTimeout` is costing you words. Per-day counts and
+  timings only, in `~/Library/Application Support/scribe/stats.json`; no
+  text, no app names. **Reset Stats** empties it.
 - **Dictionary**: your vocabulary and corrections, fed to the cleanup pass
   so names and jargon come out spelled right — see below.
 - If cleanup ever misbehaves (timeout, length/language sanity gates), the
