@@ -176,6 +176,23 @@ final class FakePaster: Pasting {
     }
 }
 
+final class FakeKeyPresser: KeyPressing {
+    let err: Error?
+    private(set) var pressed: [SyntheticKey] = []
+    /// The key-down app each press was given, in call order.
+    private(set) var targets: [pid_t?] = []
+
+    init(err: Error? = nil) {
+        self.err = err
+    }
+
+    func press(_ key: SyntheticKey, target: pid_t?) throws {
+        if let err { throw err }
+        pressed.append(key)
+        targets.append(target)
+    }
+}
+
 final class FakeClock {
     var t: Double = 0.0
     func now() -> Double { t }
