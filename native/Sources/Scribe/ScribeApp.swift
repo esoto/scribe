@@ -40,6 +40,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var enhancerDownloadStatus: String?
     /// True until the launch preload ends. The download statuses cover only part of it: a load from disk reports nothing.
     @Published private(set) var startupPreloadInFlight = true
+    private var lastRefusedNoticeAt: Date?
 
     init() {
         let defaults = UserDefaults.standard
@@ -175,8 +176,8 @@ final class AppModel: ObservableObject {
             soundsEnabled: { settings.sounds },
             microphoneGranted: { permissions.grants.microphone },
             reportInputMonitoring: { permissions.setInputMonitoring($0) },
-            // target nil: no key-down app to compare against, so only the Accessibility check applies.
-            repaste: { try guardedPaster.paste($0, target: nil) },
+            // No key-down app to compare against: only Accessibility and "not scribe itself" apply.
+            repaste: { try guardedPaster.pasteIntoFocusedApp($0, ownPID: ProcessInfo.processInfo.processIdentifier) },
             log: log)
         lateDictation = dictation
         self.permissions = permissions
@@ -394,9 +395,14 @@ final class AppModel: ObservableObject {
         case .run(.pasteLast):
             pasteLastDictation()
         case .refusedOff:
-            dictation.notify("scribe:// URLs are off — allow them in Settings › General")
+            // A looping opener would otherwise stack one banner per open.
+            let now = Date()
+            if URLCommand.shouldNotifyRefusal(lastAt: lastRefusedNoticeAt, now: now) {
+                lastRefusedNoticeAt = now
+                dictation.notify("scribe:// URLs are off — allow them in Settings › General")
+            }
         case .ignored:
-            logger.log("url ignored: \(url.scheme ?? "no scheme")://\(url.host ?? "")")
+            logger.log(URLCommand.ignoredLogLine(for: url))
         }
     }
 }
@@ -518,7 +524,7 @@ final class ScribeAppDelegate: NSObject, NSApplicationDelegate {
         return false
     }
 
-    /// LSUIElement apps receive URL opens here, not through SwiftUI's onOpenURL.
+    /// scribe has no WindowGroup or always-built view to host onOpenURL, so URL opens arrive here.
     func application(_ application: NSApplication, open urls: [URL]) {
         for url in urls {
             NotificationCenter.default.post(name: .scribeOpenURL, object: url)

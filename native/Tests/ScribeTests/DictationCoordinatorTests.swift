@@ -57,7 +57,8 @@ final class DictationCoordinatorTests: XCTestCase {
         config: PipelineConfig = PipelineConfig(),
         errorStickySeconds: Double = 5,
         hintSeconds: Double = 4,
-        failedAudioURL: URL? = nil
+        failedAudioURL: URL? = nil,
+        repasteDelay: Double = 0
     ) -> DictationCoordinator {
         let recorder = self.recorder!
         let clock = pipelineClock!
@@ -103,7 +104,7 @@ final class DictationCoordinatorTests: XCTestCase {
                 if let repasteError { throw repasteError }
                 repasted.append(text)
             },
-            repasteDelay: 0,
+            repasteDelay: repasteDelay,
             log: { [logs] in logs!.append($0) })
     }
 
@@ -136,6 +137,16 @@ final class DictationCoordinatorTests: XCTestCase {
         XCTAssertTrue(notified)
         XCTAssertEqual(notifier.delivered.first?.body, "Paste failed — press ⌘V to paste manually")
         XCTAssertTrue(logs.value.contains { $0.hasPrefix("paste again failed:") })
+        XCTAssertEqual(sounds.value, [])
+    }
+
+    func testPasteAgainWaitsForTheMenuToCloseBeforePasting() async {
+        let c = make(repasteDelay: 0.3)
+        c.pasteAgain("later")
+        try? await Task.sleep(nanoseconds: 50_000_000)
+        XCTAssertEqual(repasted, [])
+        let done = await eventually { [unowned self] in repasted == ["later"] }
+        XCTAssertTrue(done)
     }
 
     // MARK: - State, error stickiness and sounds

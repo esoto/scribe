@@ -109,7 +109,7 @@ final class DictationCoordinator: ObservableObject {
         errorStickySeconds: Double = 5,
         hintSeconds: Double = 4,
         failedAudioURL: URL = FileLogger.logsDirectory.appendingPathComponent("last_failed.wav"),
-        repaste: @escaping (String) throws -> Void = { _ in },
+        repaste: @escaping (String) throws -> Void,
         repasteDelay: Double = 0.2,
         log: @escaping @Sendable (String) -> Void
     ) {

@@ -38,4 +38,11 @@ final class URLCommandTests: XCTestCase {
         XCTAssertEqual(URLCommand.ignoredLogLine(for: url("scribe://x%0A2026-10-19T00%3A00%3A00Z%20models%20ready")), "url ignored: not a scribe:// command")
         XCTAssertEqual(URLCommand.ignoredLogLine(for: URL(fileURLWithPath: "/tmp/notes.txt")), "url ignored: a file was opened")
     }
+
+    func testRefusalNoticeIsThrottledToOnePerThirtySeconds() {
+        let t0 = Date(timeIntervalSince1970: 1_000_000)
+        XCTAssertTrue(URLCommand.shouldNotifyRefusal(lastAt: nil, now: t0))
+        XCTAssertFalse(URLCommand.shouldNotifyRefusal(lastAt: t0, now: t0.addingTimeInterval(10)))
+        XCTAssertTrue(URLCommand.shouldNotifyRefusal(lastAt: t0, now: t0.addingTimeInterval(31)))
+    }
 }

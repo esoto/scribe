@@ -42,6 +42,16 @@ final class GuardedPaster: Pasting {
         }
         try inner.paste(text, target: target)
     }
+
+    /// Paste Again has no key-down app to compare against. It still refuses scribe itself: `open scribe://…`
+    /// activates scribe, and a ⌘V there pastes nothing while the cue says it worked.
+    func pasteIntoFocusedApp(_ text: String, ownPID: pid_t) throws {
+        if accessibilityGranted(), currentFrontmost() == ownPID {
+            inner.copyOnly(text)
+            throw PasteGuardError(notice: "scribe has focus — text copied, press ⌘V")
+        }
+        try paste(text, target: nil)
+    }
 }
 
 /// Safe from any thread: reads directly on main, hops otherwise.
