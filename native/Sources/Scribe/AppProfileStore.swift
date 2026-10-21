@@ -24,6 +24,8 @@ final class AppProfileStore: @unchecked Sendable {
         loadLocked()
     }
 
+    /// Fires on the store's queue. A handler that reads the store must hop off it first (as `AppProfilesModel` does):
+    /// the accessors use `queue.sync`, which traps when called from that same queue.
     var onChange: (() -> Void)? {
         get { queue.sync { changeHandler } }
         set { queue.sync { changeHandler = newValue } }

@@ -1302,6 +1302,56 @@ final class PipelineTests: XCTestCase {
         XCTAssertEqual(paster.pasted, ["hello there world"])
         XCTAssertEqual(hist.items()[0].final, "hello there world")
         XCTAssertEqual(h.stats.value.first?.words, 3)
+        XCTAssertEqual(h.cleanedTexts.value, ["Hello there world."], "the harvester sees the model's casing")
+    }
+
+    func testQueuedJobKeepsItsKeyDownProfile() {
+        let runner = ManualRunner()
+        let paster = FakePaster()
+        var id: String? = "com.slack"
+        let lower = AppProfile(bundleID: "com.slack", appName: "Slack", lowercaseFirst: true)
+        let h = make(
+            cleaner: FakeCleaner(out: "Hello there world."), paster: paster, runner: runner.run,
+            frontmostBundleID: { id }, profiles: [lower])
+        dictate(h)
+        id = "com.other"
+        h.pipeline.keyDown()
+        runner.drain()
+        XCTAssertEqual(paster.pasted, ["hello there world."])
+    }
+
+    func testProfileRulesApplyOnTheRawPath() {
+        let cleaner = FakeCleaner()
+        let paster = FakePaster()
+        let profile = AppProfile(
+            bundleID: "com.slack", appName: "Slack", cleanup: false, stripTrailingPeriod: true, lowercaseFirst: true)
+        let h = make(
+            stt: FakeStt(text: "Hello there big world."), cleaner: cleaner, paster: paster,
+            frontmostBundleID: { "com.slack" }, profiles: [profile])
+        dictate(h)
+        XCTAssertEqual(cleaner.calls, 0)
+        XCTAssertEqual(paster.pasted, ["hello there big world"])
+    }
+
+    func testProfileRulesApplyToARawFallback() {
+        let paster = FakePaster()
+        let profile = AppProfile(bundleID: "com.slack", appName: "Slack", stripTrailingPeriod: true)
+        let h = make(
+            stt: FakeStt(text: "Hello there big world."), cleaner: FakeCleaner(err: TestError(message: "boom")),
+            paster: paster, frontmostBundleID: { "com.slack" }, profiles: [profile])
+        dictate(h)
+        XCTAssertEqual(paster.pasted, ["Hello there big world"])
+        XCTAssertTrue(h.cues.value.contains("hint: Pasted raw — cleanup failed"), "\(h.cues.value)")
+    }
+
+    func testProfileCleanupOnStillNeedsMinWords() {
+        let cleaner = FakeCleaner()
+        let profile = AppProfile(bundleID: "com.slack", appName: "Slack", cleanup: true)
+        let h = make(
+            stt: FakeStt(text: "hi there"), cleaner: cleaner, frontmostBundleID: { "com.slack" }, profiles: [profile])
+        h.pipeline.cleanupEnabled = false
+        dictate(h)
+        XCTAssertEqual(cleaner.calls, 0)
     }
 
     func testProfileIsReadAtKeyDown() {

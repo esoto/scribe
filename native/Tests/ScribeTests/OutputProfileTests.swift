@@ -18,6 +18,11 @@ final class OutputProfileTests: XCTestCase {
         XCTAssertEqual(OutputProfile.apply(p, to: "Hello there..."), "Hello there...")
         XCTAssertEqual(OutputProfile.apply(p, to: "Hello there?"), "Hello there?")
         XCTAssertEqual(OutputProfile.apply(p, to: "."), "")
+        XCTAssertEqual(OutputProfile.apply(p, to: "See you at 5 p.m."), "See you at 5 p.m.")
+        XCTAssertEqual(OutputProfile.apply(p, to: "Made in the U.S."), "Made in the U.S.")
+        XCTAssertEqual(OutputProfile.apply(p, to: "Version 3.5."), "Version 3.5")
+        XCTAssertEqual(OutputProfile.apply(p, to: "Plan A."), "Plan A")
+        XCTAssertEqual(OutputProfile.apply(p, to: "And so on, etc."), "And so on, etc")
     }
 
     func testLowercasesOnlyASentenceInitialCapital() {
@@ -31,6 +36,25 @@ final class OutputProfileTests: XCTestCase {
         XCTAssertEqual(OutputProfile.apply(p, to: ""), "")
     }
 
+    func testAnIWithEdgePunctuationStaysCapitalised() {
+        let p = profile(lower: true)
+        XCTAssertEqual(OutputProfile.apply(p, to: "I, for one, agree"), "I, for one, agree")
+        XCTAssertEqual(OutputProfile.apply(p, to: "I. Am. Done"), "I. Am. Done")
+        XCTAssertEqual(OutputProfile.apply(p, to: "I\u{2019}m fine"), "I\u{2019}m fine")
+    }
+
+    func testLowercasesAfterAnOpeningMark() {
+        let p = profile(lower: true)
+        XCTAssertEqual(OutputProfile.apply(p, to: "¿Qué tal?"), "¿qué tal?")
+        XCTAssertEqual(OutputProfile.apply(p, to: "¡Hola!"), "¡hola!")
+        XCTAssertEqual(OutputProfile.apply(p, to: "Él dijo"), "él dijo")
+        XCTAssertEqual(OutputProfile.apply(p, to: "\"Hello\" she said"), "\"hello\" she said")
+        XCTAssertEqual(OutputProfile.apply(p, to: "¿OK?"), "¿OK?")
+        XCTAssertEqual(OutputProfile.apply(p, to: "McDonald's is open"), "McDonald's is open")
+        XCTAssertEqual(OutputProfile.apply(p, to: "3 apples"), "3 apples")
+        XCTAssertEqual(OutputProfile.apply(p, to: "..."), "...")
+    }
+
     func testBothRulesCompose() {
         XCTAssertEqual(OutputProfile.apply(profile(period: true, lower: true), to: "Sounds good."), "sounds good")
     }
@@ -40,6 +64,13 @@ final class OutputProfileTests: XCTestCase {
         XCTAssertFalse(OutputProfile.cleanupEnabled(profile(), global: false))
         XCTAssertFalse(OutputProfile.cleanupEnabled(profile(cleanup: false), global: true))
         XCTAssertTrue(OutputProfile.cleanupEnabled(profile(cleanup: true), global: false))
+    }
+
+    func testWarmUpAtLaunchFollowsTheToggleOrAnAppThatTurnsCleanupOn() {
+        XCTAssertTrue(OutputProfile.warmUpNeeded(global: true, profiles: []))
+        XCTAssertFalse(OutputProfile.warmUpNeeded(global: false, profiles: []))
+        XCTAssertFalse(OutputProfile.warmUpNeeded(global: false, profiles: [profile(), profile(cleanup: false)]))
+        XCTAssertTrue(OutputProfile.warmUpNeeded(global: false, profiles: [profile(cleanup: false), profile(cleanup: true)]))
     }
 
     func testCleanupRulePickerTagsRoundTrip() {
@@ -104,6 +135,36 @@ final class AppProfileStoreTests: XCTestCase {
         store.onChange = { fired.fulfill() }
         store.upsert(AppProfile(bundleID: "a", appName: "Slack"))
         wait(for: [fired], timeout: 2)
+    }
+
+    @MainActor
+    func testAddingAnAppAgainKeepsItsRules() async {
+        let store = makeStore()
+        let model = AppProfilesModel(store: store)
+        model.upsert(AppProfile(bundleID: "a", appName: "Slack", stripTrailingPeriod: true))
+        let shown = await eventually { model.profiles.count == 1 }
+        XCTAssertTrue(shown)
+        model.add(AppProfile(bundleID: "a", appName: "Slack"))
+        XCTAssertEqual(store.profile(for: "a")?.stripTrailingPeriod, true)
+        model.add(AppProfile(bundleID: "b", appName: "Zed"))
+        let added = await eventually { model.profiles.count == 2 }
+        XCTAssertTrue(added)
+    }
+
+    func testAProfileMissingASwitchStillLoads() throws {
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try Data(#"{"version":1,"profiles":[{"bundleID":"a","appName":"Slack"}]}"#.utf8)
+            .write(to: dir.appendingPathComponent("profiles.json"))
+        XCTAssertEqual(makeStore().profile(for: "a"), AppProfile(bundleID: "a", appName: "Slack"))
+    }
+
+    func testASwitchPresentInTheFileIsKept() throws {
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try Data(#"{"version":1,"profiles":[{"bundleID":"a","appName":"Slack","cleanup":false,"lowercaseFirst":true}]}"#.utf8)
+            .write(to: dir.appendingPathComponent("profiles.json"))
+        XCTAssertEqual(
+            makeStore().profile(for: "a"),
+            AppProfile(bundleID: "a", appName: "Slack", cleanup: false, lowercaseFirst: true))
     }
 
     @MainActor

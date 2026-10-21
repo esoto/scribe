@@ -23,6 +23,13 @@ final class AppProfilesModel: ObservableObject {
     }
 
     func upsert(_ profile: AppProfile) { store.upsert(profile) }
+
+    /// Picking an app that already has rules keeps them; a fresh profile would silently reset its switches.
+    func add(_ profile: AppProfile) {
+        guard !profiles.contains(where: { $0.bundleID == profile.bundleID }) else { return }
+        store.upsert(profile)
+    }
+
     func remove(_ profile: AppProfile) { store.remove(bundleID: profile.bundleID) }
 }
 
@@ -56,21 +63,33 @@ func appProfile(forBundleAt url: URL) -> AppProfile? {
 
 struct AppsPane: View {
     @ObservedObject var model: AppProfilesModel
+    @State private var notice: String?
 
     var body: some View {
-        Form {
+        // Add App… sits above the list and the list scrolls: each app adds about 100 pt, and an unbounded pane
+        // grows the Settings window past the screen with the button off it.
+        VStack(alignment: .leading, spacing: 12) {
             Text("Rules for the app you dictate into. Deterministic — the cleanup model never sees them.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            if model.profiles.isEmpty {
-                Text("No app rules yet.").foregroundStyle(.secondary)
-            }
-            ForEach(model.profiles) { profile in
-                profileSection(profile)
-            }
             HStack {
                 Spacer()
                 Button("Add App…", action: addApp)
+            }
+            if let notice {
+                Text(notice).font(.caption).foregroundStyle(.secondary)
+            }
+            if model.profiles.isEmpty {
+                Text("No app rules yet.").foregroundStyle(.secondary)
+            } else {
+                ScrollView {
+                    Form {
+                        ForEach(model.profiles) { profile in
+                            profileSection(profile)
+                        }
+                    }
+                }
+                .frame(maxHeight: 260)
             }
         }
         .padding(16)
@@ -94,6 +113,7 @@ struct AppsPane: View {
                     Text(choice.label).tag(choice.tag)
                 }
             }
+            .accessibilityLabel("Cleanup for \(profile.appName)")
             Toggle(
                 "Drop the trailing period",
                 isOn: Binding(
@@ -102,7 +122,9 @@ struct AppsPane: View {
                         var changed = profile
                         changed.stripTrailingPeriod = on
                         model.upsert(changed)
-                    }))
+                    })
+            )
+            .accessibilityLabel("Drop the trailing period in \(profile.appName)")
             Toggle(
                 "Lowercase the first letter",
                 isOn: Binding(
@@ -111,7 +133,9 @@ struct AppsPane: View {
                         var changed = profile
                         changed.lowercaseFirst = on
                         model.upsert(changed)
-                    }))
+                    })
+            )
+            .accessibilityLabel("Lowercase the first letter in \(profile.appName)")
         } header: {
             HStack {
                 Text(profile.appName)
@@ -124,7 +148,7 @@ struct AppsPane: View {
                 }
                 .buttonStyle(.borderless)
                 .help("Remove the rules for \(profile.appName)")
-                .accessibilityLabel("Remove rules for \(profile.appName)")
+                .accessibilityLabel("Remove the rules for \(profile.appName)")
             }
         }
     }
@@ -137,7 +161,12 @@ struct AppsPane: View {
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
         panel.message = "Choose the app these rules apply to"
-        guard panel.runModal() == .OK, let url = panel.url, let profile = appProfile(forBundleAt: url) else { return }
-        model.upsert(profile)
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        guard let profile = appProfile(forBundleAt: url) else {
+            notice = "That app has no bundle identifier."
+            return
+        }
+        notice = nil
+        model.add(profile)
     }
 }

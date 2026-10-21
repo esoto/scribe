@@ -20,6 +20,7 @@ final class AppModel: ObservableObject {
     let statsModel: StatsModel
     let snippetsModel: SnippetsModel
     let appProfilesModel: AppProfilesModel
+    private let appProfiles: AppProfileStore
     let permissions: PermissionsModel
     let dictation: DictationCoordinator
     let hudModel = HUDModel()
@@ -93,6 +94,7 @@ final class AppModel: ObservableObject {
         let snippetStore = SnippetStore()
         self.snippetsModel = SnippetsModel(store: snippetStore)
         let profiles = AppProfileStore()
+        self.appProfiles = profiles
         self.appProfilesModel = AppProfilesModel(store: profiles)
 
         // The sub-models call into each other (permissions ↔ coordinator, cleanup → coordinator); this ref
@@ -291,7 +293,8 @@ final class AppModel: ObservableObject {
         let cleanupModels = self.cleanupModels
         // Captured before the STT preload below: the controller re-checks it is still the current one afterwards.
         let cleaner = cleanupModels.cleaner
-        let cleanupEnabled = self.cleanupEnabled
+        // An app whose profile turns cleanup on needs the model at launch even while the global toggle is off.
+        let cleanupEnabled = OutputProfile.warmUpNeeded(global: self.cleanupEnabled, profiles: appProfiles.all)
         let logger = self.logger
         Task { [weak self] in
             let t0 = Date()
@@ -358,7 +361,10 @@ final class AppModel: ObservableObject {
         let engine = engineController.activeEngine
         let cleanupModels = self.cleanupModels
         let cleaner = cleanupModels.cleaner
-        let cleanupEnabled = self.cleanupEnabled
+        // A per-app "On" must warm the model even while the global toggle is off, or its first dictation loads
+        // the model inside the cleanup deadline and pastes raw.
+        let profile = appProfiles.profile(for: NSWorkspace.shared.frontmostApplication?.bundleIdentifier)
+        let cleanupEnabled = OutputProfile.cleanupEnabled(profile, global: self.cleanupEnabled)
         // LazyModel coalesces concurrent loads; an in-flight load can't be cancelled.
         // Separate from the STT warm-up: enhance skips itself while cold, so it must not queue behind it.
         enhancerLifecycle.warmUp()
