@@ -40,10 +40,29 @@ final class SnippetStore: @unchecked Sendable {
 
     var all: [Snippet] { queue.sync { snippets } }
 
-    /// The trigger is single-spaced like the matcher sees it; an existing trigger (any case) is replaced.
+    /// What the matcher can actually see of a typed trigger: single-spaced, with the edge punctuation it strips
+    /// from spoken tokens already gone, so "my address." is stored as the trigger that will fire.
+    static func normalisedTrigger(_ trigger: String) -> String {
+        func singleSpaced(_ text: String) -> String {
+            text.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
+        }
+        // Trimming can strand a bracket behind a space ("( my email ) ."), so repeat until nothing changes.
+        var current = singleSpaced(trigger)
+        while true {
+            let next = singleSpaced(TermReplacer.trimEdges(current))
+            if next == current { return next }
+            current = next
+        }
+    }
+
+    /// An existing trigger (any case) is replaced. Line breaks are stored as `\n` so a pasted CRLF expansion is still
+    /// one block.
     func upsert(trigger: String, expansion: String) {
-        let t = trigger.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
-        let e = expansion.trimmingCharacters(in: .newlines)
+        let t = Self.normalisedTrigger(trigger)
+        let e = expansion
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+            .trimmingCharacters(in: .newlines)
         guard !t.isEmpty, !e.isEmpty else { return }
         let key = TermReplacer.words(t)
         queue.async {
@@ -82,17 +101,12 @@ final class SnippetStore: @unchecked Sendable {
 }
 
 /// Expands triggers after cleanup, so the model never sees an expansion and `Gates.normalize` never flattens its
-/// line breaks. A multi-line expansion drops the punctuation ASR put after the trigger; a one-line one keeps it.
+/// line breaks. A multi-line expansion drops the sentence punctuation ASR put after a trigger that ends the text;
+/// a one-line one keeps it.
 enum SnippetExpander {
     static func apply(_ snippets: [Snippet], to text: String) -> String {
-        guard !snippets.isEmpty, !text.isEmpty else { return text }
-        let blocks = snippets.filter { $0.expansion.contains("\n") }.map(pair)
-        let oneLiners = snippets.filter { !$0.expansion.contains("\n") }.map(pair)
-        let afterBlocks = TermReplacer.apply(blocks, to: text, keepTrailingPunctuation: false)
-        return TermReplacer.apply(oneLiners, to: afterBlocks)
-    }
-
-    private static func pair(_ snippet: Snippet) -> ReplacementPair {
-        ReplacementPair(original: snippet.trigger, replacement: snippet.expansion, addedAt: .distantPast)
+        TermReplacer.apply(
+            entries: snippets.map { ($0.trigger, $0.expansion, !$0.expansion.contains(where: \.isNewline)) },
+            to: text)
     }
 }

@@ -24,6 +24,21 @@ final class SnippetStoreTests: XCTestCase {
         XCTAssertEqual(store.all, [Snippet(trigger: "My Address", expansion: "elsewhere")])
     }
 
+    func testUpsertNormalisesCRLFToNewlines() {
+        let store = makeStore()
+        store.upsert(trigger: "a", expansion: "x\r\ny")
+        store.upsert(trigger: "b", expansion: "\r\nx\ry\r\n")
+        XCTAssertEqual(store.all, [Snippet(trigger: "a", expansion: "x\ny"), Snippet(trigger: "b", expansion: "x\ny")])
+    }
+
+    func testUpsertStripsEdgePunctuationFromTheTrigger() {
+        let store = makeStore()
+        store.upsert(trigger: "my address.", expansion: address)
+        store.upsert(trigger: " ( my email ) .", expansion: "e@example.com")
+        store.upsert(trigger: "...", expansion: "never stored")
+        XCTAssertEqual(store.all.map(\.trigger), ["my address", "my email"])
+    }
+
     func testBlankTriggerOrExpansionIsIgnored() {
         let store = makeStore()
         store.upsert(trigger: " ", expansion: "x")
@@ -76,7 +91,30 @@ final class SnippetStoreTests: XCTestCase {
     func testBlockInsideASentenceKeepsTheRestAndTheLeadingPunctuation() {
         XCTAssertEqual(
             SnippetExpander.apply(snippets, to: "Ship it to (my address), thanks."),
-            "Ship it to (" + address + " thanks.")
+            "Ship it to (" + address + "), thanks.")
+    }
+
+    func testBlockMidTextKeepsTheSentencePeriod() {
+        XCTAssertEqual(
+            SnippetExpander.apply(snippets, to: "Send it to my address. Thanks."),
+            "Send it to 12 Elm St\nSpringfield. Thanks.")
+    }
+
+    func testALongerOneLineTriggerBeatsAShorterBlockTrigger() {
+        let mixed = snippets + [Snippet(trigger: "my address line", expansion: "12 Elm St")]
+        XCTAssertEqual(SnippetExpander.apply(mixed, to: "my address line"), "12 Elm St")
+    }
+
+    func testAnExpansionIsNeverExpandedAgain() {
+        let mixed = snippets + [Snippet(trigger: "elm", expansion: "ELM TREE")]
+        XCTAssertEqual(SnippetExpander.apply(mixed, to: "my address"), address)
+        XCTAssertEqual(SnippetExpander.apply(mixed, to: "the elm"), "the ELM TREE")
+    }
+
+    func testCRLFExpansionCountsAsABlock() {
+        // Hand-edited files can carry CRLF, which is a single Character, so it must still drop the ASR period.
+        let crlf = [Snippet(trigger: "my address", expansion: "12 Elm St\r\nSpringfield")]
+        XCTAssertEqual(SnippetExpander.apply(crlf, to: "my address."), "12 Elm St\r\nSpringfield")
     }
 
     func testNoSnippetsOrNoMatchLeavesTextAlone() {
@@ -89,11 +127,21 @@ final class SnippetStoreTests: XCTestCase {
     func testRowLabelShowsTheFirstLineAndMarksMore() {
         XCTAssertEqual(snippetRowLabel(Snippet(trigger: "my address", expansion: address)), "my address → 12 Elm St …")
         XCTAssertEqual(snippetRowLabel(Snippet(trigger: "my email", expansion: "e@example.com")), "my email → e@example.com")
+        XCTAssertEqual(
+            snippetRowLabel(Snippet(trigger: "my address", expansion: "12 Elm St\r\nSpringfield")),
+            "my address → 12 Elm St …")
+    }
+
+    func testSnippetCountCaptionExplainsTheCap() {
+        XCTAssertEqual(snippetCountCaption(3), "3 of \(SnippetStore.maxSnippets) snippets")
+        XCTAssertEqual(snippetCountCaption(SnippetStore.maxSnippets - 1), "49 of 50 snippets")
+        XCTAssertEqual(snippetCountCaption(SnippetStore.maxSnippets), "Remove one to add another.")
     }
 
     func testCanAddSnippet() {
         XCTAssertTrue(canAddSnippet(trigger: "x", expansion: "y", count: 0))
         XCTAssertFalse(canAddSnippet(trigger: " ", expansion: "y", count: 0))
+        XCTAssertFalse(canAddSnippet(trigger: " . ... ", expansion: "y", count: 0))
         XCTAssertFalse(canAddSnippet(trigger: "x", expansion: "\n", count: 0))
         XCTAssertFalse(canAddSnippet(trigger: "x", expansion: "y", count: SnippetStore.maxSnippets))
     }

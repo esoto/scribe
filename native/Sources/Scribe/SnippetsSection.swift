@@ -27,13 +27,20 @@ final class SnippetsModel: ObservableObject {
 
 /// A row: the trigger and the first line of the expansion, with a mark when there is more.
 func snippetRowLabel(_ snippet: Snippet) -> String {
-    let firstLine = snippet.expansion.split(separator: "\n", omittingEmptySubsequences: false).first.map(String.init) ?? ""
-    let more = snippet.expansion.contains("\n") ? " …" : ""
+    let firstLine =
+        snippet.expansion.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline).first.map(String.init) ?? ""
+    let more = snippet.expansion.contains(where: \.isNewline) ? " …" : ""
     return "\(truncateLabel(snippet.trigger, n: 20)) → \(truncateLabel(firstLine, n: 28))\(more)"
 }
 
+/// The count under the editor; at the cap it says why Add is off, as the Replacements section does.
+func snippetCountCaption(_ count: Int) -> String {
+    count >= SnippetStore.maxSnippets
+        ? "Remove one to add another." : "\(count) of \(SnippetStore.maxSnippets) snippets"
+}
+
 func canAddSnippet(trigger: String, expansion: String, count: Int) -> Bool {
-    !trigger.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    !SnippetStore.normalisedTrigger(trigger).isEmpty
         && !expansion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         && count < SnippetStore.maxSnippets
 }
@@ -52,30 +59,38 @@ struct SnippetsSection: View {
                 if model.snippets.isEmpty {
                     Text("No snippets yet — add one below.").foregroundStyle(.secondary)
                 } else {
-                    ForEach(model.snippets) { snippet in
-                        HStack {
-                            Text(snippetRowLabel(snippet))
-                            Spacer()
-                            Button {
-                                model.remove(snippet)
-                            } label: {
-                                Image(systemName: "trash")
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 6) {
+                            ForEach(model.snippets) { snippet in
+                                HStack {
+                                    Text(snippetRowLabel(snippet))
+                                    Spacer()
+                                    Button {
+                                        model.remove(snippet)
+                                    } label: {
+                                        Image(systemName: "trash")
+                                    }
+                                    .buttonStyle(.borderless)
+                                    .help("Remove this snippet")
+                                    .accessibilityLabel("Remove snippet \(snippet.trigger)")
+                                }
+                                .help(snippet.expansion)
                             }
-                            .buttonStyle(.borderless)
-                            .help("Remove this snippet")
-                            .accessibilityLabel("Remove snippet \(snippet.trigger)")
                         }
-                        .help(snippet.expansion)
                     }
+                    .frame(maxHeight: 120)
                 }
                 TextField("Trigger — e.g. my address", text: $trigger)
+                Text("Expands to")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 TextEditor(text: $expansion)
                     .font(.body)
                     .frame(height: 60)
                     .border(Color(nsColor: .separatorColor))
                     .accessibilityLabel("Expansion")
                 HStack {
-                    Text("\(model.snippets.count) of \(SnippetStore.maxSnippets) snippets")
+                    Text(snippetCountCaption(model.snippets.count))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Spacer()

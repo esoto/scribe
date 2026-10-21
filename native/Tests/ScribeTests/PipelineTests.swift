@@ -1241,10 +1241,14 @@ final class PipelineTests: XCTestCase {
         XCTAssertEqual(h.stats.value.first?.words, 2)
     }
 
-    func testNoSnippetsLeavesTextAlone() {
+    func testVoiceCommandBeatsASnippetWithTheSameWords() {
         let paster = FakePaster()
-        let h = make(paster: paster)
+        let hist = History(maxLen: 10)
+        let h = make(
+            stt: FakeStt(text: "new line"), paster: paster, history: hist,
+            snippets: [Snippet(trigger: "new line", expansion: "X")], keyPresser: FakeKeyPresser())
         dictate(h)
-        XCTAssertEqual(paster.pasted, ["hello there world"])
+        XCTAssertEqual(paster.pasted, ["\n"])
+        XCTAssertTrue(hist.items().isEmpty, "a command is not a dictation")
     }
 }

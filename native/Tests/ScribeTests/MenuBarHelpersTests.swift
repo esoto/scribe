@@ -138,6 +138,13 @@ final class MenuBarHelpersTests: XCTestCase {
         XCTAssertEqual(historyRowLabel(raw), "hello there · raw")
     }
 
+    func testHistoryRowLabelFlattensLineBreaks() {
+        let block = DictationRecord(
+            raw: "r", final: "12 Elm St\nSpringfield", engine: "parakeet", cleaned: true, at: Date(), durationMs: 1)
+        XCTAssertEqual(historyRowLabel(block), "12 Elm St Springfield")
+        XCTAssertFalse(historyRowLabel(block).contains("\n"))
+    }
+
     func testEngineLabelIsTheOptionLabelAndFallsBackToTheId() {
         XCTAssertEqual(engineLabel("parakeet"), "Parakeet (fast)")
         XCTAssertEqual(engineLabel("whisper"), "Whisper (best Spanish)")

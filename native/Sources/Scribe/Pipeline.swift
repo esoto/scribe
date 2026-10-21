@@ -76,7 +76,8 @@ final class DictationPipeline {
     private let onCleaned: ((String) -> Void)?
     /// Read fresh each dictation; applied deterministically here, not via the cleanup prompt.
     private let replacementPairs: () -> [ReplacementPair]
-    /// Read fresh each dictation; expanded last, so neither the model nor the harvester ever sees an expansion.
+    /// Read fresh each dictation; expanded after the harvester and before any per-app text rules, so neither the
+    /// model nor the harvester ever sees an expansion.
     private let snippets: () -> [Snippet]
     private let saveFailedAudio: ([Float]) -> Void
     /// A short verdict on the last dictation for the status row: a degradation, or the command that ran — never a plain user choice like disabled cleanup.
