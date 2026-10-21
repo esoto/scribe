@@ -65,9 +65,14 @@ Upgrading from a v3 install downloads Ultra on first launch (progress shows in t
 - Hold **Right ⌥** (≥ 0.3 s), speak, release. Text lands in the focused app.
 - Menu bar: ◦ idle · ● recording · ⋯ processing · ⚠ error or a missing
   permission, plus a live status line while recording/transcribing.
+- **Recording pill** (Settings › General, on by default): while you hold
+  the key a pill above the Dock shows the microphone level — five flat
+  bars mean the mic isn't picking you up (dead, muted or wrong device) —
+  then "Transcribing…", then "Pasted" or the raw-fallback verdict. It
+  shows on every Space and over full-screen apps and never takes focus.
 - **Engine** picker: Parakeet (fast, default) ↔ Whisper (better for
   Spanish-heavy dictation; loads on first switch).
-- **Settings…** (⌘,) has three tabs. **General** holds the hotkey, hold delay, sounds, scribe:// URLs, Launch at Login, idle unload, and history size. **Audio** picks the microphone and holds the experimental **Enhance Audio** toggle (LocalVQE noise suppression before transcription — off by default because it lowered accuracy on synthetic noise in tests). **Models** downloads, switches, and deletes the cleanup model.
+- **Settings…** (⌘,) has three tabs. **General** holds the hotkey, hold delay, sounds, scribe:// URLs, voice commands, the recording pill, Launch at Login, idle unload, and history size. **Audio** picks the microphone and holds the experimental **Enhance Audio** toggle (LocalVQE noise suppression before transcription — off by default because it lowered accuracy on synthetic noise in tests). **Models** downloads, switches, and deletes the cleanup model.
 - **Cleanup (remove fillers)** toggle: off = verbatim transcription pasted raw.
 - **Voice commands** (Settings › General, on by default): say one of these
   as the whole utterance and scribe acts instead of pasting — "enter" /
@@ -226,6 +231,7 @@ Most of these have a control in **Settings…** (⌘,), the menu, or the Diction
 | `enhanceAudioEnabled` | false | LocalVQE noise suppression before transcription — experimental (Settings › Audio) |
 | `urlSchemeEnabled` | false | allow `scribe://` URLs from other apps (Settings) |
 | `voiceCommandsEnabled` | true | whole-utterance voice commands ("enter", "new line", …) — see Usage (Settings) |
+| `hudEnabled` | true | the recording pill above the Dock (Settings) |
 | `microphoneUID` | _(unset)_ | input device UID; unset follows the system default input (Settings) |
 
 **Custom cleanup model:** point `cleanupModelPath` at any local MLX model

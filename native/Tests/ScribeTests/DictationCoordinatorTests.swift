@@ -18,6 +18,8 @@ final class DictationCoordinatorTests: XCTestCase {
     private var inputMonitoring: Box<Bool>!
     private var soundsEnabled = true
     private var microphoneGranted = true
+    private var hud: HUDModel!
+    private var hudEnabled = true
     private var sinks: PipelineSinks!
     private var monitorDown: (() -> Void)!
     private var monitorUp: (() -> Void)!
@@ -39,6 +41,8 @@ final class DictationCoordinatorTests: XCTestCase {
         inputMonitoring = Box<Bool>()
         soundsEnabled = true
         microphoneGranted = true
+        hud = HUDModel()
+        hudEnabled = true
         pipelineClock = FakeClock()
         repasted = []
         repasteError = nil
@@ -58,7 +62,8 @@ final class DictationCoordinatorTests: XCTestCase {
         errorStickySeconds: Double = 5,
         hintSeconds: Double = 4,
         failedAudioURL: URL? = nil,
-        repasteDelay: Double = 0
+        repasteDelay: Double = 0,
+        hudResultSeconds: Double = HUDModel.resultSeconds
     ) -> DictationCoordinator {
         let recorder = self.recorder!
         let clock = pipelineClock!
@@ -105,6 +110,9 @@ final class DictationCoordinatorTests: XCTestCase {
                 repasted.append(text)
             },
             repasteDelay: repasteDelay,
+            hud: hud,
+            hudEnabled: { [unowned self] in hudEnabled },
+            hudResultSeconds: hudResultSeconds,
             log: { [logs] in logs!.append($0) })
     }
 
@@ -297,6 +305,127 @@ final class DictationCoordinatorTests: XCTestCase {
         c.playPasteCue()
 
         XCTAssertEqual(sounds.value, [])
+    }
+
+    // MARK: - Recording pill
+
+    func testPillFollowsTheDictationStates() async {
+        let c = make(hudResultSeconds: 0.05)
+
+        c.applyState(.recording)
+        XCTAssertEqual(hud.phase, .listening)
+        c.applyState(.processing)
+        XCTAssertEqual(hud.phase, .processing)
+        c.playPasteCue()
+        XCTAssertEqual(hud.phase, .result("Pasted"))
+        c.applyState(.idle)
+        XCTAssertEqual(hud.phase, .result("Pasted"))
+
+        let hidden = await eventually { [unowned self] in hud.phase == .hidden }
+        XCTAssertTrue(hidden)
+    }
+
+    func testPillShowsTheRawVerdict() {
+        let c = make()
+
+        c.applyState(.recording)
+        c.applyState(.processing)
+        c.showHint("Pasted raw — cleanup timed out")
+
+        XCTAssertEqual(hud.phase, .result("Pasted raw — cleanup timed out"))
+    }
+
+    func testPillHidesAtOnceWhenIdleHasNoVerdict() {
+        let c = make()
+
+        c.applyState(.recording)
+        c.applyState(.processing)
+        c.applyState(.idle)
+
+        XCTAssertEqual(hud.phase, .hidden)
+    }
+
+    func testPillOffNeverShows() {
+        hudEnabled = false
+        let c = make()
+
+        c.applyState(.recording)
+        XCTAssertEqual(hud.phase, .hidden)
+        c.showHint("x")
+        XCTAssertEqual(hud.phase, .hidden)
+    }
+
+    func testErrorShowsOnThePillThenHides() async {
+        let c = make(hudResultSeconds: 0.05)
+
+        c.applyState(.error)
+        XCTAssertEqual(hud.phase, .problem("Error — check log"))
+
+        let hidden = await eventually { [unowned self] in hud.phase == .hidden }
+        XCTAssertTrue(hidden)
+    }
+
+    func testIdleAfterAnErrorLeavesTheProblemUpBriefly() {
+        let c = make()
+
+        c.applyState(.error)
+        c.applyState(.idle)
+
+        XCTAssertEqual(hud.phase, .problem("Error — check log"))
+    }
+
+    func testTurningThePillOffHidesIt() {
+        let c = make()
+        c.applyState(.recording)
+
+        c.setHudEnabled(false)
+
+        XCTAssertEqual(hud.phase, .hidden)
+    }
+
+    func testLevelReachesThePillOnlyWhileListening() {
+        let c = make()
+
+        c.reportLevel(rms: 0.1)
+        XCTAssertEqual(hud.level, 0)
+        c.applyState(.recording)
+        c.reportLevel(rms: 0.1)
+
+        XCTAssertGreaterThan(hud.level, 0)
+    }
+
+    func testAnEarlierJobsVerdictLeavesTheHoldInProgressListening() {
+        let c = make()
+        c.applyState(.recording)
+
+        c.playPasteCue()
+        c.showHint("Pasted raw — cleanup timed out")
+        c.reportLevel(rms: 0.1)
+
+        XCTAssertEqual(hud.phase, .listening)
+        XCTAssertGreaterThan(hud.level, 0)
+    }
+
+    func testANewHoldCancelsThePendingHide() {
+        let c = make()
+        c.applyState(.processing)
+        c.playPasteCue()
+        c.applyState(.idle)
+        let pending = c.hudHide
+
+        c.applyState(.recording)
+
+        XCTAssertEqual(pending?.isCancelled, true)
+        XCTAssertEqual(hud.phase, .listening)
+    }
+
+    func testAVerdictWithThePillHiddenShowsNothing() {
+        let c = make()
+
+        c.playPasteCue()
+        c.showHint("Pasted raw — cleanup timed out")
+
+        XCTAssertEqual(hud.phase, .hidden)
     }
 
     // MARK: - Notifications

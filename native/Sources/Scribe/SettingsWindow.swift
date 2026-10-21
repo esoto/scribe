@@ -106,6 +106,10 @@ private struct GeneralPane: View {
                 isOn: Binding(get: { settings.voiceCommandsEnabled }, set: { settings.setVoiceCommandsEnabled($0) }))
             caption("Say one of these on its own: “enter” or “send it”, “new line”, “new paragraph”, “scratch that” or “undo” — or the Spanish “enviar”, “nueva línea”, “nuevo párrafo”, “borra eso”, “deshacer”.")
             Toggle(
+                "Recording pill",
+                isOn: Binding(get: { settings.hudEnabled }, set: { settings.setHudEnabled($0) }))
+            caption("A small pill above the Dock shows the level while you hold the key, then the result.")
+            Toggle(
                 "Launch at Login",
                 isOn: Binding(get: { model.launchAtLoginEnabled }, set: { model.setLaunchAtLogin($0) }))
 

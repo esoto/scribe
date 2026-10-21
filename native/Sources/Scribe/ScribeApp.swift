@@ -20,6 +20,9 @@ final class AppModel: ObservableObject {
     let statsModel: StatsModel
     let permissions: PermissionsModel
     let dictation: DictationCoordinator
+    let hudModel = HUDModel()
+    /// Owned here so the window lives as long as the app; it shows itself from `hudModel`'s phase.
+    let hudPanel: HUDPanel
     let settingsModel: SettingsModel
     let cleanupModels: CleanupModelController
     let engineController: EngineController
@@ -189,8 +192,16 @@ final class AppModel: ObservableObject {
             reportInputMonitoring: { permissions.setInputMonitoring($0) },
             // No key-down app to compare against: only Accessibility and "not scribe itself" apply.
             repaste: { try guardedPaster.pasteIntoFocusedApp($0, ownPID: ProcessInfo.processInfo.processIdentifier) },
+            hud: hudModel,
+            hudEnabled: { settings.hudEnabled },
             log: log)
         lateDictation = dictation
+        // The recorder calls this on the audio thread once per captured chunk, a few tens of times a second at most:
+        // one small main-actor hop per chunk is cheap enough, and the model drops levels while it is not listening.
+        recorder.onLevel = { rms in
+            Task { @MainActor in dictation.reportLevel(rms: rms) }
+        }
+        self.hudPanel = HUDPanel(model: hudModel)
         self.permissions = permissions
         self.dictation = dictation
         self.settingsModel = SettingsModel(
@@ -200,7 +211,8 @@ final class AppModel: ObservableObject {
             onIdleMinutesChanged: { idleTracker.setUnloadAfterMinutes($0) },
             onHistorySizeChanged: { history.setMaxLen($0) },
             onRestoreDelayChanged: { paster.setRestoreDelay($0) },
-            onVoiceCommandsChanged: { dictation.setVoiceCommandsEnabled($0) })
+            onVoiceCommandsChanged: { dictation.setVoiceCommandsEnabled($0) },
+            onHudEnabledChanged: { dictation.setHudEnabled($0) })
 
         let parakeet = engines["parakeet"] as? ParakeetEngine
         self.dictionaryModel = DictionaryModel(

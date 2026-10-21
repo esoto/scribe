@@ -24,6 +24,8 @@ final class Recorder: RecorderLike {
     private let engineControl: EngineControl
     private let lock = NSLock()
     private var armed = false
+    /// RMS of each captured chunk while armed, for the recording pill's level bars. Called on the audio thread.
+    var onLevel: ((Double) -> Void)?
 
     init(maxSeconds: Double = 300, sampleRate: Double = 16000, engineControl: EngineControl = AVEngineControl()) {
         self.buffer = RingBuffer(maxSeconds: maxSeconds, sampleRate: sampleRate)
@@ -37,6 +39,7 @@ final class Recorder: RecorderLike {
         lock.unlock()
         guard isArmed else { return }
         buffer.append(chunk)
+        onLevel?(Gates.rms(chunk))
     }
 
     func arm() throws {
