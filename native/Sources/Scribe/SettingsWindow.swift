@@ -47,6 +47,8 @@ struct SettingsWindow: View {
                     .tabItem { Text("Audio") }
                 ModelsPane(model: model.cleanupModels)
                     .tabItem { Text("Models") }
+                StatsPane(model: model.statsModel)
+                    .tabItem { Text("Stats") }
             }
         }
         .padding(24)
