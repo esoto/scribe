@@ -19,6 +19,7 @@ final class AppModel: ObservableObject {
     let dictionaryModel: DictionaryModel
     let statsModel: StatsModel
     let snippetsModel: SnippetsModel
+    let appProfilesModel: AppProfilesModel
     let permissions: PermissionsModel
     let dictation: DictationCoordinator
     let hudModel = HUDModel()
@@ -91,6 +92,8 @@ final class AppModel: ObservableObject {
         self.statsModel = StatsModel(store: stats)
         let snippetStore = SnippetStore()
         self.snippetsModel = SnippetsModel(store: snippetStore)
+        let profiles = AppProfileStore()
+        self.appProfilesModel = AppProfilesModel(store: profiles)
 
         // The sub-models call into each other (permissions ↔ coordinator, cleanup → coordinator); this ref
         // closes those loops once the coordinator exists.
@@ -165,6 +168,9 @@ final class AppModel: ObservableObject {
                     clock: { Date().timeIntervalSince1970 },
                     // keyDown runs on main (tap callback), so a direct read is safe.
                     frontmost: { NSWorkspace.shared.frontmostApplication?.processIdentifier },
+                    frontmostBundleID: { NSWorkspace.shared.frontmostApplication?.bundleIdentifier },
+                    // The store is thread-safe, so the pipeline's runner thread reads it directly.
+                    profileFor: { profiles.profile(for: $0) },
                     onState: sinks.onState,
                     onNotice: sinks.onNotice,
                     saveFailedAudio: sinks.saveFailedAudio,

@@ -49,6 +49,8 @@ struct SettingsWindow: View {
                     .tabItem { Text("Models") }
                 StatsPane(model: model.statsModel)
                     .tabItem { Text("Stats") }
+                AppsPane(model: model.appProfilesModel)
+                    .tabItem { Text("Apps") }
             }
         }
         .padding(24)
