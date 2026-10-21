@@ -82,6 +82,12 @@ final class SnippetStoreTests: XCTestCase {
         XCTAssertEqual(SnippetExpander.apply(snippets, to: "My address."), address)
     }
 
+    func testWholeUtteranceSpanishQuestionDropsBothMarks() {
+        XCTAssertEqual(SnippetExpander.apply(snippets, to: "¿My address?"), address)
+        // A one-liner keeps the question as asked.
+        XCTAssertEqual(SnippetExpander.apply(snippets, to: "¿My email?"), "¿e@example.com?")
+    }
+
     func testOneLineExpansionKeepsPunctuation() {
         XCTAssertEqual(
             SnippetExpander.apply(snippets, to: "Write to my email, please."),

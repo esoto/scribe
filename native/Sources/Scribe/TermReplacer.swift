@@ -37,11 +37,11 @@ enum TermReplacer {
                     let entry = lookup[stripped.cores]
                 else { continue }
                 let endsText = i + length == tokens.count
-                let trailing =
-                    entry.keepTrailing || !endsText
-                    ? stripped.trailing
-                    : stripped.trailing.filter { !sentencePunctuation.contains($0) }
-                out.append(stripped.leading + entry.replacement + trailing)
+                let dropsSentenceMarks = !entry.keepTrailing && endsText
+                let trailing = dropsSentenceMarks ? stripped.trailing.filter { !sentencePunctuation.contains($0) } : stripped.trailing
+                // Spanish opens a question with ¿: when the closing ? goes, its opener must go too.
+                let leading = dropsSentenceMarks ? stripped.leading.filter { !openingMarks.contains($0) } : stripped.leading
+                out.append(leading + entry.replacement + trailing)
                 i += length
                 advanced = true
                 break
@@ -93,6 +93,7 @@ enum TermReplacer {
         return (leading, cores, trailing)
     }
 
+    private static let openingMarks: Set<Character> = ["¿", "¡"]
     private static let sentencePunctuation: Set<Character> = [".", ",", ";", ":", "!", "?", "…"]
 
     private static let edgePunctuation: Set<Character> = [
