@@ -306,11 +306,14 @@ final class DictationCoordinator: ObservableObject {
             case .recording: hud.show(.listening)
             case .processing: hud.show(.processing)
             case .error:
-                hud.show(.result("Error — check log"))
+                hud.show(.problem("Error — check log"))
                 scheduleHudHide(hud)
             case .idle:
                 // process() emits the verdict (hint or paste cue) before this idle: leave it up briefly.
-                if case .result = hud.phase { scheduleHudHide(hud) } else { hud.hide() }
+                switch hud.phase {
+                case .result, .problem: scheduleHudHide(hud)
+                default: hud.hide()
+                }
             }
         }
         guard soundsEnabled() else { return }
@@ -344,7 +347,7 @@ final class DictationCoordinator: ObservableObject {
             notify("Microphone is off — open Setup / Doctor…")
             return
         }
-        if let hud, hudEnabled(), hud.phase != .hidden { hud.show(.result(message)) }
+        showVerdictOnPill(message)
         hint = message
         hintClear?.cancel()
         let seconds = hintSeconds
@@ -356,8 +359,18 @@ final class DictationCoordinator: ObservableObject {
     }
 
     func playPasteCue() {
-        if let hud, hudEnabled(), hud.phase != .hidden { hud.show(.result("Pasted")) }
+        showVerdictOnPill("Pasted")
         if soundsEnabled() { playSound("Tink") }
+    }
+
+    /// A verdict replaces Transcribing… or an earlier verdict. Hidden means the pill is off or this is Paste Again;
+    /// listening means an earlier queued job finished during the next hold and must not cover its level bars.
+    private func showVerdictOnPill(_ text: String) {
+        guard let hud, hudEnabled() else { return }
+        switch hud.phase {
+        case .processing, .result, .problem: hud.show(.result(text))
+        case .hidden, .listening: break
+        }
     }
 
     /// History → Paste Again, and `scribe://paste-last`. Guard failures read like a dictation's.

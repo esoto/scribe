@@ -196,8 +196,8 @@ final class AppModel: ObservableObject {
             hudEnabled: { settings.hudEnabled },
             log: log)
         lateDictation = dictation
-        // The recorder calls this on the audio thread, about 15 times a second while recording: one small
-        // main-actor hop per chunk is cheap enough, and the model drops levels while it is not listening.
+        // The recorder calls this on the audio thread once per captured chunk, a few tens of times a second at most:
+        // one small main-actor hop per chunk is cheap enough, and the model drops levels while it is not listening.
         recorder.onLevel = { rms in
             Task { @MainActor in dictation.reportLevel(rms: rms) }
         }

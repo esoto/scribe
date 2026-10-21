@@ -359,10 +359,19 @@ final class DictationCoordinatorTests: XCTestCase {
         let c = make(hudResultSeconds: 0.05)
 
         c.applyState(.error)
-        XCTAssertEqual(hud.phase, .result("Error — check log"))
+        XCTAssertEqual(hud.phase, .problem("Error — check log"))
 
         let hidden = await eventually { [unowned self] in hud.phase == .hidden }
         XCTAssertTrue(hidden)
+    }
+
+    func testIdleAfterAnErrorLeavesTheProblemUpBriefly() {
+        let c = make()
+
+        c.applyState(.error)
+        c.applyState(.idle)
+
+        XCTAssertEqual(hud.phase, .problem("Error — check log"))
     }
 
     func testTurningThePillOffHidesIt() {
@@ -383,6 +392,40 @@ final class DictationCoordinatorTests: XCTestCase {
         c.reportLevel(rms: 0.1)
 
         XCTAssertGreaterThan(hud.level, 0)
+    }
+
+    func testAnEarlierJobsVerdictLeavesTheHoldInProgressListening() {
+        let c = make()
+        c.applyState(.recording)
+
+        c.playPasteCue()
+        c.showHint("Pasted raw — cleanup timed out")
+        c.reportLevel(rms: 0.1)
+
+        XCTAssertEqual(hud.phase, .listening)
+        XCTAssertGreaterThan(hud.level, 0)
+    }
+
+    func testANewHoldCancelsThePendingHide() {
+        let c = make()
+        c.applyState(.processing)
+        c.playPasteCue()
+        c.applyState(.idle)
+        let pending = c.hudHide
+
+        c.applyState(.recording)
+
+        XCTAssertEqual(pending?.isCancelled, true)
+        XCTAssertEqual(hud.phase, .listening)
+    }
+
+    func testAVerdictWithThePillHiddenShowsNothing() {
+        let c = make()
+
+        c.playPasteCue()
+        c.showHint("Pasted raw — cleanup timed out")
+
+        XCTAssertEqual(hud.phase, .hidden)
     }
 
     // MARK: - Notifications

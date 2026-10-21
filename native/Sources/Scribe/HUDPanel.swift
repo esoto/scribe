@@ -2,6 +2,10 @@ import AppKit
 import Combine
 import SwiftUI
 
+/// Wide enough for the longest raw-fallback verdict ("Pasted raw — cleanup output rejected", about 281 pt of content);
+/// the capsule hugs its text, so short phases look the same and the spare width is transparent and click-through.
+private let pillSize = NSSize(width: 320, height: 40)
+
 /// The recording pill: a non-activating panel above the Dock, on every Space and over full-screen apps. It never
 /// becomes key — ⌘V must keep landing in the app the user is dictating into. Untested: it is a window.
 @MainActor
@@ -11,7 +15,7 @@ final class HUDPanel {
 
     init(model: HUDModel) {
         panel = NonKeyPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 220, height: 40),
+            contentRect: NSRect(origin: .zero, size: pillSize),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered, defer: true)
         panel.level = .statusBar
@@ -26,7 +30,8 @@ final class HUDPanel {
         hosting.frame = panel.contentRect(forFrameRect: panel.frame)
         panel.contentView = hosting
         phaseWatcher = model.$phase
-            .receive(on: RunLoop.main)
+            // Not RunLoop.main: that only runs in the default mode, so the pill would stall while a menu is open.
+            .receive(on: DispatchQueue.main)
             .sink { [weak self] phase in
                 MainActor.assumeIsolated { self?.setVisible(phase != .hidden) }
             }
@@ -73,7 +78,7 @@ struct HUDView: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
         .background(.regularMaterial, in: Capsule())
-        .frame(width: 220, height: 40)
+        .frame(width: pillSize.width, height: pillSize.height)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("scribe \(hudLabel(model.phase))")
     }

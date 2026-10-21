@@ -5,18 +5,22 @@ final class HUDModelTests: XCTestCase {
         XCTAssertEqual(hudGlyph(.listening), "\u{25CF}")
         XCTAssertEqual(hudGlyph(.processing), "\u{22EF}")
         XCTAssertEqual(hudGlyph(.result("Pasted")), "\u{25E6}")
+        XCTAssertEqual(hudGlyph(.problem("Error — check log")), "\u{26A0}")
         XCTAssertEqual(hudGlyph(.hidden), "")
         XCTAssertEqual(hudLabel(.listening), "Listening")
         XCTAssertEqual(hudLabel(.processing), "Transcribing\u{2026}")
         XCTAssertEqual(hudLabel(.result("Pasted raw — cleanup timed out")), "Pasted raw — cleanup timed out")
+        XCTAssertEqual(hudLabel(.problem("x")), "x")
         XCTAssertEqual(hudLabel(.hidden), "")
     }
 
     func testLevelIsADecibelScaleClampedToZeroOne() {
         XCTAssertEqual(hudLevel(rms: 0), 0)
-        XCTAssertEqual(hudLevel(rms: 0.0005), 0)   // below -50 dBFS: the energy gate's idea of silence
-        XCTAssertEqual(hudLevel(rms: 0.01), 0.2, accuracy: 0.01)
-        XCTAssertEqual(hudLevel(rms: 0.1), 0.6, accuracy: 0.01)
+        XCTAssertEqual(hudLevel(rms: 0.0005), 0)   // -66 dBFS, the energy gate, is under the floor
+        XCTAssertEqual(hudLevel(rms: 0.001), 0, accuracy: 1e-9)   // -60 dBFS is the floor
+        XCTAssertEqual(hudLevel(rms: 0.01), 0.4, accuracy: 0.01)
+        XCTAssertEqual(hudLevel(rms: 0.1), 0.8, accuracy: 0.01)
+        XCTAssertEqual(hudLevel(rms: 0.316), 1, accuracy: 0.01)   // -10 dBFS is full
         XCTAssertEqual(hudLevel(rms: 1), 1)
         XCTAssertEqual(hudLevel(rms: 5), 1)
     }
@@ -39,7 +43,7 @@ final class HUDModelTests: XCTestCase {
 
         model.show(.listening)
         model.setLevel(rms: 0.1)
-        XCTAssertEqual(model.level, 0.6, accuracy: 0.01)
+        XCTAssertEqual(model.level, 0.8, accuracy: 0.01)
         model.show(.listening)
         XCTAssertEqual(changes, 2)
 
@@ -59,8 +63,17 @@ final class HUDModelTests: XCTestCase {
         model.show(.listening)
         model.setLevel(rms: 0.1)
         model.setLevel(rms: 0)
-        XCTAssertEqual(model.level, 0.36, accuracy: 0.01)
+        XCTAssertEqual(model.level, 0.48, accuracy: 0.01)
         model.setLevel(rms: 0)
-        XCTAssertEqual(model.level, 0.216, accuracy: 0.01)
+        XCTAssertEqual(model.level, 0.288, accuracy: 0.01)
+    }
+
+    @MainActor
+    func testSilenceAfterSpeechReturnsTheBarsToFlat() {
+        let model = HUDModel()
+        model.show(.listening)
+        model.setLevel(rms: 0.1)
+        for _ in 0..<20 { model.setLevel(rms: 0) }
+        XCTAssertEqual(model.level, 0)
     }
 }
