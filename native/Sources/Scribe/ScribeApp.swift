@@ -408,6 +408,10 @@ struct ScribeApp: App {
             DictionaryWindow(model: model.dictionaryModel, cleanupModels: model.cleanupModels)
         }
 
+        Window("scribe fix a word", id: fixWordWindowID) {
+            FixWordWindow(dictionary: model.dictionaryModel, history: model.history)
+        }
+
         Window("scribe settings", id: settingsWindowID) {
             SettingsWindow(model: model)
         }

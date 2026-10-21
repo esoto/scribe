@@ -45,6 +45,14 @@ enum TermReplacer {
         original.lowercased().split(whereSeparator: { $0.isWhitespace }).map(String.init)
     }
 
+    /// Edge punctuation off both ends, as `strip` treats a matched window's outer tokens.
+    static func trimEdges(_ text: String) -> String {
+        var core = Substring(text)
+        while let f = core.first, edgePunctuation.contains(f) { core.removeFirst() }
+        while let l = core.last, edgePunctuation.contains(l) { core.removeLast() }
+        return String(core)
+    }
+
     /// nil when a token is empty after stripping, so punctuation-only tokens never match.
     private static func strip(_ window: ArraySlice<String>) -> (leading: String, cores: [String], trailing: String)? {
         var cores: [String] = []

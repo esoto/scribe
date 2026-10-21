@@ -133,6 +133,10 @@ times out or trips its gates. Matching is whole-word and case-insensitive,
 punctuation is preserved, and the replacement is pasted verbatim, so
 `camel` fixes "Camel," but leaves `camelCase` alone.
 
+**Fix a Word…** (History submenu) skips the guessing: pick the dictation,
+click the word scribe misheard — several in a row for a phrase — type
+what you said, and the pair is added for you. Only the pair is stored.
+
 **Heard but not matched.** Matching is exact, so one pair catches one
 spelling — and a mangled name comes back differently every time. The editor
 therefore lists words scribe heard that match nothing it knows, with a
