@@ -76,6 +76,8 @@ final class DictationPipeline {
     private let onCleaned: ((String) -> Void)?
     /// Read fresh each dictation; applied deterministically here, not via the cleanup prompt.
     private let replacementPairs: () -> [ReplacementPair]
+    /// Read fresh each dictation; expanded last, so neither the model nor the harvester ever sees an expansion.
+    private let snippets: () -> [Snippet]
     private let saveFailedAudio: ([Float]) -> Void
     /// A short verdict on the last dictation for the status row: a degradation, or the command that ran — never a plain user choice like disabled cleanup.
     private let onHint: (String) -> Void
@@ -127,6 +129,7 @@ final class DictationPipeline {
         onLog: ((String) -> Void)? = nil,
         onCleaned: ((String) -> Void)? = nil,
         replacementPairs: @escaping () -> [ReplacementPair] = { [] },
+        snippets: @escaping () -> [Snippet] = { [] },
         onHint: @escaping (String) -> Void = { _ in },
         onPasted: @escaping () -> Void = {},
         onStats: ((DictationStat) -> Void)? = nil
@@ -153,6 +156,7 @@ final class DictationPipeline {
         self.onLog = onLog
         self.onCleaned = onCleaned
         self.replacementPairs = replacementPairs
+        self.snippets = snippets
         self.onHint = onHint
         self.onPasted = onPasted
         self.onStats = onStats
@@ -361,6 +365,9 @@ final class DictationPipeline {
         if cleaned {
             onCleaned?(final)
         }
+
+        // After the harvester, so personal text in an expansion never becomes a learned term; after cleanup, so the model never sees it and its line breaks survive.
+        final = SnippetExpander.apply(snippets(), to: final)
 
         do {
             try paster.paste(final, target: target)
