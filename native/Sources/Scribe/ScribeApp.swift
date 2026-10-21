@@ -40,6 +40,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var enhancerDownloadStatus: String?
     /// True until the launch preload ends. The download statuses cover only part of it: a load from disk reports nothing.
     @Published private(set) var startupPreloadInFlight = true
+    private var lastRefusedNoticeAt: Date?
 
     init() {
         let defaults = UserDefaults.standard
@@ -132,6 +133,10 @@ final class AppModel: ObservableObject {
             notificationAuthorizer: LiveNotificationAuthorizer(log: log),
             onMicrophoneGranted: { lateDictation.prewarmRecorderIfGranted() },
             onInputMonitoringGranted: { lateDictation.activateHotkeyIfNeeded() })
+        let guardedPaster = GuardedPaster(
+            inner: paster,
+            accessibilityGranted: { TCC.accessibilityGranted() },
+            currentFrontmost: frontmostPID)
         let dictation = DictationCoordinator(
             recorder: recorder,
             pipelineConfig: config,
@@ -141,10 +146,7 @@ final class AppModel: ObservableObject {
                     recorder: recorder,
                     stt: engine,
                     cleaner: cleanupModels.cleaner,
-                    paster: GuardedPaster(
-                        inner: paster,
-                        accessibilityGranted: { TCC.accessibilityGranted() },
-                        currentFrontmost: frontmostPID),
+                    paster: guardedPaster,
                     history: history,
                     config: config,
                     clock: { Date().timeIntervalSince1970 },
@@ -174,6 +176,8 @@ final class AppModel: ObservableObject {
             soundsEnabled: { settings.sounds },
             microphoneGranted: { permissions.grants.microphone },
             reportInputMonitoring: { permissions.setInputMonitoring($0) },
+            // No key-down app to compare against: only Accessibility and "not scribe itself" apply.
+            repaste: { try guardedPaster.pasteIntoFocusedApp($0, ownPID: ProcessInfo.processInfo.processIdentifier) },
             log: log)
         lateDictation = dictation
         self.permissions = permissions
@@ -225,6 +229,10 @@ final class AppModel: ObservableObject {
         // last_failed.wav is for debugging a recent failure, not for keeping audio around.
         FileLogger.expireFailedAudio()
         dictation.start()
+        NotificationCenter.default.addObserver(forName: .scribeOpenURL, object: nil, queue: .main) { [weak self] note in
+            guard let url = note.object as? URL else { return }
+            MainActor.assumeIsolated { self?.handleURL(url) }
+        }
 
         microphones = AudioDevices.inputDevices()
         AudioDevices.onDevicesChanged { [weak self] in
@@ -371,6 +379,32 @@ final class AppModel: ObservableObject {
     func copyToClipboard(_ text: String) {
         pasteboard.set(text)
     }
+
+    /// History → Paste Again and `scribe://paste-last`: the last dictation, through the same guard as a dictation.
+    func pasteLastDictation() {
+        guard let last = history.items().first else {
+            dictation.notify("Nothing to paste — no dictation yet")
+            return
+        }
+        dictation.pasteAgain(last.final)
+    }
+
+    /// Off by default: any process can open a URL scheme. The parser takes no parameters, so nothing here reads one.
+    func handleURL(_ url: URL) {
+        switch URLCommand.outcome(for: url, enabled: settings.urlSchemeEnabled) {
+        case .run(.pasteLast):
+            pasteLastDictation()
+        case .refusedOff:
+            // A looping opener would otherwise stack one banner per open.
+            let now = Date()
+            if URLCommand.shouldNotifyRefusal(lastAt: lastRefusedNoticeAt, now: now) {
+                lastRefusedNoticeAt = now
+                dictation.notify("scribe:// URLs are off — allow them in Settings › General")
+            }
+        case .ignored:
+            logger.log(URLCommand.ignoredLogLine(for: url))
+        }
+    }
 }
 
 /// Same phase-1-init workaround as ProgressRelay, for the AFM-lost signal.
@@ -477,6 +511,7 @@ private struct MenuBarLabel: View {
 
 extension Notification.Name {
     static let scribeReopen = Notification.Name("dev.esoto.scribe.reopen")
+    static let scribeOpenURL = Notification.Name("dev.esoto.scribe.openURL")
 }
 
 /// With the menu bar item hidden behind the notch, launching scribe again from Spotlight or Finder did nothing.
@@ -487,6 +522,13 @@ final class ScribeAppDelegate: NSObject, NSApplicationDelegate {
             NotificationCenter.default.post(name: .scribeReopen, object: nil)
         }
         return false
+    }
+
+    /// scribe has no WindowGroup or always-built view to host onOpenURL, so URL opens arrive here.
+    func application(_ application: NSApplication, open urls: [URL]) {
+        for url in urls {
+            NotificationCenter.default.post(name: .scribeOpenURL, object: url)
+        }
     }
 }
 

@@ -67,11 +67,18 @@ Upgrading from a v3 install downloads Ultra on first launch (progress shows in t
   permission, plus a live status line while recording/transcribing.
 - **Engine** picker: Parakeet (fast, default) ↔ Whisper (better for
   Spanish-heavy dictation; loads on first switch).
-- **Settings…** (⌘,) has three tabs. **General** holds the hotkey, hold delay, sounds, Launch at Login, idle unload, and history size. **Audio** picks the microphone and holds the experimental **Enhance Audio** toggle (LocalVQE noise suppression before transcription — off by default because it lowered accuracy on synthetic noise in tests). **Models** downloads, switches, and deletes the cleanup model.
+- **Settings…** (⌘,) has three tabs. **General** holds the hotkey, hold delay, sounds, scribe:// URLs, Launch at Login, idle unload, and history size. **Audio** picks the microphone and holds the experimental **Enhance Audio** toggle (LocalVQE noise suppression before transcription — off by default because it lowered accuracy on synthetic noise in tests). **Models** downloads, switches, and deletes the cleanup model.
 - **Cleanup (remove fillers)** toggle: off = verbatim transcription pasted raw.
 - **History**: the last 10 dictations by default (Settings › General), in
   memory only, never persisted; "· raw" marks one pasted without cleanup.
-  Click one to copy it back to the clipboard.
+  Click one to copy it back to the clipboard; Option-click copies what the
+  engine heard, before your Dictionary corrections and cleanup. **Paste Again** re-pastes the last dictation
+  into the app that has focus.
+- **Automation**: with **Allow scribe:// URLs** on (Settings › General, off
+  by default), `open -g scribe://paste-last` pastes the last dictation into
+  the app that has focus (`-g` keeps that app in front). No parameters are
+  accepted, so a URL can never carry text into scribe. While it is on, any
+  app, or a web page you allow, can paste your last dictation the same way.
 - **Dictionary**: your vocabulary and corrections, fed to the cleanup pass
   so names and jargon come out spelled right — see below.
 - If cleanup ever misbehaves (timeout, length/language sanity gates), the
@@ -202,6 +209,7 @@ Most of these have a control in **Settings…** (⌘,), the menu, or the Diction
 | `cleanupModelPath` | _(unset)_ | local MLX model folder to use for cleanup instead of stock Gemma; when set, overrides `cleanupModel` and disables switching in **Settings › Models** |
 | `vocabularyBiasingEnabled` | false | acoustic vocabulary biasing for Parakeet (experimental) (Dictionary window) |
 | `enhanceAudioEnabled` | false | LocalVQE noise suppression before transcription — experimental (Settings › Audio) |
+| `urlSchemeEnabled` | false | allow `scribe://` URLs from other apps (Settings) |
 | `microphoneUID` | _(unset)_ | input device UID; unset follows the system default input (Settings) |
 
 **Custom cleanup model:** point `cleanupModelPath` at any local MLX model

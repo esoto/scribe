@@ -62,6 +62,11 @@ func historyRowLabel(_ record: DictationRecord) -> String {
     record.cleaned ? truncateLabel(record.final) : truncateLabel(record.final) + " · raw"
 }
 
+/// Option-click alternate of a History row: what the engine heard, before replacements and cleanup.
+func historyRawRowLabel(_ record: DictationRecord) -> String {
+    "Copy raw · " + truncateLabel(record.raw, n: 30)
+}
+
 func truncateLabel(_ text: String, n: Int = 40) -> String {
     guard text.count > n else { return text }
     let cutIndex = text.index(text.startIndex, offsetBy: n - 1)
@@ -147,6 +152,10 @@ struct MenuBarView: View {
             if items.isEmpty {
                 Text("(empty)")
             } else {
+                Button("Paste Again") {
+                    model.pasteLastDictation()
+                }
+                .help("Pastes the last dictation into the app that has focus")
                 Button("Fix a Word…") {
                     openFixWordWindow(openWindow)
                 }
@@ -158,6 +167,13 @@ struct MenuBarView: View {
                         Label(historyRowLabel(record), systemImage: "doc.on.clipboard")
                     }
                     .help(record.final)
+                    .modifierKeyAlternate(.option) {
+                        Button {
+                            model.copyToClipboard(record.raw)
+                        } label: {
+                            Label(historyRawRowLabel(record), systemImage: "doc.on.clipboard")
+                        }
+                    }
                 }
             }
         }

@@ -104,4 +104,29 @@ final class PasteGuardTests: XCTestCase {
         }
         XCTAssertEqual(inner.copied, [])
     }
+
+    func test_paste_again_refuses_scribe_itself() {
+        let inner = FakeDeliverer()
+        XCTAssertThrowsError(try guarded(inner, current: 7).pasteIntoFocusedApp("hola", ownPID: 7)) { error in
+            XCTAssertEqual((error as? PasteGuardError)?.notice, "scribe has focus — text copied, press ⌘V")
+        }
+        XCTAssertEqual(inner.copied, ["hola"])
+        XCTAssertEqual(inner.pasted, [])
+    }
+
+    func test_paste_again_pastes_into_another_app_without_a_target() throws {
+        let inner = FakeDeliverer()
+        try guarded(inner, current: 42).pasteIntoFocusedApp("hola", ownPID: 7)
+        XCTAssertEqual(inner.pasted, ["hola"])
+        XCTAssertEqual(inner.pastedTargets, [nil])
+    }
+
+    func test_paste_again_reports_accessibility_before_focus() {
+        let inner = FakeDeliverer()
+        XCTAssertThrowsError(
+            try guarded(inner, accessibility: false, current: 7).pasteIntoFocusedApp("hola", ownPID: 7)
+        ) { error in
+            XCTAssertEqual((error as? PasteGuardError)?.notice, "Accessibility is off — text copied, press ⌘V")
+        }
+    }
 }

@@ -42,6 +42,9 @@ targets:
         CFBundleIconFile: AppIcon
         LSUIElement: true
         NSMicrophoneUsageDescription: "scribe listens while you hold the dictation key."
+        CFBundleURLTypes:
+          - CFBundleURLName: dev.esoto.scribe
+            CFBundleURLSchemes: [scribe]
     dependencies: &mlDeps
       - package: FluidAudio
         product: FluidAudio
