@@ -96,4 +96,23 @@ final class RecorderTests: XCTestCase {
         try recorder.arm()
         XCTAssertEqual(recorder.disarm(), [])
     }
+
+    func testLevelReportsEachChunkOnlyWhileArmed() throws {
+        var levels: [Double] = []
+        recorder.onLevel = { levels.append($0) }
+
+        engine.onSamples?([Float](repeating: 0.5, count: 160))
+        XCTAssertEqual(levels, [])
+
+        try recorder.arm()
+        engine.onSamples?([Float](repeating: 0.5, count: 160))
+        engine.onSamples?([Float](repeating: 0.0, count: 160))
+        XCTAssertEqual(levels.count, 2)
+        XCTAssertEqual(levels[0], 0.5, accuracy: 1e-6)
+        XCTAssertEqual(levels[1], 0)
+
+        _ = recorder.disarm()
+        engine.onSamples?([Float](repeating: 0.5, count: 160))
+        XCTAssertEqual(levels.count, 2)
+    }
 }
