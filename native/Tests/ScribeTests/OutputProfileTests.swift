@@ -33,6 +33,8 @@ final class OutputProfileTests: XCTestCase {
         XCTAssertEqual(OutputProfile.apply(p, to: "I think so"), "I think so")
         XCTAssertEqual(OutputProfile.apply(p, to: "I'm fine"), "I'm fine")
         XCTAssertEqual(OutputProfile.apply(p, to: "Hetzner is down"), "hetzner is down")
+        XCTAssertEqual(OutputProfile.apply(p, to: "@Esteban can you"), "@Esteban can you")
+        XCTAssertEqual(OutputProfile.apply(p, to: "/Users is a folder"), "/Users is a folder")
         XCTAssertEqual(OutputProfile.apply(p, to: ""), "")
     }
 
@@ -47,6 +49,7 @@ final class OutputProfileTests: XCTestCase {
         let p = profile(lower: true)
         XCTAssertEqual(OutputProfile.apply(p, to: "¿Qué tal?"), "¿qué tal?")
         XCTAssertEqual(OutputProfile.apply(p, to: "¡Hola!"), "¡hola!")
+        XCTAssertEqual(OutputProfile.apply(p, to: "«Hola»"), "«hola»")
         XCTAssertEqual(OutputProfile.apply(p, to: "Él dijo"), "él dijo")
         XCTAssertEqual(OutputProfile.apply(p, to: "\"Hello\" she said"), "\"hello\" she said")
         XCTAssertEqual(OutputProfile.apply(p, to: "¿OK?"), "¿OK?")

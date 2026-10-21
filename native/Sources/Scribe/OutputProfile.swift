@@ -34,10 +34,12 @@ enum OutputProfile {
         return String(text.dropLast())
     }
 
+    private static let openingMarks: Set<Character> = ["¿", "¡", "\"", "'", "\u{201C}", "\u{2018}", "«", "(", "["]
+
     /// Only a sentence-initial capital: "iPhone", "OK", "I" and "I'm" are left alone. An opening "¿", "¡" or quote
     /// comes before the capital in Spanish and in quoted speech.
     static func lowercasingFirst(_ text: String) -> String {
-        guard let start = text.firstIndex(where: { !$0.isPunctuation }), text[start].isUppercase else { return text }
+        guard let start = text.firstIndex(where: { !openingMarks.contains($0) }), text[start].isUppercase else { return text }
         let firstWord = text[start...].prefix { !$0.isWhitespace }
         guard TermReplacer.trimEdges(String(firstWord)) != "I", !firstWord.hasPrefix("I'"),
             !firstWord.hasPrefix("I\u{2019}"), firstWord.dropFirst().allSatisfy({ !$0.isUppercase })

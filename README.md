@@ -101,9 +101,10 @@ Upgrading from a v3 install downloads Ultra on first launch (progress shows in t
   text, no app names. **Reset Stats** empties it.
 - **Apps** (Settings › Apps): rules for the app you dictate into — cleanup
   on, off or as the menu toggle says; drop the trailing period (an
-  ellipsis, an abbreviation's period, "?" and "!" stay); lowercase the
-  first letter ("I", acronyms and brand casing like "iPhone" keep their
-  capital). Add an app from /Applications. Deterministic text rules, so
+  ellipsis, "?", "!" and the last period of "p.m." or "U.S." stay);
+  lowercase the first letter, names included ("I", "OK" and
+  "McDonald" stay as they are). Add an app from /Applications.
+  Deterministic text rules, so
   the cleanup model and its eval are untouched. Stored as bundle ids and
   switches in `~/Library/Application Support/scribe/profiles.json`; the
   app you dictate into is never logged.
