@@ -241,4 +241,32 @@ final class AppSettingsTests: XCTestCase {
         settings.importFromPythonConfigOnce()
         XCTAssertTrue(defaults.bool(forKey: "didImportToml"))
     }
+
+    // MARK: - 1.4 keys
+
+    func testOneFourDefaults() {
+        XCTAssertTrue(settings.voiceCommandsEnabled)
+        // Off by default: any process can open a URL scheme.
+        XCTAssertFalse(settings.urlSchemeEnabled)
+        XCTAssertTrue(settings.hudEnabled)
+        XCTAssertEqual(settings.hotkeyMode, .hold)
+    }
+
+    func testOneFourKeysRoundTrip() {
+        settings.voiceCommandsEnabled = false
+        settings.urlSchemeEnabled = true
+        settings.hudEnabled = false
+        settings.hotkeyMode = .holdOrLatch
+
+        let other = AppSettings(defaults: defaults)
+        XCTAssertFalse(other.voiceCommandsEnabled)
+        XCTAssertTrue(other.urlSchemeEnabled)
+        XCTAssertFalse(other.hudEnabled)
+        XCTAssertEqual(other.hotkeyMode, .holdOrLatch)
+    }
+
+    func testUnknownHotkeyModeFallsBackToHold() {
+        defaults.set("latch", forKey: "hotkeyMode")
+        XCTAssertEqual(settings.hotkeyMode, .hold)
+    }
 }

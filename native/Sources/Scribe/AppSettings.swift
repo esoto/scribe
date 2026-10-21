@@ -28,6 +28,10 @@ final class AppSettings {
         static let dictionaryLearningEnabled = "dictionaryLearningEnabled"
         static let vocabularyBiasingEnabled = "vocabularyBiasingEnabled"
         static let enhanceAudioEnabled = "enhanceAudioEnabled"
+        static let voiceCommandsEnabled = "voiceCommandsEnabled"
+        static let urlSchemeEnabled = "urlSchemeEnabled"
+        static let hudEnabled = "hudEnabled"
+        static let hotkeyMode = "hotkeyMode"
         static let didImportToml = "didImportToml"
     }
 
@@ -62,6 +66,36 @@ final class AppSettings {
     var enhanceAudioEnabled: Bool {
         get { defaults.object(forKey: Key.enhanceAudioEnabled) as? Bool ?? false }
         set { defaults.set(newValue, forKey: Key.enhanceAudioEnabled) }
+    }
+
+    /// Whole-utterance commands ("enter", "new line", …). On by default: an utterance that is exactly a command
+    /// phrase is almost never meant as text.
+    var voiceCommandsEnabled: Bool {
+        get { defaults.object(forKey: Key.voiceCommandsEnabled) as? Bool ?? true }
+        set { defaults.set(newValue, forKey: Key.voiceCommandsEnabled) }
+    }
+
+    /// `scribe://` URLs. Off by default: any process or web page can open a URL scheme.
+    var urlSchemeEnabled: Bool {
+        get { defaults.object(forKey: Key.urlSchemeEnabled) as? Bool ?? false }
+        set { defaults.set(newValue, forKey: Key.urlSchemeEnabled) }
+    }
+
+    /// The recording pill above the Dock.
+    var hudEnabled: Bool {
+        get { defaults.object(forKey: Key.hudEnabled) as? Bool ?? true }
+        set { defaults.set(newValue, forKey: Key.hudEnabled) }
+    }
+
+    /// Hold is the default and what the privacy copy promises; latching is opt-in.
+    var hotkeyMode: HotkeyMode {
+        get {
+            guard let raw = defaults.string(forKey: Key.hotkeyMode), let mode = HotkeyMode(rawValue: raw) else {
+                return .hold
+            }
+            return mode
+        }
+        set { defaults.set(newValue.rawValue, forKey: Key.hotkeyMode) }
     }
 
     /// Parakeet vocabulary biasing. Default off: rescoring loose enough to catch manglings also
