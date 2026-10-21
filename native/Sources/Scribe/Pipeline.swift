@@ -69,6 +69,9 @@ final class DictationPipeline {
     private let clock: () -> Double
     private let runner: (@escaping () async -> Void) -> Void
     private let frontmost: () -> pid_t?
+    /// Read at key-down, like `frontmost`; the app that had focus then picks the profile.
+    private let frontmostBundleID: () -> String?
+    private let profileFor: (String?) -> AppProfile?
     private let onState: (PipelineState) -> Void
     private let onNotice: (String) -> Void
     private let onLog: ((String) -> Void)?
@@ -100,6 +103,7 @@ final class DictationPipeline {
     private var downAt: Double?
     /// Per hold, not per pipeline: queued jobs outlive later key-downs, which would otherwise retarget them.
     private var downTarget: pid_t?
+    private var downBundleID: String?
     private var isArmed = false
     /// A job only touches the glyph while no hold is in progress and no newer job is queued, else its
     /// .processing/.idle would blank the ● of the dictation in progress. A discarded short tap starts a hold
@@ -119,6 +123,8 @@ final class DictationPipeline {
         clock: @escaping () -> Double,
         runner: ((@escaping () async -> Void) -> Void)? = nil,
         frontmost: @escaping () -> pid_t? = { nil },
+        frontmostBundleID: @escaping () -> String? = { nil },
+        profileFor: @escaping (String?) -> AppProfile? = { _ in nil },
         onState: @escaping (PipelineState) -> Void,
         onNotice: @escaping (String) -> Void,
         saveFailedAudio: @escaping ([Float]) -> Void,
@@ -146,6 +152,8 @@ final class DictationPipeline {
         self.clock = clock
         self.runner = runner ?? DictationPipeline.makeSerialRunner()
         self.frontmost = frontmost
+        self.frontmostBundleID = frontmostBundleID
+        self.profileFor = profileFor
         self.onState = onState
         self.onNotice = onNotice
         self.saveFailedAudio = saveFailedAudio
@@ -176,6 +184,7 @@ final class DictationPipeline {
         isArmed = true
         downAt = clock()
         downTarget = frontmost()
+        downBundleID = frontmostBundleID()
         stateLock.withLock {
             holding = true
             onState(.recording)
@@ -198,9 +207,10 @@ final class DictationPipeline {
             return latestJob
         }
         let target = downTarget
+        let bundleID = downBundleID
         runner { [weak self] in
             guard let self else { return }
-            await self.process(pcm, job: job, target: target, enqueuedAt: enqueuedAt)
+            await self.process(pcm, job: job, target: target, bundleID: bundleID, enqueuedAt: enqueuedAt)
         }
     }
 
@@ -244,7 +254,7 @@ final class DictationPipeline {
 
     // MARK: - Processing (runs on the injected runner)
 
-    private func process(_ pcm: [Float], job: Int, target: pid_t?, enqueuedAt: Double) async {
+    private func process(_ pcm: [Float], job: Int, target: pid_t?, bundleID: String?, enqueuedAt: Double) async {
         func emit(_ state: PipelineState) {
             stateLock.withLock { if !holding, latestJob == job { onState(state) } }
         }
@@ -334,6 +344,7 @@ final class DictationPipeline {
         // Unconditional so it also covers too-short, disabled, and gated-out cleanup.
         let pairs = replacementPairs()
         let transcript = TermReplacer.apply(pairs, to: raw)
+        let profile = profileFor(bundleID)
 
         var final = transcript
         var cleaned = false
@@ -343,7 +354,9 @@ final class DictationPipeline {
         var skipNote = ""
         var cleanupSkip: CleanupSkip?
         if let cleaner,
-            Gates.shouldClean(transcript, enabled: cleanupEnabled, minWords: config.minWords)
+            Gates.shouldClean(
+                transcript, enabled: OutputProfile.cleanupEnabled(profile, global: cleanupEnabled),
+                minWords: config.minWords)
         {
             cleanupRan = true
             let cleanStart = clock()
@@ -358,7 +371,7 @@ final class DictationPipeline {
             }
             cleanupMs = Int((clock() - cleanStart) * 1000)
         }
-        onLog?("dictation: engine=\(engineName) cleanupModel=\(cleanupModelName) stt=\(sttMs)ms bias=\(biasMs)ms enhance=\(enhanceMs)ms cleanup=\(cleanupMs)ms cleaned=\(cleaned) chars=\(final.count)\(enhanceSkipNote)\(skipNote)")
+        onLog?("dictation: engine=\(engineName) cleanupModel=\(cleanupModelName) stt=\(sttMs)ms bias=\(biasMs)ms enhance=\(enhanceMs)ms cleanup=\(cleanupMs)ms cleaned=\(cleaned) chars=\(final.count)\(enhanceSkipNote)\(skipNote)\(profile == nil ? "" : " profile=yes")")
         onStats?(DictationStat(
             words: final.split(whereSeparator: { $0.isWhitespace }).count, cleaned: cleaned,
             rawFallback: cleanupSkip != nil, sttMs: sttMs, cleanupMs: cleanupRan ? cleanupMs : nil))
@@ -369,6 +382,9 @@ final class DictationPipeline {
 
         // After the harvester, so personal text in an expansion never becomes a learned term; after cleanup, so the model never sees it and its line breaks survive.
         final = SnippetExpander.apply(snippets(), to: final)
+        // After the snippets, so a block keeps its end-of-text rule; after onCleaned and the stats: the harvester wants the
+        // model's casing, and these rules never change the word count.
+        final = OutputProfile.apply(profile, to: final)
 
         do {
             try paster.paste(final, target: target)

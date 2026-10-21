@@ -51,6 +51,8 @@ final class PipelineTests: XCTestCase {
         snippets: [Snippet] = [],
         runner: ((@escaping () async -> Void) -> Void)? = nil,
         frontmost: @escaping () -> pid_t? = { nil },
+        frontmostBundleID: @escaping () -> String? = { nil },
+        profiles: [AppProfile] = [],
         enhancer: AudioEnhancer? = nil,
         enhanceEnabled: Bool = false,
         keyPresser: KeyPressing? = nil,
@@ -74,6 +76,8 @@ final class PipelineTests: XCTestCase {
             clock: { clock.t },
             runner: runner ?? makeSyncRunner(),
             frontmost: frontmost,
+            frontmostBundleID: frontmostBundleID,
+            profileFor: { id in profiles.first { $0.bundleID == id } },
             onState: { states.append($0) },
             onNotice: { notices.append($0) },
             saveFailedAudio: { saved.append($0) },
@@ -1250,5 +1254,134 @@ final class PipelineTests: XCTestCase {
         dictate(h)
         XCTAssertEqual(paster.pasted, ["\n"])
         XCTAssertTrue(hist.items().isEmpty, "a command is not a dictation")
+    }
+
+    func testSnippetsRunBeforeProfiles() {
+        // A one-line expansion that ends in a period: only the profile rule, applied after the expansion, can drop it.
+        let paster = FakePaster()
+        let profile = AppProfile(bundleID: "com.slack", appName: "Slack", stripTrailingPeriod: true)
+        let h = make(
+            stt: FakeStt(text: "sign off"), paster: paster,
+            snippets: [Snippet(trigger: "sign off", expansion: "Best, Esteban.")],
+            frontmostBundleID: { "com.slack" }, profiles: [profile])
+        dictate(h)
+        XCTAssertEqual(paster.pasted, ["Best, Esteban"])
+    }
+
+    // MARK: - App profiles
+
+    private let slackOff = AppProfile(bundleID: "com.slack", appName: "Slack", cleanup: false)
+
+    func testProfileCleanupOffSkipsTheCleaner() {
+        let cleaner = FakeCleaner()
+        let paster = FakePaster()
+        let h = make(cleaner: cleaner, paster: paster, frontmostBundleID: { "com.slack" }, profiles: [slackOff])
+        dictate(h)
+        XCTAssertEqual(cleaner.calls, 0)
+        XCTAssertEqual(paster.pasted, ["so um hello there world"])
+    }
+
+    func testProfileCleanupOnOverridesAGlobalOff() {
+        let cleaner = FakeCleaner()
+        let profile = AppProfile(bundleID: "com.slack", appName: "Slack", cleanup: true)
+        let h = make(cleaner: cleaner, frontmostBundleID: { "com.slack" }, profiles: [profile])
+        h.pipeline.cleanupEnabled = false
+        dictate(h)
+        XCTAssertEqual(cleaner.calls, 1)
+    }
+
+    func testProfileRulesApplyAfterCleanup() {
+        let paster = FakePaster()
+        let hist = History(maxLen: 10)
+        let profile = AppProfile(
+            bundleID: "com.slack", appName: "Slack", cleanup: nil, stripTrailingPeriod: true, lowercaseFirst: true)
+        let h = make(
+            cleaner: FakeCleaner(out: "Hello there world."), paster: paster, history: hist,
+            frontmostBundleID: { "com.slack" }, profiles: [profile])
+        dictate(h)
+        XCTAssertEqual(paster.pasted, ["hello there world"])
+        XCTAssertEqual(hist.items()[0].final, "hello there world")
+        XCTAssertEqual(h.stats.value.first?.words, 3)
+        XCTAssertEqual(h.cleanedTexts.value, ["Hello there world."], "the harvester sees the model's casing")
+    }
+
+    func testQueuedJobKeepsItsKeyDownProfile() {
+        let runner = ManualRunner()
+        let paster = FakePaster()
+        var id: String? = "com.slack"
+        let lower = AppProfile(bundleID: "com.slack", appName: "Slack", lowercaseFirst: true)
+        let h = make(
+            cleaner: FakeCleaner(out: "Hello there world."), paster: paster, runner: runner.run,
+            frontmostBundleID: { id }, profiles: [lower])
+        dictate(h)
+        id = "com.other"
+        h.pipeline.keyDown()
+        runner.drain()
+        XCTAssertEqual(paster.pasted, ["hello there world."])
+    }
+
+    func testProfileRulesApplyOnTheRawPath() {
+        let cleaner = FakeCleaner()
+        let paster = FakePaster()
+        let profile = AppProfile(
+            bundleID: "com.slack", appName: "Slack", cleanup: false, stripTrailingPeriod: true, lowercaseFirst: true)
+        let h = make(
+            stt: FakeStt(text: "Hello there big world."), cleaner: cleaner, paster: paster,
+            frontmostBundleID: { "com.slack" }, profiles: [profile])
+        dictate(h)
+        XCTAssertEqual(cleaner.calls, 0)
+        XCTAssertEqual(paster.pasted, ["hello there big world"])
+    }
+
+    func testProfileRulesApplyToARawFallback() {
+        let paster = FakePaster()
+        let profile = AppProfile(bundleID: "com.slack", appName: "Slack", stripTrailingPeriod: true)
+        let h = make(
+            stt: FakeStt(text: "Hello there big world."), cleaner: FakeCleaner(err: TestError(message: "boom")),
+            paster: paster, frontmostBundleID: { "com.slack" }, profiles: [profile])
+        dictate(h)
+        XCTAssertEqual(paster.pasted, ["Hello there big world"])
+        XCTAssertTrue(h.cues.value.contains("hint: Pasted raw — cleanup failed"), "\(h.cues.value)")
+    }
+
+    func testProfileCleanupOnStillNeedsMinWords() {
+        let cleaner = FakeCleaner()
+        let profile = AppProfile(bundleID: "com.slack", appName: "Slack", cleanup: true)
+        let h = make(
+            stt: FakeStt(text: "hi there"), cleaner: cleaner, frontmostBundleID: { "com.slack" }, profiles: [profile])
+        h.pipeline.cleanupEnabled = false
+        dictate(h)
+        XCTAssertEqual(cleaner.calls, 0)
+    }
+
+    func testProfileIsReadAtKeyDown() {
+        let cleaner = FakeCleaner()
+        var id: String? = "com.slack"
+        let h = make(cleaner: cleaner, frontmostBundleID: { id }, profiles: [slackOff])
+        h.pipeline.keyDown()
+        id = "com.other"
+        h.clock.t += 1.0
+        h.pipeline.keyUp()
+        XCTAssertEqual(cleaner.calls, 0, "the app focused at key-down picks the profile, not the one focused at paste time")
+    }
+
+    func testNoProfileChangesNothing() {
+        let cleaner = FakeCleaner()
+        let paster = FakePaster()
+        let h = make(cleaner: cleaner, paster: paster, frontmostBundleID: { "com.unknown" }, profiles: [slackOff])
+        dictate(h)
+        XCTAssertEqual(cleaner.calls, 1)
+        XCTAssertEqual(paster.pasted, ["hello there world"])
+    }
+
+    func testLogNamesAProfileButNeverTheBundleId() {
+        let withProfile = make(frontmostBundleID: { "com.slack" }, profiles: [slackOff])
+        dictate(withProfile)
+        XCTAssertTrue(withProfile.logs.value.contains { $0.contains("profile=yes") }, "\(withProfile.logs.value)")
+        XCTAssertFalse(withProfile.logs.value.contains { $0.contains("com.slack") || $0.contains("Slack") })
+
+        let without = make(frontmostBundleID: { "com.unknown" }, profiles: [slackOff])
+        dictate(without)
+        XCTAssertFalse(without.logs.value.contains { $0.contains("profile=") })
     }
 }
