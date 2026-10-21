@@ -129,4 +129,64 @@ final class PasteGuardTests: XCTestCase {
             XCTAssertEqual((error as? PasteGuardError)?.notice, "Accessibility is off — text copied, press ⌘V")
         }
     }
+
+    // MARK: - GuardedKeyPresser
+
+    private func keyPresser(
+        _ posted: Box<SyntheticKey>, accessibility: Bool = true, current: pid_t? = 42, error: Error? = nil
+    ) -> GuardedKeyPresser {
+        GuardedKeyPresser(
+            post: { key in
+                if let error { throw error }
+                posted.append(key)
+            },
+            accessibilityGranted: { accessibility },
+            currentFrontmost: { current })
+    }
+
+    func test_key_press_refused_without_accessibility() {
+        let posted = Box<SyntheticKey>()
+        let presser = keyPresser(posted, accessibility: false)
+
+        XCTAssertThrowsError(try presser.press(.returnKey, target: 42)) { error in
+            XCTAssertEqual((error as? PasteGuardError)?.notice, "Accessibility is off — Return not sent")
+        }
+        XCTAssertEqual(posted.value, [])
+    }
+
+    func test_key_press_refused_after_a_focus_change() {
+        let posted = Box<SyntheticKey>()
+        let presser = keyPresser(posted, current: 99)
+
+        XCTAssertThrowsError(try presser.press(.commandZ, target: 42)) { error in
+            XCTAssertEqual((error as? PasteGuardError)?.notice, "Focus changed — Undo not sent")
+        }
+        XCTAssertEqual(posted.value, [])
+    }
+
+    func test_key_press_reaches_the_same_app_or_an_unknown_target() throws {
+        let posted = Box<SyntheticKey>()
+        let presser = keyPresser(posted)
+        try presser.press(.returnKey, target: 42)
+        try presser.press(.commandZ, target: nil)
+        XCTAssertEqual(posted.value, [.returnKey, .commandZ])
+    }
+
+    func test_key_press_post_failure_is_not_a_guard_failure() {
+        let posted = Box<SyntheticKey>()
+        let presser = keyPresser(posted, error: TestError(message: "no event"))
+        XCTAssertThrowsError(try presser.press(.returnKey, target: 42)) { error in
+            XCTAssertNil(error as? PasteGuardError)
+        }
+    }
+
+    func test_synthetic_keys_carry_their_virtual_keycodes_and_flags() {
+        XCTAssertEqual(SyntheticKey.commandV.keycode, 9)
+        XCTAssertEqual(SyntheticKey.returnKey.keycode, 36)
+        XCTAssertEqual(SyntheticKey.commandZ.keycode, 6)
+        XCTAssertEqual(SyntheticKey.commandV.flags, .maskCommand)
+        XCTAssertEqual(SyntheticKey.commandZ.flags, .maskCommand)
+        XCTAssertEqual(SyntheticKey.returnKey.flags, [])
+        XCTAssertEqual(SyntheticKey.commandV.spoken, "\u{2318}V")
+    }
 }

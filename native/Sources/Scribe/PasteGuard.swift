@@ -54,6 +54,38 @@ final class GuardedPaster: Pasting {
     }
 }
 
+/// The voice-command counterpart of `Pasting`: presses a key in the app the user was dictating into.
+protocol KeyPressing {
+    func press(_ key: SyntheticKey, target: pid_t?) throws
+}
+
+/// Same two checks as `GuardedPaster`. A key that misses its app has no clipboard fallback, so the notice says so.
+final class GuardedKeyPresser: KeyPressing {
+    private let post: (SyntheticKey) throws -> Void
+    private let accessibilityGranted: () -> Bool
+    private let currentFrontmost: () -> pid_t?
+
+    init(
+        post: @escaping (SyntheticKey) throws -> Void,
+        accessibilityGranted: @escaping () -> Bool,
+        currentFrontmost: @escaping () -> pid_t?
+    ) {
+        self.post = post
+        self.accessibilityGranted = accessibilityGranted
+        self.currentFrontmost = currentFrontmost
+    }
+
+    func press(_ key: SyntheticKey, target: pid_t?) throws {
+        guard accessibilityGranted() else {
+            throw PasteGuardError(notice: "Accessibility is off — \(key.spoken) not sent")
+        }
+        if let target, target != currentFrontmost() {
+            throw PasteGuardError(notice: "Focus changed — \(key.spoken) not sent")
+        }
+        try post(key)
+    }
+}
+
 /// Safe from any thread: reads directly on main, hops otherwise.
 func frontmostPID() -> pid_t? {
     let read = { NSWorkspace.shared.frontmostApplication?.processIdentifier }

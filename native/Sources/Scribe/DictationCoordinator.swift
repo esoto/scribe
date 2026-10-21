@@ -237,6 +237,10 @@ final class DictationCoordinator: ObservableObject {
         pipeline.enhanceAudioEnabled = on
     }
 
+    func setVoiceCommandsEnabled(_ on: Bool) {
+        pipeline.voiceCommandsEnabled = on
+    }
+
     /// Swaps the hotkey at runtime. The old tap goes first, while its monitor is still retained, and a hold in
     /// progress ends: the old key's release will never arrive. The new monitor is kept even when its install
     /// fails, so the Input Monitoring retry rebuilds the tap for the new key.

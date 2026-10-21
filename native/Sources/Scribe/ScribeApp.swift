@@ -145,6 +145,10 @@ final class AppModel: ObservableObject {
             pipelineConfig: config,
             hotkey: settings.hotkey,
             makePipeline: { sinks in
+                let keyPresser = GuardedKeyPresser(
+                    post: postKey,
+                    accessibilityGranted: { TCC.accessibilityGranted() },
+                    currentFrontmost: frontmostPID)
                 let pipeline = DictationPipeline(
                     recorder: recorder,
                     stt: engine,
@@ -161,6 +165,8 @@ final class AppModel: ObservableObject {
                     cleanupEnabled: settings.cleanupEnabled,
                     enhancer: enhancer,
                     enhanceAudioEnabled: settings.enhanceAudioEnabled,
+                    keyPresser: keyPresser,
+                    voiceCommandsEnabled: settings.voiceCommandsEnabled,
                     onLog: log,
                     // Store is thread-safe and observe() is fire-and-forget: no main-actor hop.
                     onCleaned: { [dictionary] text in dictionary.observe(cleanedText: text) },
@@ -193,7 +199,8 @@ final class AppModel: ObservableObject {
             onHoldThresholdChanged: { dictation.pipeline.setHoldThreshold($0) },
             onIdleMinutesChanged: { idleTracker.setUnloadAfterMinutes($0) },
             onHistorySizeChanged: { history.setMaxLen($0) },
-            onRestoreDelayChanged: { paster.setRestoreDelay($0) })
+            onRestoreDelayChanged: { paster.setRestoreDelay($0) },
+            onVoiceCommandsChanged: { dictation.setVoiceCommandsEnabled($0) })
 
         let parakeet = engines["parakeet"] as? ParakeetEngine
         self.dictionaryModel = DictionaryModel(

@@ -66,20 +66,55 @@ final class MacPasteboard: PasteboardLike {
     }
 }
 
-/// Posts a synthetic ⌘V. Untested: needs Accessibility and would hit the frontmost app.
-func postCmdV() throws {
-    guard
-        let keyDown = CGEvent(keyboardEventSource: nil, virtualKey: 9, keyDown: true),
-        let keyUp = CGEvent(keyboardEventSource: nil, virtualKey: 9, keyDown: false)
-    else {
-        throw PasteError(message: "could not create synthetic \u{2318}V key event")
+/// Keys scribe can press on the user's behalf. Return submits in chat apps and runs a line in a terminal — a voice
+/// command asks for it by name, a dictation never does (its text is pasted, newlines flattened).
+enum SyntheticKey: Equatable {
+    case commandV, returnKey, commandZ
+
+    var keycode: CGKeyCode {
+        switch self {
+        case .commandV: return 9
+        case .returnKey: return 36
+        case .commandZ: return 6
+        }
     }
 
-    keyDown.flags = .maskCommand
-    keyUp.flags = .maskCommand
+    var flags: CGEventFlags {
+        switch self {
+        case .commandV, .commandZ: return .maskCommand
+        case .returnKey: return []
+        }
+    }
+
+    /// For notices.
+    var spoken: String {
+        switch self {
+        case .commandV: return "\u{2318}V"
+        case .returnKey: return "Return"
+        case .commandZ: return "Undo"
+        }
+    }
+}
+
+/// Posts a synthetic key press. Untested: needs Accessibility and would hit the frontmost app.
+func postKey(_ key: SyntheticKey) throws {
+    guard
+        let keyDown = CGEvent(keyboardEventSource: nil, virtualKey: key.keycode, keyDown: true),
+        let keyUp = CGEvent(keyboardEventSource: nil, virtualKey: key.keycode, keyDown: false)
+    else {
+        throw PasteError(message: "could not create synthetic \(key.spoken) key event")
+    }
+
+    keyDown.flags = key.flags
+    keyUp.flags = key.flags
 
     keyDown.post(tap: .cghidEventTap)
     keyUp.post(tap: .cghidEventTap)
+}
+
+/// Paster's injected poster, kept by name so its call site is unchanged.
+func postCmdV() throws {
+    try postKey(.commandV)
 }
 
 func timerSchedule(_ delaySeconds: Double, _ fn: @escaping () -> Void) {

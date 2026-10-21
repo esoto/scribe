@@ -69,6 +69,15 @@ Upgrading from a v3 install downloads Ultra on first launch (progress shows in t
   Spanish-heavy dictation; loads on first switch).
 - **Settings…** (⌘,) has three tabs. **General** holds the hotkey, hold delay, sounds, scribe:// URLs, Launch at Login, idle unload, and history size. **Audio** picks the microphone and holds the experimental **Enhance Audio** toggle (LocalVQE noise suppression before transcription — off by default because it lowered accuracy on synthetic noise in tests). **Models** downloads, switches, and deletes the cleanup model.
 - **Cleanup (remove fillers)** toggle: off = verbatim transcription pasted raw.
+- **Voice commands** (Settings › General, on by default): say one of these
+  as the whole utterance and scribe acts instead of pasting — "enter" /
+  "send it" presses Return; "new line" and "new paragraph" insert breaks;
+  "scratch that" / "undo" sends ⌘Z (best-effort: terminals ignore it). ⌘Z assumes a QWERTY-family layout.
+  Spanish: "enviar" / "envíalo", "nueva línea", "nuevo párrafo", "borra
+  eso" / "deshacer". Also accepted: "press enter", "send that", "newline", "line break", "undo that"; "mándalo", "presiona enter", "línea nueva", "salto de línea", "párrafo nuevo", "deshace eso". Only the entire utterance counts, so "add a new line
+  after the title" is still text. Spoken punctuation ("comma", "period")
+  is not a command: transcription and cleanup already punctuate. Return
+  goes to whatever has focus — in a terminal it runs the line, and a pasted break can too in a shell without bracketed paste.
 - **History**: the last 10 dictations by default (Settings › General), in
   memory only, never persisted; "· raw" marks one pasted without cleanup.
   Click one to copy it back to the clipboard; Option-click copies what the
@@ -216,6 +225,7 @@ Most of these have a control in **Settings…** (⌘,), the menu, or the Diction
 | `vocabularyBiasingEnabled` | false | acoustic vocabulary biasing for Parakeet (experimental) (Dictionary window) |
 | `enhanceAudioEnabled` | false | LocalVQE noise suppression before transcription — experimental (Settings › Audio) |
 | `urlSchemeEnabled` | false | allow `scribe://` URLs from other apps (Settings) |
+| `voiceCommandsEnabled` | true | whole-utterance voice commands ("enter", "new line", …) — see Usage (Settings) |
 | `microphoneUID` | _(unset)_ | input device UID; unset follows the system default input (Settings) |
 
 **Custom cleanup model:** point `cleanupModelPath` at any local MLX model
