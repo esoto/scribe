@@ -75,6 +75,7 @@ final class DictationCoordinator: ObservableObject {
     private(set) var errorRevert: Task<Void, Never>?
     private(set) var hintClear: Task<Void, Never>?
     private(set) var holdWatchdog: Task<Void, Never>?
+    private(set) var hudHide: Task<Void, Never>?
 
     private let recorder: RecorderPreparing
     private let pipelineConfig: PipelineConfig
@@ -93,6 +94,10 @@ final class DictationCoordinator: ObservableObject {
     private let repaste: (String) throws -> Void
     /// The menu is still closing when its action fires; ⌘V waits this long so it lands in the user's app.
     private let repasteDelay: Double
+    /// The recording pill; nil in tests that don't care about it.
+    private let hud: HUDModel?
+    private let hudEnabled: () -> Bool
+    private let hudResultSeconds: Double
 
     init(
         recorder: RecorderPreparing,
@@ -111,6 +116,9 @@ final class DictationCoordinator: ObservableObject {
         failedAudioURL: URL = FileLogger.logsDirectory.appendingPathComponent("last_failed.wav"),
         repaste: @escaping (String) throws -> Void,
         repasteDelay: Double = 0.2,
+        hud: HUDModel? = nil,
+        hudEnabled: @escaping () -> Bool = { true },
+        hudResultSeconds: Double = HUDModel.resultSeconds,
         log: @escaping @Sendable (String) -> Void
     ) {
         self.recorder = recorder
@@ -127,6 +135,9 @@ final class DictationCoordinator: ObservableObject {
         self.failedAudioURL = failedAudioURL
         self.repaste = repaste
         self.repasteDelay = repasteDelay
+        self.hud = hud
+        self.hudEnabled = hudEnabled
+        self.hudResultSeconds = hudResultSeconds
         self.log = log
 
         // The pipeline calls these from its own threads; each hops to the main actor.
@@ -241,6 +252,19 @@ final class DictationCoordinator: ObservableObject {
         pipeline.voiceCommandsEnabled = on
     }
 
+    /// Turning the pill off hides it at once; turning it on needs nothing, the next dictation shows it.
+    func setHudEnabled(_ on: Bool) {
+        if !on {
+            hudHide?.cancel()
+            hud?.hide()
+        }
+    }
+
+    /// Microphone level from the recorder, hopped to the main actor by the caller.
+    func reportLevel(rms: Double) {
+        hud?.setLevel(rms: rms)
+    }
+
     /// Swaps the hotkey at runtime. The old tap goes first, while its monitor is still retained, and a hold in
     /// progress ends: the old key's release will never arrive. The new monitor is kept even when its install
     /// fails, so the Input Monitoring retry rebuilds the tap for the new key.
@@ -276,11 +300,33 @@ final class DictationCoordinator: ObservableObject {
                 self.state = .idle
             }
         }
+        if let hud, hudEnabled() {
+            hudHide?.cancel()
+            switch newState {
+            case .recording: hud.show(.listening)
+            case .processing: hud.show(.processing)
+            case .error:
+                hud.show(.result("Error — check log"))
+                scheduleHudHide(hud)
+            case .idle:
+                // process() emits the verdict (hint or paste cue) before this idle: leave it up briefly.
+                if case .result = hud.phase { scheduleHudHide(hud) } else { hud.hide() }
+            }
+        }
         guard soundsEnabled() else { return }
         if newState == .recording {
             playSound("Pop")
         } else if newState == .error {
             playSound("Basso")
+        }
+    }
+
+    private func scheduleHudHide(_ hud: HUDModel) {
+        let seconds = hudResultSeconds
+        hudHide = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: UInt64(seconds * 1e9))
+            guard !Task.isCancelled else { return }
+            hud.hide()
         }
     }
 
@@ -298,6 +344,7 @@ final class DictationCoordinator: ObservableObject {
             notify("Microphone is off — open Setup / Doctor…")
             return
         }
+        if let hud, hudEnabled(), hud.phase != .hidden { hud.show(.result(message)) }
         hint = message
         hintClear?.cancel()
         let seconds = hintSeconds
@@ -309,6 +356,7 @@ final class DictationCoordinator: ObservableObject {
     }
 
     func playPasteCue() {
+        if let hud, hudEnabled(), hud.phase != .hidden { hud.show(.result("Pasted")) }
         if soundsEnabled() { playSound("Tink") }
     }
 
