@@ -18,6 +18,7 @@ final class AppModel: ObservableObject {
     let dictionary: UserDictionaryStore
     let dictionaryModel: DictionaryModel
     let statsModel: StatsModel
+    let snippetsModel: SnippetsModel
     let permissions: PermissionsModel
     let dictation: DictationCoordinator
     let hudModel = HUDModel()
@@ -88,6 +89,8 @@ final class AppModel: ObservableObject {
         self.dictionary = dictionary
         let stats = StatsStore()
         self.statsModel = StatsModel(store: stats)
+        let snippetStore = SnippetStore()
+        self.snippetsModel = SnippetsModel(store: snippetStore)
 
         // The sub-models call into each other (permissions ↔ coordinator, cleanup → coordinator); this ref
         // closes those loops once the coordinator exists.
@@ -174,6 +177,7 @@ final class AppModel: ObservableObject {
                     // Store is thread-safe and observe() is fire-and-forget: no main-actor hop.
                     onCleaned: { [dictionary] text in dictionary.observe(cleanedText: text) },
                     replacementPairs: { [dictionary] in dictionary.allPairs },
+                    snippets: { snippetStore.all },
                     onHint: sinks.onHint,
                     onPasted: sinks.onPasted,
                     // The store hops to its own queue, so no main-actor hop here.
@@ -463,7 +467,8 @@ struct ScribeApp: App {
         }
 
         Window("scribe dictionary", id: dictionaryWindowID) {
-            DictionaryWindow(model: model.dictionaryModel, cleanupModels: model.cleanupModels)
+            DictionaryWindow(
+                model: model.dictionaryModel, cleanupModels: model.cleanupModels, snippets: model.snippetsModel)
         }
 
         Window("scribe fix a word", id: fixWordWindowID) {

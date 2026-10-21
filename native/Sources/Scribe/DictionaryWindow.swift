@@ -43,6 +43,7 @@ struct DictionaryWindow: View {
 
     @ObservedObject var model: DictionaryModel
     @ObservedObject var cleanupModels: CleanupModelController
+    @ObservedObject var snippets: SnippetsModel
     @State private var newOriginal = ""
     @State private var newReplacement = ""
     @FocusState private var addFocus: AddField?
@@ -132,6 +133,8 @@ struct DictionaryWindow: View {
                 }
                 .padding(4)
             }
+
+            SnippetsSection(model: snippets)
 
             if !model.unmatchedHeardWords.isEmpty {
                 GroupBox("Heard but not matched") {

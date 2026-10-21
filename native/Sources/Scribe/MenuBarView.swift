@@ -57,9 +57,11 @@ func nowLine(engine: String, cleanupModel: String, cleanupEnabled: Bool) -> Stri
     cleanupEnabled ? "\(engine) · \(cleanupModel)" : "\(engine) · cleanup off"
 }
 
-/// History row: the text, plus a marker when cleanup did not run so the user can tell the two apart.
+/// History row: the text, plus a marker when cleanup did not run so the user can tell the two apart. Line breaks
+/// are flattened because a snippet block is stored with them and a menu title would wrap.
 func historyRowLabel(_ record: DictationRecord) -> String {
-    record.cleaned ? truncateLabel(record.final) : truncateLabel(record.final) + " · raw"
+    let flat = record.final.split(whereSeparator: \.isNewline).joined(separator: " ")
+    return record.cleaned ? truncateLabel(flat) : truncateLabel(flat) + " · raw"
 }
 
 /// Option-click alternate of a History row: what the engine heard, before replacements and cleanup.

@@ -48,6 +48,7 @@ final class PipelineTests: XCTestCase {
         history: History = History(maxLen: 10),
         config: PipelineConfig = PipelineConfig(),
         pairs: [ReplacementPair] = [],
+        snippets: [Snippet] = [],
         runner: ((@escaping () async -> Void) -> Void)? = nil,
         frontmost: @escaping () -> pid_t? = { nil },
         enhancer: AudioEnhancer? = nil,
@@ -83,6 +84,7 @@ final class PipelineTests: XCTestCase {
             onLog: { logs.append($0) },
             onCleaned: { cleanedTexts.append($0) },
             replacementPairs: { pairs },
+            snippets: { snippets },
             onHint: { cues.append("hint: \($0)") },
             onPasted: { cues.append("pasted") },
             onStats: { stats.append($0) }
@@ -1195,5 +1197,58 @@ final class PipelineTests: XCTestCase {
             keyPresser: presser)
         dictate(h)
         XCTAssertEqual(presser.pressed, [.returnKey])
+    }
+
+    // MARK: - Snippets
+
+    private let address = "12 Elm St\nSpringfield"
+    private var snippets: [Snippet] {
+        [Snippet(trigger: "my address", expansion: address), Snippet(trigger: "my email", expansion: "e@example.com")]
+    }
+
+    func testWholeUtteranceSnippetExpandsUncleanedAndKeepsLineBreaks() {
+        let cleaner = FakeCleaner()
+        let paster = FakePaster()
+        let hist = History(maxLen: 10)
+        let h = make(
+            stt: FakeStt(text: "my address."), cleaner: cleaner, paster: paster, history: hist, snippets: snippets)
+        dictate(h)
+        XCTAssertEqual(cleaner.calls, 0, "two words is under minWords, so the model never sees the trigger")
+        XCTAssertEqual(paster.pasted, [address], "the period ASR added after the trigger must not trail a block")
+        XCTAssertEqual(hist.items()[0].final, address)
+    }
+
+    func testSnippetInsideASentenceExpandsAfterCleanup() {
+        let paster = FakePaster()
+        let h = make(
+            stt: FakeStt(text: "um write to my email please"),
+            cleaner: FakeCleaner(out: "Write to my email, please."), paster: paster, snippets: snippets)
+        dictate(h)
+        XCTAssertEqual(paster.pasted, ["Write to e@example.com, please."])
+    }
+
+    func testHarvesterNeverSeesAnExpansion() {
+        let h = make(
+            stt: FakeStt(text: "um write to my email please"),
+            cleaner: FakeCleaner(out: "Write to my email, please."), snippets: snippets)
+        dictate(h)
+        XCTAssertEqual(h.cleanedTexts.value, ["Write to my email, please."])
+    }
+
+    func testStatsCountTheWordsSaidNotTheExpansion() {
+        let h = make(stt: FakeStt(text: "my address."), snippets: snippets)
+        dictate(h)
+        XCTAssertEqual(h.stats.value.first?.words, 2)
+    }
+
+    func testVoiceCommandBeatsASnippetWithTheSameWords() {
+        let paster = FakePaster()
+        let hist = History(maxLen: 10)
+        let h = make(
+            stt: FakeStt(text: "new line"), paster: paster, history: hist,
+            snippets: [Snippet(trigger: "new line", expansion: "X")], keyPresser: FakeKeyPresser())
+        dictate(h)
+        XCTAssertEqual(paster.pasted, ["\n"])
+        XCTAssertTrue(hist.items().isEmpty, "a command is not a dictation")
     }
 }

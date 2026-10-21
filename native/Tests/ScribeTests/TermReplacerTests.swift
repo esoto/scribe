@@ -89,4 +89,29 @@ final class TermReplacerTests: XCTestCase {
         let p = [pair("méxico city", "Ciudad de México")]
         XCTAssertEqual(TermReplacer.apply(p, to: "fly to México City"), "fly to Ciudad de México")
     }
+
+    func testTrailingPunctuationIsDroppedOnlyWhenTheMatchEndsTheText() {
+        let block: [(original: String, replacement: String, keepTrailing: Bool)] = [
+            ("my address", "12 Elm St\nSpringfield", false)
+        ]
+        XCTAssertEqual(
+            TermReplacer.apply(entries: block, to: "Send it to my address."), "Send it to 12 Elm St\nSpringfield")
+        // Mid-text the period belongs to the sentence, so it stays.
+        XCTAssertEqual(
+            TermReplacer.apply(entries: block, to: "Send it to my address. Thanks."),
+            "Send it to 12 Elm St\nSpringfield. Thanks.")
+        // Closing brackets and quotes are not sentence punctuation, even at the end of the text.
+        XCTAssertEqual(TermReplacer.apply(entries: block, to: "(my address)"), "(12 Elm St\nSpringfield)")
+        XCTAssertEqual(
+            TermReplacer.apply(entries: block, to: "\u{201C}my address\u{201D}."),
+            "\u{201C}12 Elm St\nSpringfield\u{201D}")
+        // Entries that keep their trailing punctuation, and the plain pair form every dictionary pair uses, keep it.
+        let keeper: [(original: String, replacement: String, keepTrailing: Bool)] = [
+            ("my address", "12 Elm St\nSpringfield", true)
+        ]
+        XCTAssertEqual(TermReplacer.apply(entries: keeper, to: "my address."), "12 Elm St\nSpringfield.")
+        XCTAssertEqual(
+            TermReplacer.apply([pair("my address", "12 Elm St\nSpringfield")], to: "my address."),
+            "12 Elm St\nSpringfield.")
+    }
 }
