@@ -3,8 +3,9 @@ import Foundation
 /// Deterministic find/replace over whitespace tokens. Kept out of the LLM prompt: the model read `X -> Y` pairs as instructions and dropped words.
 enum TermReplacer {
     /// Case-insensitive. An original may span several words; the longest match wins. Edge punctuation on
-    /// the first and last matched token is kept; punctuation inside a phrase prevents a match.
-    static func apply(_ pairs: [ReplacementPair], to text: String) -> String {
+    /// the first and last matched token is kept (the trailing part optionally dropped, for multi-line snippet
+    /// expansions); punctuation inside a phrase prevents a match.
+    static func apply(_ pairs: [ReplacementPair], to text: String, keepTrailingPunctuation: Bool = true) -> String {
         guard !pairs.isEmpty, !text.isEmpty else { return text }
 
         var lookup: [[String]: String] = [:]
@@ -27,7 +28,7 @@ enum TermReplacer {
                 guard let stripped = strip(tokens[i..<(i + length)]),
                     let replacement = lookup[stripped.cores]
                 else { continue }
-                out.append(stripped.leading + replacement + stripped.trailing)
+                out.append(stripped.leading + replacement + (keepTrailingPunctuation ? stripped.trailing : ""))
                 i += length
                 advanced = true
                 break

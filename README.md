@@ -172,6 +172,12 @@ against `headsner` — `Headstar` and `Hatsner` are 2 edits away, but so is
 is 2 edits — and so are **"camera"** and **"cancel"**. No threshold
 separates them, so a human confirms instead.
 
+**Snippets.** A spoken trigger ("my address") stands for a block of text;
+say it alone or inside a sentence. Snippets are applied after cleanup, so
+the model never sees the expansion and its line breaks survive. They live
+in `~/Library/Application Support/scribe/snippets.json` in plain text —
+fine for an address or a repo URL, not for a password.
+
 **Learned terms (automatic) — off by default.** With learning off, scribe
 writes nothing it hears to disk: words are kept in memory for the current
 session only (to offer bindings), learned terms are frozen, and nothing is

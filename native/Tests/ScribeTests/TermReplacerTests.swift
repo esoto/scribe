@@ -89,4 +89,15 @@ final class TermReplacerTests: XCTestCase {
         let p = [pair("méxico city", "Ciudad de México")]
         XCTAssertEqual(TermReplacer.apply(p, to: "fly to México City"), "fly to Ciudad de México")
     }
+
+    func testTrailingPunctuationCanBeDroppedForBlockExpansions() {
+        let block = [pair("my address", "12 Elm St\nSpringfield")]
+        XCTAssertEqual(
+            TermReplacer.apply(block, to: "Send it to my address.", keepTrailingPunctuation: false),
+            "Send it to 12 Elm St\nSpringfield")
+        XCTAssertEqual(
+            TermReplacer.apply(block, to: "(my address)", keepTrailingPunctuation: false), "(12 Elm St\nSpringfield")
+        // The default keeps it, as every dictionary pair relies on.
+        XCTAssertEqual(TermReplacer.apply(block, to: "my address."), "12 Elm St\nSpringfield.")
+    }
 }
