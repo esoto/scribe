@@ -295,7 +295,8 @@ outside scribe's process. scribe manages them on demand:
 - **Transcription failed** → the audio was saved to
   `~/Library/Logs/scribe/last_failed.wav`. For a few seconds the status
   row shows "Error — check log"; the log names the cause, and
-  **Show Log in Finder** (Setup / Doctor) reveals it.
+  **Show Log in Finder** (Setup / Doctor) reveals it. If the download ran out of disk,
+  the notification says so.
 - **No notification when a dictation fails** → scribe only asks for
   notification permission from the Notifications row in Setup / Doctor;
   click Request there, or allow it in System Settings → Notifications.

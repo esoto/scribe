@@ -6,6 +6,7 @@ final class UserFacingErrorsTests: XCTestCase {
     private let missingNotice =
         "Transcription failed — the speech model is missing. Audio saved; delete the models folder to re-download."
     private let logNotice = "Transcription failed — audio saved. Open Setup / Doctor › Show Log in Finder for the cause."
+    private let diskNotice = "Not enough free disk space for the speech model — free some space and relaunch; audio saved"
 
     func testConnectivityFailuresPointAtTheDownload() {
         for message in ["device is offline", "network timed out", "download aborted", "URLError: -1009", "no internet connection"] {
@@ -32,6 +33,25 @@ final class UserFacingErrorsTests: XCTestCase {
 
     func testOtherFailuresPointAtTheLog() {
         for message in ["out of memory", "decode failed", ""] {
+            XCTAssertEqual(UserFacingError.transcriptionNotice(engineMessage: message), logNotice, message)
+        }
+    }
+
+    func testOutOfDiskMessagesNameTheFreeSpace() {
+        for message in ["No space left on device", "no space left on device", "write failed: ENOSPC", "enospc"] {
+            XCTAssertEqual(UserFacingError.transcriptionNotice(engineMessage: message), diskNotice, message)
+        }
+    }
+
+    /// A download that fails for lack of disk is a disk problem; "try again online" would point at the wrong fix.
+    func testOutOfDiskWinsOverTheOtherBranches() {
+        for message in ["No such file or directory: No space left on device", "download failed: ENOSPC"] {
+            XCTAssertEqual(UserFacingError.transcriptionNotice(engineMessage: message), diskNotice, message)
+        }
+    }
+
+    func testDiskWordingThatIsNotOutOfSpaceKeepsTheLogNotice() {
+        for message in ["Disk I/O error", "no space for the window"] {
             XCTAssertEqual(UserFacingError.transcriptionNotice(engineMessage: message), logNotice, message)
         }
     }
