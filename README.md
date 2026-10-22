@@ -70,6 +70,8 @@ Upgrading from a v3 install downloads Ultra on first launch (progress shows in t
   bars mean the mic isn't picking you up (dead, muted or wrong device) —
   then "Transcribing…", then "Pasted" or the raw-fallback verdict. It
   shows on every Space and over full-screen apps and never takes focus.
+  It appears once a hold outlasts the tap threshold, so a brief tap never
+  flashes it, on the screen where your pointer is.
 - **Engine** picker: Parakeet (fast, default) ↔ Whisper (better for
   Spanish-heavy dictation; loads on first switch).
 - **Settings…** (⌘,) has three tabs. **General** holds the hotkey, hold delay, sounds, scribe:// URLs, voice commands, the recording pill, Launch at Login, idle unload, and history size. **Audio** picks the microphone and holds the experimental **Enhance Audio** toggle (LocalVQE noise suppression before transcription — off by default because it lowered accuracy on synthetic noise in tests). **Models** downloads, switches, and deletes the cleanup model.

@@ -76,6 +76,7 @@ final class DictationCoordinator: ObservableObject {
     private(set) var hintClear: Task<Void, Never>?
     private(set) var holdWatchdog: Task<Void, Never>?
     private(set) var hudHide: Task<Void, Never>?
+    private(set) var hudShow: Task<Void, Never>?
 
     private let recorder: RecorderPreparing
     private let pipelineConfig: PipelineConfig
@@ -98,6 +99,8 @@ final class DictationCoordinator: ObservableObject {
     private let hud: HUDModel?
     private let hudEnabled: () -> Bool
     private let hudResultSeconds: Double
+    /// A hold shorter than this is a discarded tap, so the pill waits it out before showing.
+    private var holdThreshold: Double
 
     init(
         recorder: RecorderPreparing,
@@ -119,6 +122,7 @@ final class DictationCoordinator: ObservableObject {
         hud: HUDModel? = nil,
         hudEnabled: @escaping () -> Bool = { true },
         hudResultSeconds: Double = HUDModel.resultSeconds,
+        holdThreshold: Double = 0.3,
         log: @escaping @Sendable (String) -> Void
     ) {
         self.recorder = recorder
@@ -138,6 +142,7 @@ final class DictationCoordinator: ObservableObject {
         self.hud = hud
         self.hudEnabled = hudEnabled
         self.hudResultSeconds = hudResultSeconds
+        self.holdThreshold = holdThreshold
         self.log = log
 
         // The pipeline calls these from its own threads; each hops to the main actor.
@@ -252,9 +257,16 @@ final class DictationCoordinator: ObservableObject {
         pipeline.voiceCommandsEnabled = on
     }
 
+    /// One entry point, so the pipeline's tap cutoff and the pill's delay can't drift apart.
+    func setHoldThreshold(_ seconds: Double) {
+        holdThreshold = seconds
+        pipeline.setHoldThreshold(seconds)
+    }
+
     /// Turning the pill off hides it at once; turning it on needs nothing, the next dictation shows it.
     func setHudEnabled(_ on: Bool) {
         if !on {
+            hudShow?.cancel()
             hudHide?.cancel()
             hud?.hide()
         }
@@ -291,6 +303,7 @@ final class DictationCoordinator: ObservableObject {
     func applyState(_ newState: PipelineState) {
         state = newState
         errorRevert?.cancel()
+        hudShow?.cancel()
         if newState == .error {
             // Sticky so the ⚠ glyph and status line can be seen; the next state clears it earlier.
             let sticky = errorStickySeconds
@@ -303,7 +316,7 @@ final class DictationCoordinator: ObservableObject {
         if let hud, hudEnabled() {
             hudHide?.cancel()
             switch newState {
-            case .recording: hud.show(.listening)
+            case .recording: showListeningAfterTheTapThreshold(hud)
             case .processing: hud.show(.processing)
             case .error:
                 hud.show(.problem("Error — check log"))
@@ -321,6 +334,17 @@ final class DictationCoordinator: ObservableObject {
             playSound("Pop")
         } else if newState == .error {
             playSound("Basso")
+        }
+    }
+
+    /// The pipeline throws away a hold shorter than the threshold, so showing the pill at once would flash it on
+    /// every accidental tap. Any later state cancels this, and a processing or error pill replaces it.
+    private func showListeningAfterTheTapThreshold(_ hud: HUDModel) {
+        let seconds = holdThreshold
+        hudShow = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: UInt64(seconds * 1e9))
+            guard !Task.isCancelled else { return }
+            hud.show(.listening)
         }
     }
 

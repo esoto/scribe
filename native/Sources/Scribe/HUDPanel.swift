@@ -46,13 +46,23 @@ final class HUDPanel {
         }
     }
 
-    /// Bottom centre of the screen with the menu bar, clear of the Dock.
+    /// Bottom centre of the screen under the pointer, clear of the Dock. An agent app has no key window, so
+    /// `NSScreen.main` is arbitrary with two displays, while the pointer is where the user is looking.
     private func position() {
-        guard let screen = NSScreen.main ?? NSScreen.screens.first else { return }
+        let screens = NSScreen.screens
+        let underPointer = displayIndex(containing: NSEvent.mouseLocation, frames: screens.map(\.frame))
+            .map { screens[$0] }
+        guard let screen = underPointer ?? NSScreen.main ?? screens.first else { return }
         let area = screen.visibleFrame
         let size = panel.frame.size
         panel.setFrameOrigin(NSPoint(x: area.midX - size.width / 2, y: area.minY + 24))
     }
+}
+
+/// Index of the first frame the pointer is in. `NSMouseInRect` is half-open, so on the seam between two displays
+/// the pointer belongs to exactly one of them.
+func displayIndex(containing point: NSPoint, frames: [NSRect]) -> Int? {
+    frames.firstIndex { NSMouseInRect(point, $0, false) }
 }
 
 private final class NonKeyPanel: NSPanel {

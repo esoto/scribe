@@ -206,6 +206,7 @@ final class AppModel: ObservableObject {
             repaste: { try guardedPaster.pasteIntoFocusedApp($0, ownPID: ProcessInfo.processInfo.processIdentifier) },
             hud: hudModel,
             hudEnabled: { settings.hudEnabled },
+            holdThreshold: settings.holdThreshold,
             log: log)
         lateDictation = dictation
         // The recorder calls this on the audio thread once per captured chunk, a few tens of times a second at most:
@@ -219,7 +220,7 @@ final class AppModel: ObservableObject {
         self.settingsModel = SettingsModel(
             settings: settings,
             onHotkeyChanged: { dictation.setHotkey($0) },
-            onHoldThresholdChanged: { dictation.pipeline.setHoldThreshold($0) },
+            onHoldThresholdChanged: { dictation.setHoldThreshold($0) },
             onIdleMinutesChanged: { idleTracker.setUnloadAfterMinutes($0) },
             onHistorySizeChanged: { history.setMaxLen($0) },
             onRestoreDelayChanged: { paster.setRestoreDelay($0) },
