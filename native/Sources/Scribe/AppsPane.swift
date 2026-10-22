@@ -114,6 +114,21 @@ struct AppsPane: View {
                 }
             }
             .accessibilityLabel("Cleanup for \(profile.appName)")
+            Picker(
+                "Voice commands",
+                selection: Binding(
+                    get: { ruleTag(profile.voiceCommands) },
+                    set: { tag in
+                        var changed = profile
+                        changed.voiceCommands = rule(fromTag: tag)
+                        model.upsert(changed)
+                    })
+            ) {
+                ForEach(ruleChoices, id: \.tag) { choice in
+                    Text(choice.label).tag(choice.tag)
+                }
+            }
+            .accessibilityLabel("Voice commands for \(profile.appName)")
             Toggle(
                 "Drop the trailing period",
                 isOn: Binding(
