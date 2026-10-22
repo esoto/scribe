@@ -41,7 +41,7 @@ final class BreakSplitterTests: XCTestCase {
             [seg("hola", .line), seg("adiós", .line), seg("fin", .paragraph), seg("ya")])
     }
 
-    func testPluralAndColloquialAliasesBreakLikeTheSingular() {
+    func testThePluralNewLinesBreaksLikeTheSingular() {
         XCTAssertEqual(
             BreakSplitter.split("one new lines two"),
             [seg("one", .line), seg("two")])

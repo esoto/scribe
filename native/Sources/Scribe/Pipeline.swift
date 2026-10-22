@@ -447,7 +447,9 @@ final class DictationPipeline {
         let cleanStart = clock()
         switch await tryClean(text, cleaner: cleaner) {
         case .success(let out):
-            // The text was replaced before it was split: a second pass before cleanup would take a chained pair (a → b, b → c) to c on a run that skips cleanup, where 1.4.0 stopped at b. This pass stays, as in 1.4.0, since cleanup may re-case a replaced word; on a cleaned run a chain reaches c, as it did.
+            // The text was replaced before it was split: a second pass before cleanup would take a chained pair (a → b,
+            // b → c) to c on a run that skips cleanup, where 1.4.0 stopped at b. This pass stays, as in 1.4.0, since cleanup
+            // may re-case a replaced word; on a cleaned run a chain reaches c, as it did.
             run.text = TermReplacer.apply(pairs, to: out)
             run.cleaned = true
         case .failure(let skip):
