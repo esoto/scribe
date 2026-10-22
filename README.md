@@ -311,6 +311,8 @@ make build-models          # compile-check the real-model test target (no GPU, n
 make test-models-gemma4    # golden + guard + fidelity for Gemma 4 E4B (CLEANUP_MODEL=gemma4)
 make test-models-e2b       # same for Gemma 4 E2B (CLEANUP_MODEL=gemma4e2b)
 make test-models-afm       # same for Apple Intelligence — report-only, exit code ignored
+make measure-longform      # report-only: Parakeet on the long en90/es90 clips (prints, asserts little)
+make measure-cleanup-latency # report-only: cleanup time at 20/50/100/200 words, one CLEANUP_MODEL per run
 ```
 
 The per-model targets run only the `CLEANUP_MODEL`-aware classes

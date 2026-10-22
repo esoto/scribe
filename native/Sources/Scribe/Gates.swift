@@ -32,7 +32,7 @@ enum Gates {
         return text.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
     }
 
-    /// Internal so the model tests can measure language drift with the gate's own lists.
+    /// Both stopword sets are internal so the model tests can measure language drift with the gate's own lists.
     static let enStopwords: Set<String> = [
         "the", "a", "an", "is", "are", "was", "were", "be", "do", "does", "did",
         "to", "of", "on", "in", "at", "for", "with", "and", "or", "but", "this",

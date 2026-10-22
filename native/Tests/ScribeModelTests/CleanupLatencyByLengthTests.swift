@@ -21,14 +21,18 @@ final class CleanupLatencyByLengthTests: XCTestCase {
         for words in Self.lengths {
             let text = input(words: words, from: pool)
             var timings: [Int] = []
+            var outWords = 0
             for _ in 0..<Self.runsPerLength {
                 let t0 = Date()
                 let cleaned = try await backend.clean(text)
                 timings.append(Int(Date().timeIntervalSince(t0) * 1000))
                 XCTAssertFalse(cleaned.isEmpty, "[\(words) words] empty output")
+                // Temperature 0, so every run returns the same text; a short count means the model
+                // answered or cut the input instead of cleaning it, and the time is not comparable.
+                outWords = cleaned.split(whereSeparator: { $0.isWhitespace }).count
             }
             timings.sort()
-            print("latency[\(model)] words=\(words) p50=\(timings[timings.count / 2]) ms max=\(timings[timings.count - 1]) ms")
+            print("latency[\(model)] words=\(words) p50=\(timings[timings.count / 2]) ms max=\(timings[timings.count - 1]) ms out_words=\(outWords)")
         }
     }
 
