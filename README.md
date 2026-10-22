@@ -295,13 +295,14 @@ outside scribe's process. scribe manages them on demand:
 - **Transcription failed** → the audio was saved to
   `~/Library/Logs/scribe/last_failed.wav`. For a few seconds the status
   row shows "Error — check log"; the log names the cause, and
-  **Show Log in Finder** (Setup / Doctor) reveals it. If the download ran out of disk,
-  the notification says so.
+  **Show Log in Finder** (Setup / Doctor) reveals it. If the speech-model
+  download ran out of disk, the Last problem row in Setup / Doctor says
+  so, and so does the notification if you allowed notifications.
 - **No notification when a dictation fails** → scribe only asks for
   notification permission from the Notifications row in Setup / Doctor;
   click Request there, or allow it in System Settings → Notifications.
 - **Enhance Audio is on but seems to do nothing** → the model loads in the background after you turn it on (the menu's status line shows the download); until then scribe transcribes the raw capture and logs `enhance: model not loaded, raw audio used`. A denoise that takes longer than 3 s is skipped for that dictation (log: `enhance_skip=timeout`).
-- **"Not enough free disk space"** → the status row shows the free space the picked cleanup model needs (its download plus ~0.5 GB headroom); free space or pick a smaller model.
+- **"Not enough free disk space"** → for a cleanup model, the status row shows the free space it needs (its download plus ~0.5 GB headroom); free space or pick a smaller model. For the speech model, see **Transcription failed** above.
 - Logs: `~/Library/Logs/scribe/scribe.log`.
 
 ## Development

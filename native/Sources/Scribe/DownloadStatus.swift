@@ -1,7 +1,7 @@
 import Foundation
 
-/// The two model downloads' progress, kept off `AppModel` so a download chunk rebuilds only the views that read it
-/// and an unrelated `AppModel` write (microphone list, launch at login) never rebuilds the menu-bar glyph.
+/// The two model downloads' progress, kept off `AppModel` so an unrelated `AppModel` write (microphone list,
+/// launch at login) never rebuilds the menu-bar glyph.
 @MainActor
 final class DownloadStatus: ObservableObject {
     /// "Downloading Parakeet Ultra… NN%" while the STT model downloads (first launch after upgrade); nil otherwise.
@@ -26,7 +26,7 @@ final class DownloadStatus: ObservableObject {
         enhancerStatus = status
     }
 
-    /// Nil at 100 %: the download is over, and the load that follows reports through the preload state.
+    /// Nil at 100 %: the download is over, and a load from disk has no percent to show.
     private static func status(label: String, fraction: Double) -> String? {
         fraction < 1 ? CleanupModelCatalog.statusText(label: label, fraction: fraction) : nil
     }

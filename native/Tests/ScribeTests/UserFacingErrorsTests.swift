@@ -45,7 +45,11 @@ final class UserFacingErrorsTests: XCTestCase {
 
     /// A download that fails for lack of disk is a disk problem; "try again online" would point at the wrong fix.
     func testOutOfDiskWinsOverTheOtherBranches() {
-        for message in ["No such file or directory: No space left on device", "download failed: ENOSPC"] {
+        for message in [
+            "No such file or directory: No space left on device",
+            "download failed: ENOSPC",
+            #"downloadFailed(path: "a", underlying: Error Domain=NSCocoaErrorDomain Code=640 "The file couldn’t be saved because there isn’t enough space.")"#,
+        ] {
             XCTAssertEqual(UserFacingError.transcriptionNotice(engineMessage: message), diskNotice, message)
         }
     }
