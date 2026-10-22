@@ -104,7 +104,7 @@ Upgrading from a v3 install downloads Ultra on first launch (progress shows in t
   lowercase the first letter, names included ("I", "OK" and
   "McDonald" stay as they are). Add an app from /Applications.
   Deterministic text rules, so
-  the cleanup model and its eval are untouched. Stored as bundle ids and
+  the cleanup model and its eval are untouched. Stored as app names, bundle ids and
   switches in `~/Library/Application Support/scribe/profiles.json`; the
   app you dictate into is never logged.
 - **Dictionary**: your vocabulary and corrections, fed to the cleanup pass
