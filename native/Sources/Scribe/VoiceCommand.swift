@@ -38,6 +38,9 @@ enum VoiceCommand: Equatable, CaseIterable {
         "borra eso": .undo, "deshacer": .undo, "deshace eso": .undo,
     ]
 
+    /// The same phrases as folded words, for a matcher that walks an utterance word by word.
+    static let phraseTokens: Set<[String]> = Set(phrases.keys.map { $0.split(separator: " ").map(String.init) })
+
     /// Tolerates ASR casing, accents and punctuation ("Send it." → send it). nil for anything else.
     static func match(_ utterance: String) -> VoiceCommand? {
         phrases[fold(utterance)]

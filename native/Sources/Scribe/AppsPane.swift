@@ -33,18 +33,18 @@ final class AppProfilesModel: ObservableObject {
     func remove(_ profile: AppProfile) { store.remove(bundleID: profile.bundleID) }
 }
 
-/// The per-app cleanup rule as a picker: default (follow the toggle), on, off.
-let cleanupRuleChoices: [(tag: Int, label: String)] = [(0, "Default"), (1, "On"), (2, "Off")]
+/// A per-app rule as a picker: default (follow the global switch), on, off. Cleanup and voice commands share it.
+let ruleChoices: [(tag: Int, label: String)] = [(0, "Default"), (1, "On"), (2, "Off")]
 
-func cleanupRuleTag(_ cleanup: Bool?) -> Int {
-    switch cleanup {
+func ruleTag(_ rule: Bool?) -> Int {
+    switch rule {
     case nil: return 0
     case true?: return 1
     case false?: return 2
     }
 }
 
-func cleanupRule(fromTag tag: Int) -> Bool? {
+func rule(fromTag tag: Int) -> Bool? {
     switch tag {
     case 1: return true
     case 2: return false
@@ -102,14 +102,14 @@ struct AppsPane: View {
             Picker(
                 "Cleanup",
                 selection: Binding(
-                    get: { cleanupRuleTag(profile.cleanup) },
+                    get: { ruleTag(profile.cleanup) },
                     set: { tag in
                         var changed = profile
-                        changed.cleanup = cleanupRule(fromTag: tag)
+                        changed.cleanup = rule(fromTag: tag)
                         model.upsert(changed)
                     })
             ) {
-                ForEach(cleanupRuleChoices, id: \.tag) { choice in
+                ForEach(ruleChoices, id: \.tag) { choice in
                     Text(choice.label).tag(choice.tag)
                 }
             }

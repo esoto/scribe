@@ -1736,6 +1736,213 @@ final class PipelineTests: XCTestCase {
         dictate(h)
         XCTAssertFalse(h.logs.value.contains { $0.contains("segments=") })
     }
+
+    // MARK: - Per-app voice commands
+
+    private let terminalOff = AppProfile(bundleID: "com.terminal", appName: "Terminal", voiceCommands: false)
+    private let notesOn = AppProfile(bundleID: "com.notes", appName: "Notes", voiceCommands: true)
+
+    func testAnAppWithCommandsOffPastesACommandPhraseAsText() {
+        let presser = FakeKeyPresser()
+        let paster = FakePaster()
+        let h = make(
+            stt: FakeStt(text: "Enter."), paster: paster, frontmostBundleID: { "com.terminal" },
+            profiles: [terminalOff], keyPresser: presser)
+        dictate(h)
+        XCTAssertEqual(paster.pasted, ["Enter."])
+        XCTAssertEqual(presser.pressed, [])
+        XCTAssertEqual(h.cues.value, ["pasted"], "no command hint for text")
+    }
+
+    func testAnAppWithCommandsOffKeepsBreakPhrasesAsWords() {
+        let cleaner = UppercasingCleaner()
+        let paster = FakePaster()
+        let h = make(
+            stt: FakeStt(text: "one two three new line four five six"), cleaner: cleaner, paster: paster,
+            frontmostBundleID: { "com.terminal" }, profiles: [terminalOff])
+        dictate(h)
+        XCTAssertEqual(cleaner.received, ["one two three new line four five six"])
+        XCTAssertEqual(paster.pasted, ["ONE TWO THREE NEW LINE FOUR FIVE SIX"])
+        XCTAssertFalse(h.logs.value.contains { $0.contains("segments=") })
+    }
+
+    func testAnAppWithCommandsOnRunsThemWhileTheGlobalSwitchIsOff() {
+        let presser = FakeKeyPresser()
+        let paster = FakePaster()
+        let h = make(
+            stt: FakeStt(text: "enter"), paster: paster, frontmostBundleID: { "com.notes" }, profiles: [notesOn],
+            keyPresser: presser, voiceCommands: false)
+        dictate(h)
+        XCTAssertEqual(presser.pressed, [.returnKey])
+        XCTAssertEqual(paster.pasted, [])
+    }
+
+    func testAnAppWithCommandsOnStillSplitsBreaksWhileTheGlobalSwitchIsOff() {
+        let paster = FakePaster()
+        let h = make(
+            stt: FakeStt(text: "one two three four new line five six seven eight"), cleaner: UppercasingCleaner(),
+            paster: paster, frontmostBundleID: { "com.notes" }, profiles: [notesOn], voiceCommands: false)
+        dictate(h)
+        XCTAssertEqual(paster.pasted, ["ONE TWO THREE FOUR\nFIVE SIX SEVEN EIGHT"])
+    }
+
+    func testAnAppWithoutTheRuleFollowsTheGlobalSwitchBothWays() {
+        let plain = AppProfile(bundleID: "com.plain", appName: "Plain", cleanup: false)
+        for global in [true, false] {
+            let presser = FakeKeyPresser()
+            let paster = FakePaster()
+            let h = make(
+                stt: FakeStt(text: "enter"), paster: paster, frontmostBundleID: { "com.plain" }, profiles: [plain],
+                keyPresser: presser, voiceCommands: global)
+            dictate(h)
+            XCTAssertEqual(presser.pressed, global ? [.returnKey] : [], "global \(global)")
+            XCTAssertEqual(paster.pasted, global ? [] : ["enter"], "global \(global)")
+        }
+    }
+
+    func testAnotherAppIsUnaffectedByTheTerminalRule() {
+        let presser = FakeKeyPresser()
+        let h = make(
+            stt: FakeStt(text: "enter"), frontmostBundleID: { "com.other" }, profiles: [terminalOff], keyPresser: presser)
+        dictate(h)
+        XCTAssertEqual(presser.pressed, [.returnKey])
+    }
+
+    func testTheAppRuleIsTheOneInForceWhenTheKeyWentDown() {
+        var id: String? = "com.terminal"
+        let presser = FakeKeyPresser()
+        let paster = FakePaster()
+        let h = make(
+            stt: FakeStt(text: "enter"), paster: paster, frontmostBundleID: { id }, profiles: [terminalOff],
+            keyPresser: presser)
+        h.pipeline.keyDown()
+        id = "com.other"
+        h.clock.t += 1.0
+        h.pipeline.keyUp()
+        XCTAssertEqual(presser.pressed, [])
+        XCTAssertEqual(paster.pasted, ["enter"])
+    }
+
+    func testAnAppWithoutTheRuleKeepsTheGlobalSwitchItStartedWith() {
+        final class Holder { var pipeline: DictationPipeline? }
+        let holder = Holder()
+        let plain = AppProfile(bundleID: "com.plain", appName: "Plain", cleanup: false)
+        let presser = FakeKeyPresser()
+        let paster = FakePaster()
+        // Settings flips the global switch while the dictation is being transcribed.
+        let h = make(
+            stt: FakeStt(text: "enter", onTranscribe: { holder.pipeline?.voiceCommandsEnabled = false }),
+            paster: paster, frontmostBundleID: { "com.plain" }, profiles: [plain], keyPresser: presser)
+        holder.pipeline = h.pipeline
+        dictate(h)
+        XCTAssertEqual(presser.pressed, [.returnKey], "the dictation keeps the setting it started with")
+        XCTAssertEqual(paster.pasted, [])
+    }
+
+    // MARK: - Escape phrase
+
+    func testTheWordsBeforeABreakPhrasePastesItAsText() {
+        let paster = FakePaster()
+        let hist = History(maxLen: 10)
+        let h = make(stt: FakeStt(text: "The words new line."), paster: paster, history: hist, keyPresser: FakeKeyPresser())
+        dictate(h)
+        XCTAssertEqual(paster.pasted, ["new line."])
+        XCTAssertEqual(hist.items()[0].raw, "The words new line.", "History keeps what was heard")
+        XCTAssertEqual(hist.items()[0].final, "new line.")
+        XCTAssertFalse(h.cues.value.contains { $0.hasPrefix("hint:") }, "text, not a command: \(h.cues.value)")
+    }
+
+    func testTheWordsInsideASentenceKeepOneSegmentAndNeverReachTheModelHarvesterOrPaste() {
+        let cleaner = UppercasingCleaner()
+        let paster = FakePaster()
+        let hist = History(maxLen: 10)
+        let h = make(
+            stt: FakeStt(text: "first point the words new line second point"), cleaner: cleaner, paster: paster,
+            history: hist)
+        dictate(h)
+        XCTAssertEqual(cleaner.received, ["first point new line second point"], "one run, the escape words removed")
+        XCTAssertEqual(paster.pasted, ["FIRST POINT NEW LINE SECOND POINT"])
+        XCTAssertEqual(h.cleanedTexts.value, ["FIRST POINT NEW LINE SECOND POINT"])
+        XCTAssertEqual(hist.items()[0].raw, "first point the words new line second point")
+        XCTAssertFalse(h.logs.value.contains { $0.contains("segments=") }, "\(h.logs.value)")
+        XCTAssertFalse(h.logs.value.contains { $0.lowercased().contains("words") || $0.lowercased().contains("new line") })
+    }
+
+    func testLasPalabrasBeforeASpanishBreakPhrasePastesItAsText() {
+        let paster = FakePaster()
+        let h = make(stt: FakeStt(text: "Las palabras nueva línea"), paster: paster, keyPresser: FakeKeyPresser())
+        dictate(h)
+        XCTAssertEqual(paster.pasted, ["nueva línea"])
+    }
+
+    func testTheWordsBeforeAReturnOrUndoPhrasePastesItAsText() {
+        for (said, pasted) in [("the words enter", "enter"), ("The words, scratch that.", "scratch that.")] {
+            let presser = FakeKeyPresser()
+            let paster = FakePaster()
+            let h = make(stt: FakeStt(text: said), paster: paster, keyPresser: presser)
+            dictate(h)
+            XCTAssertEqual(presser.pressed, [], said)
+            XCTAssertEqual(paster.pasted, [pasted], said)
+            XCTAssertFalse(h.logs.value.contains { $0.contains("command=") }, said)
+        }
+    }
+
+    func testTheWordsOnOrdinaryTextChangeNothing() {
+        for said in ["the words matter", "The words", "las palabras importan", "I like the words here"] {
+            let paster = FakePaster()
+            let h = make(stt: FakeStt(text: said), cleaner: nil, paster: paster, keyPresser: FakeKeyPresser())
+            dictate(h)
+            XCTAssertEqual(paster.pasted, [said], said)
+        }
+    }
+
+    func testABreakElsewhereStillSplitsWhenTheEscapeProtectsOnlyOne() {
+        let cleaner = UppercasingCleaner()
+        let paster = FakePaster()
+        let h = make(
+            stt: FakeStt(text: "one two three four new line the words new line five six seven eight"), cleaner: cleaner,
+            paster: paster)
+        dictate(h)
+        XCTAssertEqual(cleaner.received, ["one two three four", "new line five six seven eight"])
+        XCTAssertEqual(paster.pasted, ["ONE TWO THREE FOUR\nNEW LINE FIVE SIX SEVEN EIGHT"])
+        XCTAssertTrue(h.logs.value.contains { $0.contains("segments=2") }, "\(h.logs.value)")
+    }
+
+    func testAnEscapedReturnPhraseInASentenceStillLetsALaterBreakSplit() {
+        let cleaner = UppercasingCleaner()
+        let presser = FakeKeyPresser()
+        let paster = FakePaster()
+        let h = make(
+            stt: FakeStt(text: "first point here the words enter new line second point is here"), cleaner: cleaner,
+            paster: paster, keyPresser: presser)
+        dictate(h)
+        XCTAssertEqual(cleaner.received, ["first point here enter", "second point is here"])
+        XCTAssertEqual(paster.pasted, ["FIRST POINT HERE ENTER\nSECOND POINT IS HERE"])
+        XCTAssertEqual(presser.pressed, [])
+    }
+
+    func testTheWordsAreLeftAloneWhenCommandsAreOff() {
+        let paster = FakePaster()
+        let h = make(
+            stt: FakeStt(text: "the words new line"), cleaner: nil, paster: paster,
+            frontmostBundleID: { "com.terminal" }, profiles: [terminalOff])
+        dictate(h)
+        XCTAssertEqual(paster.pasted, ["the words new line"], "with commands off there is nothing to escape")
+
+        let global = FakePaster()
+        let g = make(stt: FakeStt(text: "the words new line"), cleaner: nil, paster: global, voiceCommands: false)
+        dictate(g)
+        XCTAssertEqual(global.pasted, ["the words new line"])
+    }
+
+    func testADictionaryPairCanProduceTheEscapePhrase() {
+        let paster = FakePaster()
+        let h = make(
+            stt: FakeStt(text: "the word new line"), paster: paster, pairs: [pair("the word", "the words")],
+            keyPresser: FakeKeyPresser())
+        dictate(h)
+        XCTAssertEqual(paster.pasted, ["new line"], "pairs run first, so a misheard escape is fixable")
+    }
 }
 
 /// Output depends on the input, so a test can tell two runs apart; `hangOn` and `failOn` pick one run to break.
