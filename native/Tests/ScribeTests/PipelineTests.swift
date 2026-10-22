@@ -1384,4 +1384,291 @@ final class PipelineTests: XCTestCase {
         dictate(without)
         XCTAssertFalse(without.logs.value.contains { $0.contains("profile=") })
     }
+
+    // MARK: - Inline breaks
+
+    private let shortDeadline = PipelineConfig(cleanupTimeout: 0.05)
+
+    func testBreakPhraseSplitsCleansEachRunAndJoinsWithANewline() {
+        let cleaner = UppercasingCleaner()
+        let paster = FakePaster()
+        let hist = History(maxLen: 10)
+        let h = make(
+            stt: FakeStt(text: "first point here now new line second point here now"), cleaner: cleaner,
+            paster: paster, history: hist)
+        dictate(h)
+        XCTAssertEqual(cleaner.received, ["first point here now", "second point here now"], "the model never sees the phrase")
+        XCTAssertEqual(paster.pasted, ["FIRST POINT HERE NOW\nSECOND POINT HERE NOW"])
+        XCTAssertEqual(hist.items().count, 1)
+        XCTAssertEqual(hist.items()[0].final, "FIRST POINT HERE NOW\nSECOND POINT HERE NOW")
+        XCTAssertEqual(hist.items()[0].raw, "first point here now new line second point here now")
+        XCTAssertTrue(hist.items()[0].cleaned)
+        XCTAssertEqual(
+            h.cleanedTexts.value, ["FIRST POINT HERE NOW\nSECOND POINT HERE NOW"], "one offer per dictation, runs on their own lines")
+        XCTAssertTrue(h.logs.value.contains { $0.contains("segments=2") }, "\(h.logs.value)")
+        XCTAssertFalse(h.logs.value.contains { $0.lowercased().contains("point") }, "the log carries counts, never text")
+    }
+
+    func testANameInThreeRunsIsOfferedToTheHarvesterOnce() {
+        let h = make(
+            stt: FakeStt(text: "call Priya about it now new line ask Priya for the logs new line thank Priya for the review"),
+            cleaner: UppercasingCleaner())
+        dictate(h)
+        XCTAssertEqual(
+            h.cleanedTexts.value, ["CALL PRIYA ABOUT IT NOW\nASK PRIYA FOR THE LOGS\nTHANK PRIYA FOR THE REVIEW"],
+            "the store counts one call per dictation toward its promotion threshold")
+        // One line per run: the harvester treats a line start as sentence-initial, so "Ask" and "Thank" are not names.
+        XCTAssertEqual(h.cleanedTexts.value.first?.components(separatedBy: "\n").count, 3)
+    }
+
+    func testADictationWithNoCleanedRunMakesNoHarvesterOffer() {
+        let h = make(
+            stt: FakeStt(text: "first point here now new line second point here now"),
+            cleaner: UppercasingCleaner(failOn: "first point here now", hangOn: "second point here now"),
+            config: shortDeadline)
+        dictateBounded(h)
+        XCTAssertEqual(h.cleanedTexts.value, [])
+    }
+
+    func testNewParagraphJoinsWithABlankLine() {
+        let paster = FakePaster()
+        let h = make(
+            stt: FakeStt(text: "one two three four new paragraph five six seven eight"), cleaner: UppercasingCleaner(),
+            paster: paster)
+        dictate(h)
+        XCTAssertEqual(paster.pasted, ["ONE TWO THREE FOUR\n\nFIVE SIX SEVEN EIGHT"])
+    }
+
+    func testShortRunIsPastedRawWhileTheLongRunIsCleaned() {
+        let cleaner = UppercasingCleaner()
+        let paster = FakePaster()
+        let hist = History(maxLen: 10)
+        let h = make(
+            stt: FakeStt(text: "ok new line first point here now"), cleaner: cleaner, paster: paster, history: hist,
+            config: PipelineConfig(minWords: 4))
+        dictate(h)
+        XCTAssertEqual(cleaner.received, ["first point here now"], "each run is gated on its own word count")
+        XCTAssertEqual(paster.pasted, ["ok\nFIRST POINT HERE NOW"])
+        XCTAssertTrue(hist.items()[0].cleaned)
+        XCTAssertEqual(h.stats.value.first?.rawFallback, false, "a short run is the user's choice, not a fallback")
+        XCTAssertTrue(h.cues.value.allSatisfy { !$0.hasPrefix("hint:") }, "\(h.cues.value)")
+    }
+
+    func testOneRunTimingOutFallsBackAlone() {
+        let hist = History(maxLen: 10)
+        let paster = FakePaster()
+        let h = make(
+            stt: FakeStt(text: "first point here now new line second point here now"),
+            cleaner: UppercasingCleaner(hangOn: "second point here now"), paster: paster, history: hist,
+            config: shortDeadline)
+        dictateBounded(h)
+        XCTAssertEqual(paster.pasted, ["FIRST POINT HERE NOW\nsecond point here now"])
+        XCTAssertFalse(hist.items()[0].cleaned, "a partial fallback is reported as a fallback")
+        XCTAssertEqual(h.cues.value.filter { $0 == "hint: Pasted raw — cleanup timed out" }.count, 1, "\(h.cues.value)")
+        XCTAssertEqual(h.stats.value.count, 1)
+        XCTAssertEqual(h.stats.value.first?.rawFallback, true)
+        XCTAssertEqual(h.stats.value.first?.cleaned, false)
+        XCTAssertEqual(h.cleanedTexts.value, ["FIRST POINT HERE NOW"], "the run that was cleaned is still offered")
+        XCTAssertTrue(h.logs.value.contains { $0.contains("cleanup_skip=timeout") && $0.contains("cleaned=false") })
+    }
+
+    func testATimeoutEndsCleanupForTheRestOfTheDictation() {
+        let cleaner = UppercasingCleaner(hangOn: "first point here now")
+        let paster = FakePaster()
+        let h = make(
+            stt: FakeStt(text: "first point here now new line second point here now"), cleaner: cleaner, paster: paster,
+            config: shortDeadline)
+        dictateBounded(h)
+        XCTAssertEqual(cleaner.received, ["first point here now"], "a backend that just timed out is not asked again")
+        XCTAssertEqual(paster.pasted, ["first point here now\nsecond point here now"])
+        XCTAssertEqual(h.cues.value.filter { $0 == "hint: Pasted raw — cleanup timed out" }.count, 1, "\(h.cues.value)")
+        XCTAssertTrue(h.logs.value.contains { $0.contains("cleanup_skip=timeout") && $0.contains("cleaned=false") })
+        XCTAssertEqual(h.stats.value.first?.rawFallback, true)
+    }
+
+    func testTheFirstFallbackReasonIsTheOneReported() {
+        let paster = FakePaster()
+        let cleaner = UppercasingCleaner(failOn: "first point here now", hangOn: "second point here now")
+        let h = make(
+            stt: FakeStt(text: "first point here now new line second point here now"), cleaner: cleaner,
+            paster: paster, config: shortDeadline)
+        dictateBounded(h)
+        XCTAssertEqual(cleaner.received, ["first point here now", "second point here now"], "an error is fast, so the next run still tries")
+        XCTAssertEqual(paster.pasted, ["first point here now\nsecond point here now"])
+        XCTAssertEqual(h.cues.value.filter { $0.hasPrefix("hint:") }, ["hint: Pasted raw — cleanup failed"])
+        XCTAssertTrue(h.logs.value.contains { $0.contains("cleanup_skip=error") }, "\(h.logs.value)")
+        XCTAssertFalse(h.logs.value.contains { $0.contains("cleanup_skip=timeout") })
+    }
+
+    func testStatsCountAllRunsOnce() {
+        let clock = FakeClock()
+        // 0.25 is exact in binary, so each run adds exactly 250 ms.
+        let h = make(
+            stt: FakeStt(text: "first point here now new line second point here now"),
+            cleaner: UppercasingCleaner(onClean: { clock.t += 0.25 }), clock: clock)
+        dictate(h)
+        XCTAssertEqual(h.stats.value.count, 1)
+        let stat = h.stats.value.first
+        XCTAssertEqual(stat?.words, 8, "the newline is whitespace, not a word")
+        XCTAssertEqual(stat?.cleaned, true)
+        XCTAssertEqual(stat?.rawFallback, false)
+        XCTAssertEqual(stat?.cleanupMs, 500, "the time of every run counts")
+    }
+
+    func testSnippetsExpandPerRunAndProfileRulesApplyToTheWhole() {
+        let paster = FakePaster()
+        let profile = AppProfile(bundleID: "com.slack", appName: "Slack", stripTrailingPeriod: true)
+        let h = make(
+            stt: FakeStt(text: "write to my email. new line thanks a lot team."), cleaner: UppercasingCleaner(),
+            paster: paster, snippets: snippets, frontmostBundleID: { "com.slack" }, profiles: [profile])
+        dictate(h)
+        XCTAssertEqual(
+            paster.pasted, ["WRITE TO e@example.com.\nTHANKS A LOT TEAM"],
+            "a trigger at a line end expands, and the period goes only at the very end")
+        XCTAssertEqual(h.cleanedTexts.value, ["WRITE TO MY EMAIL.\nTHANKS A LOT TEAM."], "the harvester never sees an expansion")
+        XCTAssertEqual(h.stats.value.first?.words, 8, "counted on what was said, not on the expansion")
+    }
+
+    func testBreaksOffWhenVoiceCommandsAreOff() {
+        let cleaner = UppercasingCleaner()
+        let paster = FakePaster()
+        let h = make(
+            stt: FakeStt(text: "one two three new line four five six"), cleaner: cleaner, paster: paster,
+            voiceCommands: false)
+        dictate(h)
+        XCTAssertEqual(cleaner.received, ["one two three new line four five six"])
+        XCTAssertEqual(paster.pasted, ["ONE TWO THREE NEW LINE FOUR FIVE SIX"])
+        XCTAssertFalse(h.logs.value.contains { $0.contains("segments=") })
+    }
+
+    func testAProfileWithCleanupOffPastesEveryRunRawWithoutAHint() {
+        let cleaner = UppercasingCleaner()
+        let paster = FakePaster()
+        let h = make(
+            stt: FakeStt(text: "one two three four new line five six seven eight"), cleaner: cleaner, paster: paster,
+            frontmostBundleID: { "com.slack" }, profiles: [slackOff])
+        dictate(h)
+        XCTAssertEqual(cleaner.calls, 0)
+        XCTAssertEqual(paster.pasted, ["one two three four\nfive six seven eight"])
+        XCTAssertTrue(h.cues.value.allSatisfy { !$0.hasPrefix("hint:") }, "\(h.cues.value)")
+        XCTAssertFalse(h.logs.value.contains { $0.contains("cleanup_skip=") })
+        XCTAssertTrue(h.logs.value.contains { $0.contains("segments=2") && $0.contains("profile=yes") })
+    }
+
+    func testDoubleBreaksCollapseToTheLargerOneInsideThePipeline() {
+        let cleaner = UppercasingCleaner()
+        let paster = FakePaster()
+        let h = make(
+            stt: FakeStt(text: "one two three four new line new paragraph five six seven eight"), cleaner: cleaner,
+            paster: paster)
+        dictate(h)
+        XCTAssertEqual(paster.pasted, ["ONE TWO THREE FOUR\n\nFIVE SIX SEVEN EIGHT"])
+        XCTAssertEqual(cleaner.calls, 2, "the empty run between the breaks is never cleaned")
+    }
+
+    func testBreaksStillApplyWithCleanupOff() {
+        let cleaner = UppercasingCleaner()
+        let paster = FakePaster()
+        let h = make(
+            stt: FakeStt(text: "one two three four new line five six seven eight"), cleaner: cleaner, paster: paster)
+        h.pipeline.cleanupEnabled = false
+        dictate(h)
+        XCTAssertEqual(cleaner.calls, 0)
+        XCTAssertEqual(paster.pasted, ["one two three four\nfive six seven eight"])
+        XCTAssertTrue(h.cues.value.allSatisfy { !$0.hasPrefix("hint:") }, "\(h.cues.value)")
+        XCTAssertTrue(h.logs.value.contains { $0.contains("segments=2") && $0.contains("cleaned=false") })
+    }
+
+    func testAnUtteranceOfOnlyBreakPhrasesPastesTheLargerBreak() {
+        let cases: [(said: String, pasted: String, hint: String, command: String)] = [
+            ("New line. New line.", "\n", "New line", "new_line"),
+            ("new line new paragraph", "\n\n", "New paragraph", "new_paragraph"),
+            ("nuevo párrafo nueva línea", "\n\n", "New paragraph", "new_paragraph"),
+        ]
+        for c in cases {
+            let cleaner = UppercasingCleaner()
+            let paster = FakePaster()
+            let hist = History(maxLen: 10)
+            let h = make(stt: FakeStt(text: c.said), cleaner: cleaner, paster: paster, history: hist)
+            dictate(h)
+            XCTAssertEqual(paster.pasted, [c.pasted], c.said)
+            XCTAssertEqual(h.cues.value, ["pasted", "hint: \(c.hint)"], c.said)
+            XCTAssertEqual(h.notices.value, [], "never \"Nothing transcribed\": \(c.said)")
+            XCTAssertTrue(h.logs.value.contains { $0.contains("command=\(c.command)") }, "\(h.logs.value)")
+            XCTAssertFalse(h.logs.value.contains { $0.contains(c.said) }, "the log never carries the utterance")
+            XCTAssertTrue(hist.items().isEmpty, "a break is not text to keep")
+            XCTAssertTrue(h.stats.value.isEmpty)
+            XCTAssertEqual(cleaner.calls, 0)
+            XCTAssertEqual(h.states.value.last, .idle)
+        }
+    }
+
+    func testABreakOnlyUtteranceIsHandedTheKeyDownApp() {
+        let paster = FakePaster()
+        let h = make(stt: FakeStt(text: "new line new line"), paster: paster, frontmost: { 9 })
+        dictate(h)
+        XCTAssertEqual(paster.targets, [9])
+    }
+
+    func testABreakOnlyUtteranceIsPlainTextWhenCommandsAreOff() {
+        let paster = FakePaster()
+        let h = make(stt: FakeStt(text: "new line new line"), cleaner: nil, paster: paster, voiceCommands: false)
+        dictate(h)
+        XCTAssertEqual(paster.pasted, ["new line new line"])
+    }
+
+    func testTheCommandSwitchIsReadOncePerDictation() {
+        final class Holder { var pipeline: DictationPipeline? }
+        let holder = Holder()
+        let presser = FakeKeyPresser()
+        let paster = FakePaster()
+        // Settings flips the switch while the dictation is being transcribed.
+        let h = make(
+            stt: FakeStt(text: "enter", onTranscribe: { holder.pipeline?.voiceCommandsEnabled = false }),
+            paster: paster, keyPresser: presser)
+        holder.pipeline = h.pipeline
+        dictate(h)
+        XCTAssertEqual(presser.pressed, [.returnKey], "the dictation keeps the setting it started with")
+        XCTAssertEqual(paster.pasted, [])
+    }
+
+    func testABreakPhraseAtTheEdgeOfAnUtteranceIsDroppedAndLogsNoSegmentCount() {
+        let cleaner = UppercasingCleaner()
+        let paster = FakePaster()
+        let h = make(stt: FakeStt(text: "new line hello there big world new paragraph"), cleaner: cleaner, paster: paster)
+        dictate(h)
+        XCTAssertEqual(cleaner.received, ["hello there big world"])
+        XCTAssertEqual(paster.pasted, ["HELLO THERE BIG WORLD"])
+        XCTAssertFalse(h.logs.value.contains { $0.contains("segments=") }, "one run is logged like any dictation")
+    }
+
+    func testAnOrdinaryDictationLogsNoSegmentCount() {
+        let h = make()
+        dictate(h)
+        XCTAssertFalse(h.logs.value.contains { $0.contains("segments=") })
+    }
+}
+
+/// Output depends on the input, so a test can tell two runs apart; `hangOn` and `failOn` pick one run to break.
+private final class UppercasingCleaner: CleanupBackend {
+    private let hangOn: String?
+    private let failOn: String?
+    private let onClean: (() -> Void)?
+    private(set) var received: [String] = []
+    var calls: Int { received.count }
+
+    init(failOn: String? = nil, hangOn: String? = nil, onClean: (() -> Void)? = nil) {
+        self.failOn = failOn
+        self.hangOn = hangOn
+        self.onClean = onClean
+    }
+
+    func clean(_ text: String) async throws -> String {
+        received.append(text)
+        onClean?()
+        if text == failOn { throw TestError(message: "boom") }
+        // Ignores cancellation, like a model load: only the pipeline's deadline can end it.
+        if text == hangOn { await withUnsafeContinuation { (_: UnsafeContinuation<Void, Never>) in } }
+        return text.uppercased()
+    }
 }

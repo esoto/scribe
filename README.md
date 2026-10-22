@@ -79,8 +79,7 @@ Upgrading from a v3 install downloads Ultra on first launch (progress shows in t
   "send it" presses Return; "new line" and "new paragraph" insert breaks;
   "scratch that" / "undo" sends ⌘Z (best-effort: terminals ignore it). ⌘Z assumes a QWERTY-family layout.
   Spanish: "enviar" / "envíalo", "nueva línea", "nuevo párrafo", "borra
-  eso" / "deshacer". Also accepted: "press enter", "send that", "newline", "line break", "undo that"; "mándalo", "presiona enter", "línea nueva", "salto de línea", "párrafo nuevo", "deshace eso". Only the entire utterance counts, so "add a new line
-  after the title" is still text. Spoken punctuation ("comma", "period")
+  eso" / "deshacer". Also accepted: "press enter", "send that", "newline", "line break", "new line break", "undo that"; "mándalo", "presiona enter", "línea nueva", "salto de línea", "párrafo nuevo", "deshace eso". The break phrases also work inside a sentence: "first point new line second point" pastes as two lines. Each part is cleaned on its own, so a dictation with breaks takes a little longer. They break wherever they are said, so "a new line of products" or "una nueva línea de crédito" cannot be dictated as text: turn voice commands off for that. The other commands count only as the entire utterance, so "please send it to the team" is still text. Spoken punctuation ("comma", "period")
   is not a command: transcription and cleanup already punctuate. Return
   goes to whatever has focus — in a terminal it runs the line, and a pasted break can too in a shell without bracketed paste.
 - **History**: the last 10 dictations by default (Settings › General), in
@@ -245,7 +244,7 @@ Most of these have a control in **Settings…** (⌘,), the menu, or the Diction
 | `vocabularyBiasingEnabled` | false | acoustic vocabulary biasing for Parakeet (experimental) (Dictionary window) |
 | `enhanceAudioEnabled` | false | LocalVQE noise suppression before transcription — experimental (Settings › Audio) |
 | `urlSchemeEnabled` | false | allow `scribe://` URLs from other apps (Settings) |
-| `voiceCommandsEnabled` | true | whole-utterance voice commands ("enter", "new line", …) — see Usage (Settings) |
+| `voiceCommandsEnabled` | true | voice commands ("enter", "new line", …), including breaks inside a sentence — see Usage (Settings) |
 | `hudEnabled` | true | the recording pill above the Dock (Settings) |
 | `microphoneUID` | _(unset)_ | input device UID; unset follows the system default input (Settings) |
 

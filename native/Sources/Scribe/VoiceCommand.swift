@@ -1,7 +1,7 @@
 import Foundation
 
 /// A whole utterance that is an instruction to scribe rather than text to paste. Only the entire utterance is
-/// matched, so false positives stay near zero: "new line" inside a sentence is text.
+/// matched here; a break phrase inside a sentence is BreakSplitter's job.
 enum VoiceCommand: Equatable, CaseIterable {
     case pressReturn, newLine, newParagraph, undo
 
@@ -26,11 +26,11 @@ enum VoiceCommand: Equatable, CaseIterable {
     }
 
     /// Folded (lowercase, no accents, no punctuation) phrases, EN and ES side by side. A bare "send" is left out:
-    /// "Send." is a plausible one-word reply.
-    private static let phrases: [String: VoiceCommand] = [
+    /// "Send." is a plausible one-word reply. Internal so a test can pin the break phrases to `BreakSplitter`'s table.
+    static let phrases: [String: VoiceCommand] = [
         "enter": .pressReturn, "press enter": .pressReturn, "send it": .pressReturn, "send that": .pressReturn,
         "enviar": .pressReturn, "envialo": .pressReturn, "mandalo": .pressReturn, "presiona enter": .pressReturn,
-        "new line": .newLine, "newline": .newLine, "line break": .newLine,
+        "new line": .newLine, "newline": .newLine, "line break": .newLine, "new line break": .newLine,
         "nueva linea": .newLine, "linea nueva": .newLine, "salto de linea": .newLine,
         "new paragraph": .newParagraph, "nuevo parrafo": .newParagraph, "parrafo nuevo": .newParagraph,
         "scratch that": .undo, "undo that": .undo, "undo": .undo,

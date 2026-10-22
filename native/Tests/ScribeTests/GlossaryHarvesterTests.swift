@@ -1,6 +1,13 @@
 import XCTest
 
 final class GlossaryHarvesterTests: XCTestCase {
+    /// Cleaned runs of one dictation reach the harvester joined by a newline, so a run's first word is sentence-initial
+    /// even when the previous run ended without a period.
+    func testNewlineJoinedRunsDoNotMakeLineStartWordsCandidates() {
+        XCTAssertEqual(GlossaryHarvester.candidates(in: "Buy milk and eggs today\nCall the plumber about the sink"), [])
+        XCTAssertEqual(GlossaryHarvester.candidates(in: "Buy milk and eggs today Call the plumber about the sink"), ["Call"])
+    }
+
     func testTable() {
         let cases: [(input: String, expected: [String], line: UInt)] = [
             // Acronyms qualify anywhere, including sentence-initial.
@@ -48,6 +55,8 @@ final class GlossaryHarvesterTests: XCTestCase {
             // Deduped within one utterance, first-occurrence order kept.
             ("MLX beats MLX every time", ["MLX"], #line),
             ("pair Kamal with MLX and Kamal", ["Kamal", "MLX"], #line),
+            // Runs of one dictation arrive joined by a space, so a name in every run is still one candidate.
+            ("Call Priya now. Ask Priya later. Thank Priya too", ["Priya"], #line),
             // Degenerate inputs.
             ("", [], #line),
             ("   \n  ", [], #line),

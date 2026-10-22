@@ -75,7 +75,8 @@ final class DictationPipeline {
     private let onState: (PipelineState) -> Void
     private let onNotice: (String) -> Void
     private let onLog: ((String) -> Void)?
-    /// Fired only for a successfully cleaned dictation; raw STT is never offered (harvesting relies on LLM casing).
+    /// Fired only for a successfully cleaned dictation, once, with its cleaned runs joined by a space; raw STT is never
+    /// offered (harvesting relies on LLM casing).
     private let onCleaned: ((String) -> Void)?
     /// Read fresh each dictation; applied deterministically here, not via the cleanup prompt.
     private let replacementPairs: () -> [ReplacementPair]
@@ -255,6 +256,8 @@ final class DictationPipeline {
     // MARK: - Processing (runs on the injected runner)
 
     private func process(_ pcm: [Float], job: Int, target: pid_t?, bundleID: String?, enqueuedAt: Double) async {
+        // Once, so a toggle from Settings mid-dictation cannot skip the command check and then split.
+        let commandsOn = voiceCommandsEnabled
         func emit(_ state: PipelineState) {
             stateLock.withLock { if !holding, latestJob == job { onState(state) } }
         }
@@ -333,55 +336,67 @@ final class DictationPipeline {
             return
         }
 
-        if voiceCommandsEnabled, let command = VoiceCommand.match(raw) {
-            // Before replacements and cleanup: a command is not text. Nothing of it is pasted, kept or harvested.
+        func perform(_ command: VoiceCommand) {
             onLog?("dictation: engine=\(engineName) stt=\(sttMs)ms command=\(command.logName)")
             runCommand(command, target: target)
+        }
+        if commandsOn, let command = VoiceCommand.match(raw) {
+            // Before replacements and cleanup: a command is not text. Nothing of it is pasted, kept or harvested.
+            perform(command)
             return
         }
 
         // Applied before cleanup (model reads what was said) and after (cleanup may recase it).
         // Unconditional so it also covers too-short, disabled, and gated-out cleanup.
         let pairs = replacementPairs()
-        let transcript = TermReplacer.apply(pairs, to: raw)
         let profile = profileFor(bundleID)
 
-        var final = transcript
-        var cleaned = false
-        var cleanupMs = 0
-        // cleanupMs is 0 both when cleanup never ran and when it ran instantly; only this tells them apart.
-        var cleanupRan = false
-        var skipNote = ""
-        var cleanupSkip: CleanupSkip?
-        if let cleaner,
-            Gates.shouldClean(
-                transcript, enabled: OutputProfile.cleanupEnabled(profile, global: cleanupEnabled),
-                minWords: config.minWords)
-        {
-            cleanupRan = true
-            let cleanStart = clock()
-            switch await tryClean(transcript, cleaner: cleaner) {
-            case .success(let out):
-                final = TermReplacer.apply(pairs, to: out)
-                cleaned = true
-            case .failure(let skip):
-                // The reason token only: the backend's error text could echo the dictated text.
-                skipNote = " cleanup_skip=\(skip.rawValue)"
-                cleanupSkip = skip
-            }
-            cleanupMs = Int((clock() - cleanStart) * 1000)
+        // A break phrase splits the dictation into runs that are cleaned on their own and joined with real line
+        // breaks: the model never sees a break phrase or a newline, and one bad run falls back to raw alone.
+        let segments = commandsOn ? BreakSplitter.split(raw) : [Segment(text: raw, breakAfter: nil)]
+        guard !segments.isEmpty else {
+            // Only break phrases were said ("new line. New line."): the user asked for a break, so they get the larger one.
+            perform(BreakSplitter.largestBreak(in: raw) == .paragraph ? .newParagraph : .newLine)
+            return
         }
-        onLog?("dictation: engine=\(engineName) cleanupModel=\(cleanupModelName) stt=\(sttMs)ms bias=\(biasMs)ms enhance=\(enhanceMs)ms cleanup=\(cleanupMs)ms cleaned=\(cleaned) chars=\(final.count)\(enhanceSkipNote)\(skipNote)\(profile == nil ? "" : " profile=yes")")
+
+        let cleaner = self.cleaner
+        let cleaningEnabled = OutputProfile.cleanupEnabled(profile, global: cleanupEnabled)
+        var runs: [CleanedRun] = []
+        // One stuck backend costs one deadline, not one per run: past the queue age the next dictation is dropped.
+        var timedOut = false
+        for segment in segments {
+            let run = await processSegment(
+                segment.text, pairs: pairs, cleaner: cleaner, enabled: cleaningEnabled && !timedOut)
+            timedOut = timedOut || run.skip == .timeout
+            runs.append(run)
+        }
+        let pieces = zip(runs, segments).map { (text: $0.text, breakAfter: $1.breakAfter) }
+        var final = BreakSplitter.join(pieces)
+
+        // A partial fallback reports as a fallback: the status row must not claim a clean dictation that pasted raw text.
+        let cleaned = runs.contains { $0.cleaned } && !runs.contains { $0.skip != nil }
+        let cleanupSkip = runs.lazy.compactMap(\.skip).first
+        let cleanupMs = runs.reduce(0) { $0 + $1.cleanupMs }
+        let cleanupRan = runs.contains { $0.ran }
+        // The reason token only: the backend's error text could echo the dictated text.
+        let skipNote = cleanupSkip.map { " cleanup_skip=\($0.rawValue)" } ?? ""
+        let segmentsNote = segments.count > 1 ? " segments=\(segments.count)" : ""
+        onLog?("dictation: engine=\(engineName) cleanupModel=\(cleanupModelName) stt=\(sttMs)ms bias=\(biasMs)ms enhance=\(enhanceMs)ms cleanup=\(cleanupMs)ms cleaned=\(cleaned) chars=\(final.count)\(segmentsNote)\(enhanceSkipNote)\(skipNote)\(profile == nil ? "" : " profile=yes")")
         onStats?(DictationStat(
             words: final.split(whereSeparator: { $0.isWhitespace }).count, cleaned: cleaned,
             rawFallback: cleanupSkip != nil, sttMs: sttMs, cleanupMs: cleanupRan ? cleanupMs : nil))
 
-        if cleaned {
-            onCleaned?(final)
-        }
+        // One offer per dictation: the harvester dedupes per call, so a name said in three runs still counts once
+        // toward the store's promotion threshold. Joined by a newline, which the harvester treats as a sentence
+        // start, so a run's capitalised first word is not mistaken for a proper noun. This text is never pasted.
+        let cleanedRuns = runs.filter(\.cleaned).map(\.text)
+        if !cleanedRuns.isEmpty { onCleaned?(cleanedRuns.joined(separator: "\n")) }
 
-        // After the harvester, so personal text in an expansion never becomes a learned term; after cleanup, so the model never sees it and its line breaks survive.
-        final = SnippetExpander.apply(snippets(), to: final)
+        // After the harvester, so personal text in an expansion never becomes a learned term; after cleanup, so the model never sees it and its line breaks survive. Per run, so a trigger at a line end still matches.
+        let expansions = snippets()
+        final = BreakSplitter.join(
+            pieces.map { (text: SnippetExpander.apply(expansions, to: $0.text), breakAfter: $0.breakAfter) })
         // After the snippets, so a block keeps its end-of-text rule; after onCleaned and the stats: the harvester wants the
         // model's casing, and these rules never change the word count.
         final = OutputProfile.apply(profile, to: final)
@@ -406,6 +421,37 @@ final class DictationPipeline {
             at: Date(),
             durationMs: durationMs
         ))
+    }
+
+    /// What one run of the dictation became and what its cleanup attempt did.
+    private struct CleanedRun {
+        var text: String
+        var cleaned = false
+        var skip: CleanupSkip?
+        var cleanupMs = 0
+        /// cleanupMs is 0 both when cleanup never ran and when it ran instantly; only this tells them apart.
+        var ran = false
+    }
+
+    /// Each run gets its own gate and its own deadline: a short run stays raw, and a timeout ends cleanup for the
+    /// rest of the dictation (the caller passes `enabled: false`), so a stuck backend is paid for once.
+    private func processSegment(
+        _ text: String, pairs: [ReplacementPair], cleaner: CleanupBackend?, enabled: Bool
+    ) async -> CleanedRun {
+        let transcript = TermReplacer.apply(pairs, to: text)
+        var run = CleanedRun(text: transcript)
+        guard let cleaner, Gates.shouldClean(transcript, enabled: enabled, minWords: config.minWords) else { return run }
+        run.ran = true
+        let cleanStart = clock()
+        switch await tryClean(transcript, cleaner: cleaner) {
+        case .success(let out):
+            run.text = TermReplacer.apply(pairs, to: out)
+            run.cleaned = true
+        case .failure(let skip):
+            run.skip = skip
+        }
+        run.cleanupMs = Int((clock() - cleanStart) * 1000)
+        return run
     }
 
     /// Return and ⌘Z go through the key presser; the breaks go through the paster, so the focus guard and the
