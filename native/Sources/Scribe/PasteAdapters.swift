@@ -67,7 +67,7 @@ final class MacPasteboard: PasteboardLike {
 }
 
 /// Keys scribe can press on the user's behalf. Return submits in chat apps and runs a line in a terminal — a voice
-/// command asks for it by name, a dictation never does (its text is pasted, newlines flattened).
+/// command asks for it by name, a dictation never does (its text is pasted; a newline in it comes only from a spoken break or a snippet).
 enum SyntheticKey: Equatable {
     case commandV, returnKey, commandZ
 

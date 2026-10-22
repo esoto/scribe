@@ -75,7 +75,8 @@ final class DictationPipeline {
     private let onState: (PipelineState) -> Void
     private let onNotice: (String) -> Void
     private let onLog: ((String) -> Void)?
-    /// Fired only for a successfully cleaned dictation; raw STT is never offered (harvesting relies on LLM casing).
+    /// Fired only for a successfully cleaned dictation, once, with its cleaned runs joined by a space; raw STT is never
+    /// offered (harvesting relies on LLM casing).
     private let onCleaned: ((String) -> Void)?
     /// Read fresh each dictation; applied deterministically here, not via the cleanup prompt.
     private let replacementPairs: () -> [ReplacementPair]
@@ -255,6 +256,8 @@ final class DictationPipeline {
     // MARK: - Processing (runs on the injected runner)
 
     private func process(_ pcm: [Float], job: Int, target: pid_t?, bundleID: String?, enqueuedAt: Double) async {
+        // Once, so a toggle from Settings mid-dictation cannot skip the command check and then split.
+        let commandsOn = voiceCommandsEnabled
         func emit(_ state: PipelineState) {
             stateLock.withLock { if !holding, latestJob == job { onState(state) } }
         }
@@ -333,10 +336,13 @@ final class DictationPipeline {
             return
         }
 
-        if voiceCommandsEnabled, let command = VoiceCommand.match(raw) {
-            // Before replacements and cleanup: a command is not text. Nothing of it is pasted, kept or harvested.
+        func perform(_ command: VoiceCommand) {
             onLog?("dictation: engine=\(engineName) stt=\(sttMs)ms command=\(command.logName)")
             runCommand(command, target: target)
+        }
+        if commandsOn, let command = VoiceCommand.match(raw) {
+            // Before replacements and cleanup: a command is not text. Nothing of it is pasted, kept or harvested.
+            perform(command)
             return
         }
 
@@ -347,17 +353,23 @@ final class DictationPipeline {
 
         // A break phrase splits the dictation into runs that are cleaned on their own and joined with real line
         // breaks: the model never sees a break phrase or a newline, and one bad run falls back to raw alone.
-        let segments = voiceCommandsEnabled ? BreakSplitter.split(raw) : [Segment(text: raw, breakAfter: nil)]
+        let segments = commandsOn ? BreakSplitter.split(raw) : [Segment(text: raw, breakAfter: nil)]
         guard !segments.isEmpty else {
-            onNotice("Nothing transcribed")
+            // Only break phrases were said ("new line. New line."): the user asked for a break, so they get the larger one.
+            perform(BreakSplitter.largestBreak(in: raw) == .paragraph ? .newParagraph : .newLine)
             return
         }
 
         let cleaner = self.cleaner
         let cleaningEnabled = OutputProfile.cleanupEnabled(profile, global: cleanupEnabled)
         var runs: [CleanedRun] = []
+        // One stuck backend costs one deadline, not one per run: past the queue age the next dictation is dropped.
+        var timedOut = false
         for segment in segments {
-            runs.append(await processSegment(segment.text, pairs: pairs, cleaner: cleaner, enabled: cleaningEnabled))
+            let run = await processSegment(
+                segment.text, pairs: pairs, cleaner: cleaner, enabled: cleaningEnabled && !timedOut)
+            timedOut = timedOut || run.skip == .timeout
+            runs.append(run)
         }
         let pieces = zip(runs, segments).map { (text: $0.text, breakAfter: $1.breakAfter) }
         var final = BreakSplitter.join(pieces)
@@ -375,10 +387,10 @@ final class DictationPipeline {
             words: final.split(whereSeparator: { $0.isWhitespace }).count, cleaned: cleaned,
             rawFallback: cleanupSkip != nil, sttMs: sttMs, cleanupMs: cleanupRan ? cleanupMs : nil))
 
-        // One offer per cleaned run, so the harvester never sees a newline.
-        for run in runs where run.cleaned {
-            onCleaned?(run.text)
-        }
+        // One offer per dictation, runs joined by a space and never a newline: the harvester dedupes per call, so a
+        // name said in three runs still counts once toward the store's promotion threshold.
+        let cleanedRuns = runs.filter(\.cleaned).map(\.text)
+        if !cleanedRuns.isEmpty { onCleaned?(cleanedRuns.joined(separator: " ")) }
 
         // After the harvester, so personal text in an expansion never becomes a learned term; after cleanup, so the model never sees it and its line breaks survive. Per run, so a trigger at a line end still matches.
         let expansions = snippets()
@@ -420,7 +432,8 @@ final class DictationPipeline {
         var ran = false
     }
 
-    /// Each run gets its own gate and its own deadline: a short run stays raw and a stuck one costs only itself.
+    /// Each run gets its own gate and its own deadline: a short run stays raw, and a timeout ends cleanup for the
+    /// rest of the dictation (the caller passes `enabled: false`), so a stuck backend is paid for once.
     private func processSegment(
         _ text: String, pairs: [ReplacementPair], cleaner: CleanupBackend?, enabled: Bool
     ) async -> CleanedRun {

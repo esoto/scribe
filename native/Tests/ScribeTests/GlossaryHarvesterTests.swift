@@ -48,6 +48,8 @@ final class GlossaryHarvesterTests: XCTestCase {
             // Deduped within one utterance, first-occurrence order kept.
             ("MLX beats MLX every time", ["MLX"], #line),
             ("pair Kamal with MLX and Kamal", ["Kamal", "MLX"], #line),
+            // Runs of one dictation arrive joined by a space, so a name in every run is still one candidate.
+            ("Call Priya now. Ask Priya later. Thank Priya too", ["Priya"], #line),
             // Degenerate inputs.
             ("", [], #line),
             ("   \n  ", [], #line),

@@ -37,6 +37,16 @@ final class UserDictionaryStoreTests: XCTestCase {
         XCTAssertEqual(store.snapshot.glossary, ["Kamal"])
     }
 
+    func testOneDictationWithATermInEveryRunCountsOnce() {
+        let store = makeStore()
+        // What the pipeline offers for "…new line…new line…": the cleaned runs of one dictation, joined by a space.
+        store.observe(cleanedText: "Call Priya about the deploy. Ask Priya for the logs. Thank Priya for the review.")
+        store.observe(cleanedText: "check Priya now")
+        XCTAssertEqual(store.snapshot.glossary, [], "two dictations, not four")
+        store.observe(cleanedText: "ping Priya later")
+        XCTAssertEqual(store.snapshot.glossary, ["Priya"])
+    }
+
     func testOnChangeFiresWhenTheWordSetChangesButNotOnCountBumps() {
         let store = makeStore()
         let fired = Box<DictionarySnapshot>()

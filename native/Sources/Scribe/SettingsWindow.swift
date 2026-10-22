@@ -106,7 +106,7 @@ private struct GeneralPane: View {
             Toggle(
                 "Voice commands",
                 isOn: Binding(get: { settings.voiceCommandsEnabled }, set: { settings.setVoiceCommandsEnabled($0) }))
-            caption("Say one of these on its own: “enter” or “send it”, “new line”, “new paragraph”, “scratch that” or “undo” — or the Spanish “enviar”, “nueva línea”, “nuevo párrafo”, “borra eso”, “deshacer”.")
+            caption("Say one of these on its own: “enter” or “send it”, “new line”, “new paragraph”, “scratch that” or “undo” — or the Spanish “enviar”, “nueva línea”, “nuevo párrafo”, “borra eso”, “deshacer”. The line and paragraph breaks also work inside a sentence.")
             Toggle(
                 "Recording pill",
                 isOn: Binding(get: { settings.hudEnabled }, set: { settings.setHudEnabled($0) }))
