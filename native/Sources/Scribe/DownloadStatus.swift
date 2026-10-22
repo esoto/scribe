@@ -1,0 +1,33 @@
+import Foundation
+
+/// The two model downloads' progress, kept off `AppModel` so a download chunk rebuilds only the views that read it
+/// and an unrelated `AppModel` write (microphone list, launch at login) never rebuilds the menu-bar glyph.
+@MainActor
+final class DownloadStatus: ObservableObject {
+    /// "Downloading Parakeet Ultra… NN%" while the STT model downloads (first launch after upgrade); nil otherwise.
+    @Published private(set) var sttStatus: String?
+    /// The same download as a 0…1 fraction for the menu-bar glyph; nil once it completes.
+    @Published private(set) var sttFraction: Double?
+    /// "Downloading Enhance Audio… NN%" while its model downloads (first use after the toggle goes on); nil otherwise.
+    @Published private(set) var enhancerStatus: String?
+
+    /// FluidAudio reports every received chunk; the status line and the glyph only change with the whole percent,
+    /// so anything else is dropped before it can rebuild a view.
+    func report(stt label: String, fraction: Double) {
+        let status = Self.status(label: label, fraction: fraction)
+        guard status != sttStatus else { return }
+        sttStatus = status
+        sttFraction = fraction < 1 ? fraction : nil
+    }
+
+    func report(enhancer label: String, fraction: Double) {
+        let status = Self.status(label: label, fraction: fraction)
+        guard status != enhancerStatus else { return }
+        enhancerStatus = status
+    }
+
+    /// Nil at 100 %: the download is over, and the load that follows reports through the preload state.
+    private static func status(label: String, fraction: Double) -> String? {
+        fraction < 1 ? CleanupModelCatalog.statusText(label: label, fraction: fraction) : nil
+    }
+}
