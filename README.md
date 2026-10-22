@@ -77,7 +77,7 @@ Upgrading from a v3 install downloads Ultra on first launch (progress shows in t
 - **Voice commands** (Settings › General, on by default): say one of these
   as the whole utterance and scribe acts instead of pasting — "enter" /
   "send it" presses Return; "new line" and "new paragraph" insert breaks;
-  "scratch that" / "undo" sends ⌘Z (best-effort: terminals ignore it). ⌘Z assumes a QWERTY-family layout.
+  "scratch that" / "undo" sends ⌘Z (best-effort: terminals ignore it). Return, ⌘V and ⌘Z use your keyboard layout.
   Spanish: "enviar" / "envíalo", "nueva línea", "nuevo párrafo", "borra
   eso" / "deshacer". Also accepted: "press enter", "send that", "newline", "line break", "new line break", "new lines", "undo that"; "mándalo", "presiona enter", "línea nueva", "salto de línea", "párrafo nuevo", "deshace eso". If the recognizer keeps hearing a command wrong, add a Dictionary pair for what it hears (for example "neal lines" → "new line") — pairs apply before commands are matched. The break phrases also work inside a sentence: "first point new line second point" pastes as two lines. Each part is cleaned on its own, so a dictation with breaks takes a little longer. They break wherever they are said, so "a new line of products" or "una nueva línea de crédito" cannot be dictated as text: turn voice commands off for that. The other commands count only as the entire utterance, so "please send it to the team" is still text. Spoken punctuation ("comma", "period")
   is not a command: transcription and cleanup already punctuate. Return

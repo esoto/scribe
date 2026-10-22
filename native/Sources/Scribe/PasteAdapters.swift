@@ -71,12 +71,29 @@ final class MacPasteboard: PasteboardLike {
 enum SyntheticKey: Equatable {
     case commandV, returnKey, commandZ
 
-    var keycode: CGKeyCode {
+    /// The letter a shortcut key types. Apps match shortcuts by character, so the keycode comes from the active
+    /// layout. Return sits at keycode 36 on every layout and has none.
+    var character: Character? {
+        switch self {
+        case .commandV: return "v"
+        case .commandZ: return "z"
+        case .returnKey: return nil
+        }
+    }
+
+    /// The ANSI position: used when the layout has no such letter (a non-Latin layout), where macOS still routes
+    /// the ⌘ shortcut from this physical key.
+    var fallbackKeycode: CGKeyCode {
         switch self {
         case .commandV: return 9
         case .returnKey: return 36
         case .commandZ: return 6
         }
+    }
+
+    func keycode(resolve: (Character) -> CGKeyCode?) -> CGKeyCode {
+        guard let character else { return fallbackKeycode }
+        return resolve(character) ?? fallbackKeycode
     }
 
     var flags: CGEventFlags {
@@ -97,10 +114,11 @@ enum SyntheticKey: Equatable {
 }
 
 /// Posts a synthetic key press. Untested: needs Accessibility and would hit the frontmost app.
-func postKey(_ key: SyntheticKey) throws {
+func postKey(_ key: SyntheticKey, resolve: (Character) -> CGKeyCode? = KeyboardLayout.keycode(for:)) throws {
+    let keycode = key.keycode(resolve: resolve)
     guard
-        let keyDown = CGEvent(keyboardEventSource: nil, virtualKey: key.keycode, keyDown: true),
-        let keyUp = CGEvent(keyboardEventSource: nil, virtualKey: key.keycode, keyDown: false)
+        let keyDown = CGEvent(keyboardEventSource: nil, virtualKey: keycode, keyDown: true),
+        let keyUp = CGEvent(keyboardEventSource: nil, virtualKey: keycode, keyDown: false)
     else {
         throw PasteError(message: "could not create synthetic \(key.spoken) key event")
     }

@@ -180,13 +180,43 @@ final class PasteGuardTests: XCTestCase {
         }
     }
 
-    func test_synthetic_keys_carry_their_virtual_keycodes_and_flags() {
-        XCTAssertEqual(SyntheticKey.commandV.keycode, 9)
-        XCTAssertEqual(SyntheticKey.returnKey.keycode, 36)
-        XCTAssertEqual(SyntheticKey.commandZ.keycode, 6)
+    func test_synthetic_keys_carry_their_ansi_fallback_keycodes_and_flags() {
+        XCTAssertEqual(SyntheticKey.commandV.fallbackKeycode, 9)
+        XCTAssertEqual(SyntheticKey.returnKey.fallbackKeycode, 36)
+        XCTAssertEqual(SyntheticKey.commandZ.fallbackKeycode, 6)
         XCTAssertEqual(SyntheticKey.commandV.flags, .maskCommand)
         XCTAssertEqual(SyntheticKey.commandZ.flags, .maskCommand)
         XCTAssertEqual(SyntheticKey.returnKey.flags, [])
         XCTAssertEqual(SyntheticKey.commandV.spoken, "\u{2318}V")
+    }
+
+    // MARK: - Keycode resolution
+
+    func test_command_keys_look_up_their_character() {
+        XCTAssertEqual(SyntheticKey.commandV.character, "v")
+        XCTAssertEqual(SyntheticKey.commandZ.character, "z")
+        XCTAssertNil(SyntheticKey.returnKey.character)
+    }
+
+    func test_the_layout_decides_the_keycode() {
+        var asked: [Character] = []
+        let resolve: (Character) -> CGKeyCode? = { character in
+            asked.append(character)
+            return character == "z" ? 20 : 47
+        }
+        XCTAssertEqual(SyntheticKey.commandZ.keycode(resolve: resolve), 20)
+        XCTAssertEqual(SyntheticKey.commandV.keycode(resolve: resolve), 47)
+        XCTAssertEqual(asked, ["z", "v"])
+    }
+
+    func test_a_layout_without_the_key_falls_back_to_ansi() {
+        XCTAssertEqual(SyntheticKey.commandV.keycode(resolve: { _ in nil }), 9)
+        XCTAssertEqual(SyntheticKey.commandZ.keycode(resolve: { _ in nil }), 6)
+    }
+
+    func test_return_never_consults_the_layout() {
+        var asked = 0
+        XCTAssertEqual(SyntheticKey.returnKey.keycode(resolve: { _ in asked += 1; return 99 }), 36)
+        XCTAssertEqual(asked, 0)
     }
 }
