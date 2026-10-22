@@ -387,10 +387,11 @@ final class DictationPipeline {
             words: final.split(whereSeparator: { $0.isWhitespace }).count, cleaned: cleaned,
             rawFallback: cleanupSkip != nil, sttMs: sttMs, cleanupMs: cleanupRan ? cleanupMs : nil))
 
-        // One offer per dictation, runs joined by a space and never a newline: the harvester dedupes per call, so a
-        // name said in three runs still counts once toward the store's promotion threshold.
+        // One offer per dictation: the harvester dedupes per call, so a name said in three runs still counts once
+        // toward the store's promotion threshold. Joined by a newline, which the harvester treats as a sentence
+        // start, so a run's capitalised first word is not mistaken for a proper noun. This text is never pasted.
         let cleanedRuns = runs.filter(\.cleaned).map(\.text)
-        if !cleanedRuns.isEmpty { onCleaned?(cleanedRuns.joined(separator: " ")) }
+        if !cleanedRuns.isEmpty { onCleaned?(cleanedRuns.joined(separator: "\n")) }
 
         // After the harvester, so personal text in an expansion never becomes a learned term; after cleanup, so the model never sees it and its line breaks survive. Per run, so a trigger at a line end still matches.
         let expansions = snippets()

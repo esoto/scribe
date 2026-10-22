@@ -1404,7 +1404,7 @@ final class PipelineTests: XCTestCase {
         XCTAssertEqual(hist.items()[0].raw, "first point here now new line second point here now")
         XCTAssertTrue(hist.items()[0].cleaned)
         XCTAssertEqual(
-            h.cleanedTexts.value, ["FIRST POINT HERE NOW SECOND POINT HERE NOW"], "one offer per dictation, never a newline")
+            h.cleanedTexts.value, ["FIRST POINT HERE NOW\nSECOND POINT HERE NOW"], "one offer per dictation, runs on their own lines")
         XCTAssertTrue(h.logs.value.contains { $0.contains("segments=2") }, "\(h.logs.value)")
         XCTAssertFalse(h.logs.value.contains { $0.lowercased().contains("point") }, "the log carries counts, never text")
     }
@@ -1415,9 +1415,10 @@ final class PipelineTests: XCTestCase {
             cleaner: UppercasingCleaner())
         dictate(h)
         XCTAssertEqual(
-            h.cleanedTexts.value, ["CALL PRIYA ABOUT IT NOW ASK PRIYA FOR THE LOGS THANK PRIYA FOR THE REVIEW"],
+            h.cleanedTexts.value, ["CALL PRIYA ABOUT IT NOW\nASK PRIYA FOR THE LOGS\nTHANK PRIYA FOR THE REVIEW"],
             "the store counts one call per dictation toward its promotion threshold")
-        XCTAssertFalse(h.cleanedTexts.value.contains { $0.contains("\n") })
+        // One line per run: the harvester treats a line start as sentence-initial, so "Ask" and "Thank" are not names.
+        XCTAssertEqual(h.cleanedTexts.value.first?.components(separatedBy: "\n").count, 3)
     }
 
     func testADictationWithNoCleanedRunMakesNoHarvesterOffer() {
@@ -1524,7 +1525,7 @@ final class PipelineTests: XCTestCase {
         XCTAssertEqual(
             paster.pasted, ["WRITE TO e@example.com.\nTHANKS A LOT TEAM"],
             "a trigger at a line end expands, and the period goes only at the very end")
-        XCTAssertEqual(h.cleanedTexts.value, ["WRITE TO MY EMAIL. THANKS A LOT TEAM."], "the harvester never sees an expansion")
+        XCTAssertEqual(h.cleanedTexts.value, ["WRITE TO MY EMAIL.\nTHANKS A LOT TEAM."], "the harvester never sees an expansion")
         XCTAssertEqual(h.stats.value.first?.words, 8, "counted on what was said, not on the expansion")
     }
 

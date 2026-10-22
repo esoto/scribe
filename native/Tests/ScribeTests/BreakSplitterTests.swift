@@ -61,6 +61,10 @@ final class BreakSplitterTests: XCTestCase {
         XCTAssertNil(BreakSplitter.largestBreak(in: ""))
     }
 
+    func testAStrayDashAfterALeadingBreakIsDropped() {
+        XCTAssertEqual(BreakSplitter.split("new line — hello there"), [Segment(text: "hello there", breakAfter: nil)])
+    }
+
     func testNeverMatchesInsideALongerWord() {
         XCTAssertEqual(BreakSplitter.split("the newlines were many"), [seg("the newlines were many")])
         XCTAssertEqual(BreakSplitter.split("a new lineage"), [seg("a new lineage")])

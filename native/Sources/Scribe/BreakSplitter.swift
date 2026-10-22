@@ -54,13 +54,18 @@ enum BreakSplitter {
         }
 
         var i = 0
+        var afterBreak = false
         while i < tokens.count {
             if let (length, brk) = phrase(in: folded, at: i) {
                 close(with: brk)
+                afterBreak = true
                 i += length
             } else {
-                // Right after a break, so a dash left over from the pause would otherwise start the new line.
-                if !(run.isEmpty && !segments.isEmpty && isStrayPunctuation(tokens[i])) { run.append(tokens[i]) }
+                // Right after a break (also a leading one), so a dash left over from the pause would otherwise start the line.
+                if !(afterBreak && run.isEmpty && isStrayPunctuation(tokens[i])) {
+                    run.append(tokens[i])
+                    afterBreak = false
+                }
                 i += 1
             }
         }
