@@ -94,6 +94,19 @@ final class HUDModelTests: XCTestCase {
         XCTAssertEqual(displayIndex(containing: NSPoint(x: 999.5, y: 400), frames: twoDisplays), 0)
     }
 
+    func testTheTopRowWhereTheMenuBarIsBelongsToItsDisplay() {
+        XCTAssertEqual(displayIndex(containing: NSPoint(x: 500, y: 800), frames: twoDisplays), 0)
+    }
+
+    func testStackedDisplaysSplitTheirSeamExactlyOnce() {
+        let stacked = [
+            NSRect(x: 0, y: 0, width: 1000, height: 800),
+            NSRect(x: 0, y: 800, width: 1000, height: 800),
+        ]
+        XCTAssertEqual(displayIndex(containing: NSPoint(x: 500, y: 800), frames: stacked), 0)
+        XCTAssertEqual(displayIndex(containing: NSPoint(x: 500, y: 800.5), frames: stacked), 1)
+    }
+
     func testAPointerOutsideEveryDisplayHasNoIndex() {
         XCTAssertNil(displayIndex(containing: NSPoint(x: 5000, y: 5000), frames: twoDisplays))
         XCTAssertNil(displayIndex(containing: NSPoint(x: 10, y: 10), frames: []))

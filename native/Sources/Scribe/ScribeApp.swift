@@ -206,7 +206,6 @@ final class AppModel: ObservableObject {
             repaste: { try guardedPaster.pasteIntoFocusedApp($0, ownPID: ProcessInfo.processInfo.processIdentifier) },
             hud: hudModel,
             hudEnabled: { settings.hudEnabled },
-            holdThreshold: settings.holdThreshold,
             log: log)
         lateDictation = dictation
         // The recorder calls this on the audio thread once per captured chunk, a few tens of times a second at most:

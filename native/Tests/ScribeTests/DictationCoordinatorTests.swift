@@ -64,7 +64,7 @@ final class DictationCoordinatorTests: XCTestCase {
         failedAudioURL: URL? = nil,
         repasteDelay: Double = 0,
         hudResultSeconds: Double = HUDModel.resultSeconds,
-        holdThreshold: Double = 0.05
+        holdThreshold: Double? = 0.05
     ) -> DictationCoordinator {
         let recorder = self.recorder!
         let clock = pipelineClock!
@@ -354,6 +354,9 @@ final class DictationCoordinatorTests: XCTestCase {
 
         c.applyState(.recording)
         XCTAssertEqual(hud.phase, .hidden)
+        XCTAssertNil(c.hudShow, "nothing is scheduled with the pill off")
+        c.applyState(.processing)
+        XCTAssertEqual(hud.phase, .hidden)
         c.showHint("x")
         XCTAssertEqual(hud.phase, .hidden)
     }
@@ -512,6 +515,58 @@ final class DictationCoordinatorTests: XCTestCase {
 
         XCTAssertEqual(pending?.isCancelled, true)
         XCTAssertEqual(hud.phase, .hidden)
+    }
+
+    func testTheDelayStartsAtThePipelineConfigsThreshold() async {
+        let c = make(config: PipelineConfig(holdThreshold: 60), holdThreshold: nil)
+
+        c.applyState(.recording)
+        try? await Task.sleep(nanoseconds: 400_000_000)
+
+        XCTAssertEqual(hud.phase, .hidden, "a 0.3 s fallback would have shown the pill by now")
+        c.applyState(.idle)
+    }
+
+    func testANegativeThresholdShowsThePillWithoutTrapping() async {
+        let c = make(holdThreshold: -1)
+
+        c.applyState(.recording)
+
+        let listening = await eventually { [unowned self] in hud.phase == .listening }
+        XCTAssertTrue(listening)
+    }
+
+    func testANonFiniteThresholdShowsThePillWithoutTrapping() async {
+        let c = make(holdThreshold: .nan)
+
+        c.applyState(.recording)
+
+        let listening = await eventually { [unowned self] in hud.phase == .listening }
+        XCTAssertTrue(listening)
+    }
+
+    func testAVerdictDuringTheDelayGivesWayToListening() async {
+        let c = make()
+        c.applyState(.processing)
+        c.applyState(.recording)
+        c.playPasteCue()
+        XCTAssertEqual(hud.phase, .result("Pasted"))
+
+        let listening = await eventually { [unowned self] in hud.phase == .listening }
+        XCTAssertTrue(listening)
+    }
+
+    func testABriefTapWhileTheVerdictIsUpLetsItHideOnSchedule() async {
+        let c = make(hudResultSeconds: 0.05, holdThreshold: 60)
+        c.applyState(.processing)
+        c.playPasteCue()
+        c.applyState(.idle)
+        c.applyState(.recording)
+        c.applyState(.idle)
+        XCTAssertEqual(hud.phase, .result("Pasted"))
+
+        let hidden = await eventually { [unowned self] in hud.phase == .hidden }
+        XCTAssertTrue(hidden)
     }
 
     func testAVerdictWithThePillHiddenShowsNothing() {
