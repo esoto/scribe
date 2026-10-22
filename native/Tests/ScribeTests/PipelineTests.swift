@@ -1227,6 +1227,22 @@ final class PipelineTests: XCTestCase {
         XCTAssertTrue(hist.items()[0].raw.contains("neal lines"), "History keeps what was heard")
     }
 
+    func testAReplacementPairCanRescueAMisheardReturn() {
+        let paster = FakePaster()
+        let presser = FakeKeyPresser()
+        let h = make(stt: FakeStt(text: "Sent it."), paster: paster, pairs: [pair("sent it", "send it")], keyPresser: presser)
+        dictate(h)
+        XCTAssertEqual(presser.pressed, [.returnKey])
+        XCTAssertEqual(paster.pasted, [])
+    }
+
+    func testAReplacementPairCanRescueAParagraphInAnUtteranceOfOnlyBreaks() {
+        let paster = FakePaster()
+        let h = make(stt: FakeStt(text: "New line. New para."), paster: paster, pairs: [pair("new para", "new paragraph")])
+        dictate(h)
+        XCTAssertEqual(paster.pasted, ["\n\n"])
+    }
+
     func testAReplacementPairCanAlsoDefuseACommand() {
         // The same rule the other way: the user's pair wins, so "send it" can be turned back into text.
         let paster = FakePaster()
@@ -1236,6 +1252,16 @@ final class PipelineTests: XCTestCase {
         dictate(h)
         XCTAssertEqual(presser.pressed, [])
         XCTAssertEqual(paster.pasted, ["sent it."])
+    }
+
+    func testAOneWordPairInsideACommandTurnsItIntoText() {
+        // The user's pair wins even when it covers only one word of the phrase.
+        let paster = FakePaster()
+        let presser = FakeKeyPresser()
+        let h = make(stt: FakeStt(text: "Enter."), paster: paster, pairs: [pair("enter", "entre")], keyPresser: presser)
+        dictate(h)
+        XCTAssertEqual(presser.pressed, [])
+        XCTAssertEqual(paster.pasted, ["entre."])
     }
 
     func testOrdinaryPairsNeverCreateACommand() {
@@ -1248,10 +1274,15 @@ final class PipelineTests: XCTestCase {
         XCTAssertEqual(presser.pressed, [])
         XCTAssertEqual(cleaner.calls, 0, "precondition: three words is under minWords")
         XCTAssertEqual(paster.pasted, ["send it kamal"])
+        // The control: an unrelated pair leaves a real command alone.
+        let controlPresser = FakeKeyPresser()
+        let control = make(stt: FakeStt(text: "Send it."), pairs: camelPair, keyPresser: controlPresser)
+        dictate(control)
+        XCTAssertEqual(controlPresser.pressed, [.returnKey])
     }
 
-    func testChainedPairsApplyOncePerDictation() {
-        // a → b and b → c: the text is replaced once up front, so a segment must not be replaced again before cleanup.
+    func testAnUncleanedRunIsNotReplacedTwice() {
+        // a → b and b → c: the text is replaced once up front, so a run that skips cleanup must not be replaced again (1.4.0 gave b too).
         let paster = FakePaster()
         let cleaner = FakeCleaner()
         let h = make(

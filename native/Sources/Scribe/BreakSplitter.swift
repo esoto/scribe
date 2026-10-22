@@ -26,7 +26,7 @@ enum BreakSplitter {
     static let phrases: [[String]: Break] = [
         ["new", "line"]: .line, ["newline"]: .line, ["line", "break"]: .line, ["new", "line", "break"]: .line,
         ["nueva", "linea"]: .line, ["linea", "nueva"]: .line, ["salto", "de", "linea"]: .line,
-        ["new", "lines"]: .line, ["line", "breaks"]: .line, ["nuevas", "lineas"]: .line,
+        ["new", "lines"]: .line,
         ["new", "paragraph"]: .paragraph, ["nuevo", "parrafo"]: .paragraph, ["parrafo", "nuevo"]: .paragraph,
     ]
     /// From the table, so a longer phrase added later cannot silently never match.
