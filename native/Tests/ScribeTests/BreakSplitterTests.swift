@@ -111,6 +111,11 @@ final class BreakSplitterTests: XCTestCase {
             BreakSplitter.split("first point the words new line second point"), [seg("first point new line second point")])
     }
 
+    func testACommandPhraseInASentenceKeepsItsEscapeWords() {
+        XCTAssertEqual(BreakSplitter.split("type the words enter in the box"), [seg("type the words enter in the box")])
+        XCTAssertEqual(BreakSplitter.split("first the words new line second"), [seg("first new line second")])
+    }
+
     func testTheSpanishEscapeKeepsTheOriginalAccents() {
         XCTAssertEqual(BreakSplitter.split("las palabras nueva línea"), [seg("nueva línea")])
         XCTAssertEqual(BreakSplitter.split("hola las palabras salto de línea adiós"), [seg("hola salto de línea adiós")])

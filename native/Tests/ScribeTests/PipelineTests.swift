@@ -1908,7 +1908,31 @@ final class PipelineTests: XCTestCase {
         XCTAssertTrue(h.logs.value.contains { $0.contains("segments=2") }, "\(h.logs.value)")
     }
 
-    func testAnEscapedReturnPhraseInASentenceStillLetsALaterBreakSplit() {
+    func testTheWordsStayWhenACommandPhraseIsOnlyPartOfWhatWasSaid() {
+        for said in [
+            "type the words enter in the box", "the words enter now", "please use las palabras enviar here",
+        ] {
+            let presser = FakeKeyPresser()
+            let paster = FakePaster()
+            let h = make(stt: FakeStt(text: said), cleaner: nil, paster: paster, keyPresser: presser)
+            dictate(h)
+            XCTAssertEqual(paster.pasted, [said], said)
+            XCTAssertEqual(presser.pressed, [], said)
+        }
+    }
+
+    func testTheWordsStillEscapeAWholeUtteranceCommandInEitherLanguage() {
+        for (said, pasted) in [("The words enter.", "enter."), ("Las palabras enviar", "enviar")] {
+            let presser = FakeKeyPresser()
+            let paster = FakePaster()
+            let h = make(stt: FakeStt(text: said), paster: paster, keyPresser: presser)
+            dictate(h)
+            XCTAssertEqual(paster.pasted, [pasted], said)
+            XCTAssertEqual(presser.pressed, [], said)
+        }
+    }
+
+    func testACommandPhraseInASentenceStaysTextWhileALaterBreakStillSplits() {
         let cleaner = UppercasingCleaner()
         let presser = FakeKeyPresser()
         let paster = FakePaster()
@@ -1916,8 +1940,8 @@ final class PipelineTests: XCTestCase {
             stt: FakeStt(text: "first point here the words enter new line second point is here"), cleaner: cleaner,
             paster: paster, keyPresser: presser)
         dictate(h)
-        XCTAssertEqual(cleaner.received, ["first point here enter", "second point is here"])
-        XCTAssertEqual(paster.pasted, ["FIRST POINT HERE ENTER\nSECOND POINT IS HERE"])
+        XCTAssertEqual(cleaner.received, ["first point here the words enter", "second point is here"])
+        XCTAssertEqual(paster.pasted, ["FIRST POINT HERE THE WORDS ENTER\nSECOND POINT IS HERE"])
         XCTAssertEqual(presser.pressed, [])
     }
 

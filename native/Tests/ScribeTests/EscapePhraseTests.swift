@@ -27,6 +27,62 @@ final class EscapePhraseTests: XCTestCase {
         XCTAssertEqual(undo.escaped, [2, 3])
     }
 
+    func testACommandPhraseInsideASentenceIsNotEscaped() {
+        // Return and undo only fire on a whole utterance, so inside a sentence there is nothing to escape and the
+        // words must survive: "type the words enter in the box" is ordinary text.
+        for said in [
+            "type the words enter in the box", "a the words scratch that b", "di las palabras enviar", "x the words enter",
+        ] {
+            let r = resolve(said)
+            XCTAssertTrue(r.dropped.isEmpty, said)
+            XCTAssertTrue(r.escaped.isEmpty, said)
+        }
+    }
+
+    func testACommandPhraseIsEscapedOnlyWhenItIsAllThatWasSaid() {
+        // Starting the utterance is not enough: "the words enter now" is not a whole-utterance command either way.
+        for said in ["the words enter now", "the words scratch that please", "las palabras enviar ahora"] {
+            let r = resolve(said)
+            XCTAssertTrue(r.dropped.isEmpty, said)
+            XCTAssertTrue(r.escaped.isEmpty, said)
+        }
+        let spanish = resolve("las palabras enviar")
+        XCTAssertEqual(spanish.dropped, [0, 1])
+        XCTAssertEqual(spanish.escaped, [2])
+    }
+
+    func testStrayPunctuationAroundAWholeUtteranceCommandDoesNotHideIt() {
+        // A lone dash folds to an empty token; VoiceCommand.match ignores it, so the escape must too.
+        let r = EscapePhrase.resolve(folded: ["", "the", "words", "enter", ""])
+        XCTAssertEqual(r.dropped, [1, 2])
+        XCTAssertEqual(r.escaped, [3])
+    }
+
+    func testABreakPhraseIsEscapedAnywhereInTheUtterance() {
+        let mid = resolve("type the words new line in the box")
+        XCTAssertEqual(mid.dropped, [1, 2])
+        XCTAssertEqual(mid.escaped, [3, 4])
+        let start = resolve("the words new line in the box")
+        XCTAssertEqual(start.dropped, [0, 1])
+        XCTAssertEqual(start.escaped, [2, 3])
+    }
+
+    func testBreakPhrasesAreEscapedMidSentenceAndCommandOnlyPhrasesAreNot() {
+        let breaks = Set(BreakSplitter.phrases.keys)
+        let commandOnly = VoiceCommand.phraseTokens.subtracting(breaks)
+        XCTAssertFalse(commandOnly.isEmpty)
+        for escape in EscapePhrase.phrases {
+            for phrase in breaks {
+                let r = EscapePhrase.resolve(folded: ["a"] + escape + phrase + ["b"])
+                XCTAssertEqual(r.escaped.count, phrase.count, "\(phrase)")
+            }
+            for phrase in commandOnly {
+                let r = EscapePhrase.resolve(folded: ["a"] + escape + phrase + ["b"])
+                XCTAssertTrue(r.escaped.isEmpty && r.dropped.isEmpty, "\(phrase)")
+            }
+        }
+    }
+
     func testTheLongestPhraseIsEscapedSoNoTailIsLeftToSplit() {
         let r = resolve("the words new line break")
         XCTAssertEqual(r.escaped, [2, 3, 4])

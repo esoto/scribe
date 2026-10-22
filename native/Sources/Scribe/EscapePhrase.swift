@@ -2,15 +2,16 @@ import Foundation
 
 /// "The words" before a command or break phrase dictates that phrase as text: "the words new line" pastes
 /// `new line`. Turning voice commands off to type one phrase would also turn off every other, so the escape is
-/// spoken instead. Only when the next words are a phrase, so "the words matter" stays as said.
+/// spoken instead. Only when the next words are a phrase, so "the words matter" stays as said. A break phrase is
+/// escaped anywhere; Return and undo only act on a whole utterance, so they are escaped only when that is what
+/// was said, and "type the words enter in the box" keeps every word.
 enum EscapePhrase {
     /// Folded like `VoiceCommand.fold`, English and Spanish side by side.
     static let phrases: [[String]] = [["the", "words"], ["las", "palabras"]]
 
-    /// Every phrase the escape can protect: the inline breaks, and the Return and undo commands that only act on a
-    /// whole utterance, so "the words enter" pastes `enter` rather than pressing Return.
-    private static let followers: Set<[String]> = Set(BreakSplitter.phrases.keys).union(VoiceCommand.phraseTokens)
-    private static let longestFollower = followers.map(\.count).max() ?? 1
+    private static let breakPhrases = Set(BreakSplitter.phrases.keys)
+    private static let commandPhrases = VoiceCommand.phraseTokens
+    private static let longestFollower = breakPhrases.union(commandPhrases).map(\.count).max() ?? 1
 
     /// For each escape immediately followed by a phrase: the escape's token indices (`dropped`, never pasted) and
     /// the phrase's (`escaped`, never matched as a break). Longest phrase first, like `BreakSplitter`, so
@@ -21,7 +22,7 @@ enum EscapePhrase {
         var i = 0
         while i < folded.count {
             guard let escape = phrases.first(where: { matches($0, in: folded, at: i) }),
-                let length = followerLength(in: folded, at: i + escape.count)
+                let length = followerLength(in: folded, escapeAt: i, escapeLength: escape.count)
             else {
                 i += 1
                 continue
@@ -38,8 +39,16 @@ enum EscapePhrase {
         i + escape.count <= folded.count && Array(folded[i..<(i + escape.count)]) == escape
     }
 
-    private static func followerLength(in folded: [String], at start: Int) -> Int? {
-        stride(from: min(longestFollower, folded.count - start), through: 1, by: -1)
-            .first { followers.contains(Array(folded[start..<(start + $0)])) }
+    /// A command phrase counts only when the escape opens the utterance and the phrase closes it, which is when
+    /// `VoiceCommand.match` would have fired. Empty tokens are punctuation on its own, which that match ignores.
+    private static func followerLength(in folded: [String], escapeAt i: Int, escapeLength: Int) -> Int? {
+        let start = i + escapeLength
+        let opensUtterance = folded[..<i].allSatisfy(\.isEmpty)
+        return stride(from: min(longestFollower, folded.count - start), through: 1, by: -1).first { length in
+            let window = Array(folded[start..<(start + length)])
+            if breakPhrases.contains(window) { return true }
+            return opensUtterance && commandPhrases.contains(window)
+                && folded[(start + length)...].allSatisfy(\.isEmpty)
+        }
     }
 }
