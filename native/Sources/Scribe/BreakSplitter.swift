@@ -41,7 +41,7 @@ enum BreakSplitter {
     /// alone beside it, are ASR's guess at a pause rather than text, so the join drops them.
     static func split(_ raw: String) -> [Segment] {
         let (tokens, folded) = tokenize(raw)
-        let escapes = EscapePhrase.resolve(folded: folded)
+        let escapes = EscapePhrase.resolve(folded: folded, sentenceEnds: sentenceEnds(tokens))
 
         var segments: [Segment] = []
         var run: [String] = []
@@ -82,8 +82,8 @@ enum BreakSplitter {
     /// The larger break among the phrases in `raw`, nil when there are none. For an utterance made only of break
     /// phrases, where `split` leaves no run to paste but the user still asked for a break.
     static func largestBreak(in raw: String) -> Break? {
-        let folded = tokenize(raw).folded
-        let escaped = EscapePhrase.resolve(folded: folded).escaped
+        let (tokens, folded) = tokenize(raw)
+        let escaped = EscapePhrase.resolve(folded: folded, sentenceEnds: sentenceEnds(tokens)).escaped
         var largest: Break?
         var i = 0
         while i < folded.count {
@@ -100,6 +100,10 @@ enum BreakSplitter {
     /// The pasted text: runs joined by their breaks.
     static func join(_ pieces: [(text: String, breakAfter: Break?)]) -> String {
         pieces.map { $0.text + ($0.breakAfter?.text ?? "") }.joined()
+    }
+
+    private static func sentenceEnds(_ tokens: [String]) -> Set<Int> {
+        Set(tokens.indices.filter { tokens[$0].last.map { ".?!".contains($0) } ?? false })
     }
 
     private static func tokenize(_ raw: String) -> (tokens: [String], folded: [String]) {

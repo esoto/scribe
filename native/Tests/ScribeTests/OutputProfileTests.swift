@@ -78,6 +78,8 @@ final class OutputProfileTests: XCTestCase {
         XCTAssertFalse(OutputProfile.voiceCommandsEnabled(profile(), global: false))
         XCTAssertFalse(OutputProfile.voiceCommandsEnabled(profile(voiceCommands: false), global: true))
         XCTAssertTrue(OutputProfile.voiceCommandsEnabled(profile(voiceCommands: true), global: false))
+        XCTAssertTrue(OutputProfile.voiceCommandsEnabled(profile(voiceCommands: true), global: true))
+        XCTAssertFalse(OutputProfile.voiceCommandsEnabled(profile(voiceCommands: false), global: false))
     }
 
     func testTheVoiceCommandsRuleIsIndependentOfTheCleanupRule() {

@@ -98,6 +98,23 @@ final class EscapePhraseTests: XCTestCase {
         }
     }
 
+    func testASentenceEndOnTheEscapeBlocksItInsideAnUtteranceButNotAtItsStart() {
+        // "I can't find the words. New line." — the full stop closes a sentence, so nothing is escaped or dropped.
+        let blocked = EscapePhrase.resolve(folded: ["a", "the", "words", "new", "line"], sentenceEnds: [2])
+        XCTAssertTrue(blocked.dropped.isEmpty)
+        XCTAssertTrue(blocked.escaped.isEmpty)
+        let spanish = EscapePhrase.resolve(folded: ["a", "las", "palabras", "nueva", "linea"], sentenceEnds: [2])
+        XCTAssertTrue(spanish.dropped.isEmpty && spanish.escaped.isEmpty)
+        // An escape that opens the utterance has no earlier sentence to close, so "The words. New line." still works.
+        let opening = EscapePhrase.resolve(folded: ["the", "words", "new", "line"], sentenceEnds: [1])
+        XCTAssertEqual(opening.dropped, [0, 1])
+        XCTAssertEqual(opening.escaped, [2, 3])
+        // Only a sentence end on the escape's own last word blocks it.
+        let elsewhere = EscapePhrase.resolve(folded: ["a", "the", "words", "new", "line"], sentenceEnds: [0, 4])
+        XCTAssertEqual(elsewhere.dropped, [1, 2])
+        XCTAssertEqual(elsewhere.escaped, [3, 4])
+    }
+
     func testAPhraseWithoutAnEscapeChangesNothing() {
         let r = resolve("add a new line here")
         XCTAssertTrue(r.dropped.isEmpty)

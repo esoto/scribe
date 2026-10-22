@@ -355,7 +355,8 @@ final class DictationPipeline {
         }
 
         // A break phrase splits the dictation into runs that are cleaned on their own and joined with real line
-        // breaks: the model never sees a break phrase or a newline, and one bad run falls back to raw alone.
+        // breaks: the model never sees a spoken break or a newline (an escaped phrase reaches it as plain words),
+        // and one bad run falls back to raw alone.
         let segments = commandsOn ? BreakSplitter.split(heard) : [Segment(text: heard, breakAfter: nil)]
         guard !segments.isEmpty else {
             // Only break phrases were said ("new line. New line."): the user asked for a break, so they get the larger one.
