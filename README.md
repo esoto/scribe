@@ -79,8 +79,7 @@ Upgrading from a v3 install downloads Ultra on first launch (progress shows in t
   "send it" presses Return; "new line" and "new paragraph" insert breaks;
   "scratch that" / "undo" sends ⌘Z (best-effort: terminals ignore it). ⌘Z assumes a QWERTY-family layout.
   Spanish: "enviar" / "envíalo", "nueva línea", "nuevo párrafo", "borra
-  eso" / "deshacer". Also accepted: "press enter", "send that", "newline", "line break", "undo that"; "mándalo", "presiona enter", "línea nueva", "salto de línea", "párrafo nuevo", "deshace eso". Only the entire utterance counts, so "add a new line
-  after the title" is still text. Spoken punctuation ("comma", "period")
+  eso" / "deshacer". Also accepted: "press enter", "send that", "newline", "line break", "undo that"; "mándalo", "presiona enter", "línea nueva", "salto de línea", "párrafo nuevo", "deshace eso". "new line" and "new paragraph" also work inside a sentence: "first point new line second point" pastes as two lines (each part is cleaned on its own, so a long dictation with breaks takes a little longer). The other commands count only as the entire utterance, so "please send it to the team" is still text. Spoken punctuation ("comma", "period")
   is not a command: transcription and cleanup already punctuate. Return
   goes to whatever has focus — in a terminal it runs the line, and a pasted break can too in a shell without bracketed paste.
 - **History**: the last 10 dictations by default (Settings › General), in
