@@ -41,6 +41,16 @@ final class BreakSplitterTests: XCTestCase {
             [seg("hola", .line), seg("adiós", .line), seg("fin", .paragraph), seg("ya")])
     }
 
+    func testPluralAndColloquialAliasesBreakLikeTheSingular() {
+        XCTAssertEqual(
+            BreakSplitter.split("one new lines two line breaks three nuevas líneas four"),
+            [seg("one", .line), seg("two", .line), seg("three", .line), seg("four")])
+        XCTAssertEqual(BreakSplitter.largestBreak(in: "New lines."), .line)
+        XCTAssertEqual(BreakSplitter.largestBreak(in: "line breaks, new paragraph"), .paragraph)
+        // The one-token plural stays text: only the spaced phrase is an alias.
+        XCTAssertEqual(BreakSplitter.split("the newlines were many"), [seg("the newlines were many")])
+    }
+
     func testBreaksAtTheEdgesAreDroppedAndDoublesCollapse() {
         XCTAssertEqual(BreakSplitter.split("new line hello"), [seg("hello")])
         XCTAssertEqual(BreakSplitter.split("hello new line"), [seg("hello")])

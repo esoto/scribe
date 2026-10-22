@@ -1193,14 +1193,72 @@ final class PipelineTests: XCTestCase {
         XCTAssertEqual(h.cues.value, [])
     }
 
-    func testAReplacementPairCannotDefuseACommand() {
+    // MARK: - Dictionary pairs apply before commands and breaks are matched
+
+    private func pair(_ original: String, _ replacement: String) -> ReplacementPair {
+        ReplacementPair(original: original, replacement: replacement, addedAt: Date(timeIntervalSince1970: 0))
+    }
+
+    func testAReplacementPairCanRescueAMisheardCommand() {
+        let paster = FakePaster()
+        let presser = FakeKeyPresser()
+        let hist = History(maxLen: 10)
+        let h = make(
+            stt: FakeStt(text: "Neal lines."), paster: paster, history: hist,
+            pairs: [pair("neal lines", "new line")], keyPresser: presser)
+        dictate(h)
+        XCTAssertEqual(paster.pasted, ["\n"])
+        XCTAssertEqual(presser.pressed, [])
+        XCTAssertTrue(hist.items().isEmpty, "a command is not a dictation")
+        XCTAssertTrue(h.logs.value.contains { $0.contains("command=new_line") }, "\(h.logs.value)")
+    }
+
+    func testAReplacementPairCanRescueAMisheardBreakInsideASentence() {
+        let cleaner = UppercasingCleaner()
+        let paster = FakePaster()
+        let hist = History(maxLen: 10)
+        let h = make(
+            stt: FakeStt(text: "first point here now neal lines second point here now"), cleaner: cleaner,
+            paster: paster, history: hist, pairs: [pair("neal lines", "new line")])
+        dictate(h)
+        XCTAssertEqual(cleaner.received, ["first point here now", "second point here now"], "the model sees neither the mishearing nor the phrase")
+        XCTAssertEqual(paster.pasted, ["FIRST POINT HERE NOW\nSECOND POINT HERE NOW"])
+        XCTAssertEqual(paster.pasted.first?.filter { $0 == "\n" }.count, 1)
+        XCTAssertTrue(hist.items()[0].raw.contains("neal lines"), "History keeps what was heard")
+    }
+
+    func testAReplacementPairCanAlsoDefuseACommand() {
+        // The same rule the other way: the user's pair wins, so "send it" can be turned back into text.
+        let paster = FakePaster()
         let presser = FakeKeyPresser()
         let h = make(
-            stt: FakeStt(text: "Send it."),
-            pairs: [ReplacementPair(original: "send it", replacement: "sent it", addedAt: Date(timeIntervalSince1970: 0))],
-            keyPresser: presser)
+            stt: FakeStt(text: "Send it."), paster: paster, pairs: [pair("send it", "sent it")], keyPresser: presser)
         dictate(h)
-        XCTAssertEqual(presser.pressed, [.returnKey])
+        XCTAssertEqual(presser.pressed, [])
+        XCTAssertEqual(paster.pasted, ["sent it."])
+    }
+
+    func testOrdinaryPairsNeverCreateACommand() {
+        let paster = FakePaster()
+        let presser = FakeKeyPresser()
+        let cleaner = FakeCleaner()
+        let h = make(
+            stt: FakeStt(text: "send it camel"), cleaner: cleaner, paster: paster, pairs: camelPair, keyPresser: presser)
+        dictate(h)
+        XCTAssertEqual(presser.pressed, [])
+        XCTAssertEqual(cleaner.calls, 0, "precondition: three words is under minWords")
+        XCTAssertEqual(paster.pasted, ["send it kamal"])
+    }
+
+    func testChainedPairsApplyOncePerDictation() {
+        // a → b and b → c: the text is replaced once up front, so a segment must not be replaced again before cleanup.
+        let paster = FakePaster()
+        let cleaner = FakeCleaner()
+        let h = make(
+            stt: FakeStt(text: "a is here"), cleaner: cleaner, paster: paster, pairs: [pair("a", "b"), pair("b", "c")])
+        dictate(h)
+        XCTAssertEqual(cleaner.calls, 0, "precondition: three words is under minWords")
+        XCTAssertEqual(paster.pasted, ["b is here"])
     }
 
     // MARK: - Snippets

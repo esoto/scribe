@@ -50,6 +50,7 @@ final class VoiceCommandTests: XCTestCase {
             ("mándalo", .pressReturn), ("presiona enter", .pressReturn),
             ("new line", .newLine), ("newline", .newLine), ("line break", .newLine), ("new line break", .newLine),
             ("nueva línea", .newLine), ("línea nueva", .newLine), ("salto de línea", .newLine),
+            ("new lines", .newLine), ("line breaks", .newLine), ("nuevas líneas", .newLine),
             ("new paragraph", .newParagraph), ("nuevo párrafo", .newParagraph), ("párrafo nuevo", .newParagraph),
             ("scratch that", .undo), ("undo that", .undo), ("undo", .undo),
             ("borra eso", .undo), ("deshacer", .undo), ("deshace eso", .undo),
