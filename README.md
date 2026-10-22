@@ -79,7 +79,7 @@ Upgrading from a v3 install downloads Ultra on first launch (progress shows in t
   "send it" presses Return; "new line" and "new paragraph" insert breaks;
   "scratch that" / "undo" sends ⌘Z (best-effort: terminals ignore it). ⌘Z assumes a QWERTY-family layout.
   Spanish: "enviar" / "envíalo", "nueva línea", "nuevo párrafo", "borra
-  eso" / "deshacer". Also accepted: "press enter", "send that", "newline", "line break", "new line break", "undo that"; "mándalo", "presiona enter", "línea nueva", "salto de línea", "párrafo nuevo", "deshace eso". The break phrases also work inside a sentence: "first point new line second point" pastes as two lines. Each part is cleaned on its own, so a dictation with breaks takes a little longer. They break wherever they are said, so "a new line of products" or "una nueva línea de crédito" cannot be dictated as text: turn voice commands off for that. The other commands count only as the entire utterance, so "please send it to the team" is still text. Spoken punctuation ("comma", "period")
+  eso" / "deshacer". Also accepted: "press enter", "send that", "newline", "line break", "new line break", "new lines", "undo that"; "mándalo", "presiona enter", "línea nueva", "salto de línea", "párrafo nuevo", "deshace eso". If the recognizer keeps hearing a command wrong, add a Dictionary pair for what it hears (for example "neal lines" → "new line") — pairs apply before commands are matched. The break phrases also work inside a sentence: "first point new line second point" pastes as two lines. Each part is cleaned on its own, so a dictation with breaks takes a little longer. They break wherever they are said, so "a new line of products" or "una nueva línea de crédito" cannot be dictated as text: turn voice commands off for that. The other commands count only as the entire utterance, so "please send it to the team" is still text. Spoken punctuation ("comma", "period")
   is not a command: transcription and cleanup already punctuate. Return
   goes to whatever has focus — in a terminal it runs the line, and a pasted break can too in a shell without bracketed paste.
 - **History**: the last 10 dictations by default (Settings › General), in
@@ -166,7 +166,7 @@ model, so they hold **on every dictation** — including ones too short to be
 cleaned (under `minWords`), with cleanup switched off, and when cleanup
 times out or trips its gates. Matching is whole-word and case-insensitive,
 punctuation is preserved, and the replacement is pasted verbatim, so
-`camel` fixes "Camel," but leaves `camelCase` alone.
+`camel` fixes "Camel," but leaves `camelCase` alone. Pairs apply before voice commands are matched, so a pair changes any command it touches: "enter" → "entre" stops "enter" from pressing Return (say "send it"), and "line" → "Lyne" stops "new line" from breaking (say "newline"). A replacement that contains a break phrase breaks the line there.
 
 **Fix a Word…** (History submenu) skips the guessing: pick the dictation,
 click the word scribe misheard — several in a row for a phrase — type

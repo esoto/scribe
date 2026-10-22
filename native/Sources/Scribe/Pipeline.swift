@@ -336,27 +336,30 @@ final class DictationPipeline {
             return
         }
 
+        // The Dictionary fixes what the recognizer heard, and that includes a misheard command or break phrase
+        // ("Neal lines" → "new line"), so it runs before they are matched. `raw` stays what History and Fix a Word
+        // show. Unconditional so it also covers too-short, disabled, and gated-out cleanup.
+        let pairs = replacementPairs()
+        let heard = TermReplacer.apply(pairs, to: raw)
+
         func perform(_ command: VoiceCommand) {
             onLog?("dictation: engine=\(engineName) stt=\(sttMs)ms command=\(command.logName)")
             runCommand(command, target: target)
         }
-        if commandsOn, let command = VoiceCommand.match(raw) {
-            // Before replacements and cleanup: a command is not text. Nothing of it is pasted, kept or harvested.
+        if commandsOn, let command = VoiceCommand.match(heard) {
+            // Before cleanup: a command is not text. Nothing of it is pasted, kept or harvested.
             perform(command)
             return
         }
 
-        // Applied before cleanup (model reads what was said) and after (cleanup may recase it).
-        // Unconditional so it also covers too-short, disabled, and gated-out cleanup.
-        let pairs = replacementPairs()
         let profile = profileFor(bundleID)
 
         // A break phrase splits the dictation into runs that are cleaned on their own and joined with real line
         // breaks: the model never sees a break phrase or a newline, and one bad run falls back to raw alone.
-        let segments = commandsOn ? BreakSplitter.split(raw) : [Segment(text: raw, breakAfter: nil)]
+        let segments = commandsOn ? BreakSplitter.split(heard) : [Segment(text: heard, breakAfter: nil)]
         guard !segments.isEmpty else {
             // Only break phrases were said ("new line. New line."): the user asked for a break, so they get the larger one.
-            perform(BreakSplitter.largestBreak(in: raw) == .paragraph ? .newParagraph : .newLine)
+            perform(BreakSplitter.largestBreak(in: heard) == .paragraph ? .newParagraph : .newLine)
             return
         }
 
@@ -438,13 +441,15 @@ final class DictationPipeline {
     private func processSegment(
         _ text: String, pairs: [ReplacementPair], cleaner: CleanupBackend?, enabled: Bool
     ) async -> CleanedRun {
-        let transcript = TermReplacer.apply(pairs, to: text)
-        var run = CleanedRun(text: transcript)
-        guard let cleaner, Gates.shouldClean(transcript, enabled: enabled, minWords: config.minWords) else { return run }
+        var run = CleanedRun(text: text)
+        guard let cleaner, Gates.shouldClean(text, enabled: enabled, minWords: config.minWords) else { return run }
         run.ran = true
         let cleanStart = clock()
-        switch await tryClean(transcript, cleaner: cleaner) {
+        switch await tryClean(text, cleaner: cleaner) {
         case .success(let out):
+            // The text was replaced before it was split: a second pass before cleanup would take a chained pair (a → b,
+            // b → c) to c on a run that skips cleanup, where 1.4.0 stopped at b. This pass stays, as in 1.4.0, since cleanup
+            // may re-case a replaced word; on a cleaned run a chain reaches c, as it did.
             run.text = TermReplacer.apply(pairs, to: out)
             run.cleaned = true
         case .failure(let skip):

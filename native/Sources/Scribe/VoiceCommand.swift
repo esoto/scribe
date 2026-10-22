@@ -32,6 +32,7 @@ enum VoiceCommand: Equatable, CaseIterable {
         "enviar": .pressReturn, "envialo": .pressReturn, "mandalo": .pressReturn, "presiona enter": .pressReturn,
         "new line": .newLine, "newline": .newLine, "line break": .newLine, "new line break": .newLine,
         "nueva linea": .newLine, "linea nueva": .newLine, "salto de linea": .newLine,
+        "new lines": .newLine,
         "new paragraph": .newParagraph, "nuevo parrafo": .newParagraph, "parrafo nuevo": .newParagraph,
         "scratch that": .undo, "undo that": .undo, "undo": .undo,
         "borra eso": .undo, "deshacer": .undo, "deshace eso": .undo,
