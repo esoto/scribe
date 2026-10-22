@@ -4,9 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>scribe — hold a key, speak, it's typed</title>
-<meta name="description" content="Personal hold-to-talk dictation for macOS — fully local, English + Spanish. No cloud, no accounts. Audio and text never leave the machine.">
+<meta name="description" content="Personal hold-to-talk dictation for macOS — fully local, English + Spanish, with voice commands and a dictionary you can teach. No cloud, no accounts. Audio and text never leave the machine.">
 <meta property="og:title" content="scribe — hold a key, speak, it's typed">
-<meta property="og:description" content="Fully local hold-to-talk dictation for macOS. No cloud, no accounts. Audio and text never leave the machine.">
+<meta property="og:description" content="Fully local hold-to-talk dictation for macOS, with voice commands. No cloud, no accounts. Audio and text never leave the machine.">
 <meta property="og:url" content="https://scribe.estebansoto.dev">
 <link rel="icon" href="appicon.svg" type="image/svg+xml">
 <style>
@@ -139,7 +139,7 @@
   <div class="step">
     <div class="n">1</div>
     <div class="t">Hold Right ⌥</div>
-    <div class="d">The mic is captured only while the key is held — the orange indicator turns off at key-up. Prefer Right ⌘ or F13? Pick it in Settings.</div>
+    <div class="d">The mic is captured only while the key is held — a small pill above the Dock shows the level, and the orange indicator turns off at key-up. Prefer Right ⌘ or F13? Pick it in Settings.</div>
   </div>
   <div class="step">
     <div class="n">2</div>
@@ -151,6 +151,46 @@
     <div class="t">Release</div>
     <div class="d">Text is pasted into whatever app has focus. If focus moved while it was transcribing, the text is copied instead — press ⌘V. If cleanup ever misbehaves, the raw transcript is pasted — you never lose words.</div>
   </div>
+</section>
+
+<section class="wrap learns">
+  <h2>Say what you <span class="violet">want done</span>.</h2>
+  <p class="lede">A few phrases act instead of pasting — in English and Spanish, with no cloud
+     and no new permission. Snippets and per-app rules shape what does get pasted.</p>
+
+  <div class="fix">
+    <div class="row">
+      <span class="lbl">Said</span>
+      <span class="heard">the first point is speed new line the second point is privacy</span>
+    </div>
+    <div class="row">
+      <span class="lbl">Typed</span>
+      <span class="typed">The first point is speed.<br>The second point is privacy.</span>
+    </div>
+  </div>
+
+  <div class="grid">
+    <div class="cell">
+      <div class="t">Commands</div>
+      <div class="d">Say "enter" or "send it" on its own and scribe presses Return; "scratch that" sends ⌘Z. Spanish: "enviar", "borra eso". They pass the same focus check as a paste: if focus moved to another app while it was transcribing, the command is dropped instead of sent.</div>
+    </div>
+    <div class="cell">
+      <div class="t">Line breaks</div>
+      <div class="d">"new line" and "new paragraph" — "nueva línea", "nuevo párrafo" — work alone or
+        inside a sentence. Each part is cleaned on its own, so the cleanup model never sees a break
+        phrase or a newline.</div>
+    </div>
+    <div class="cell">
+      <div class="t">Per-app rules</div>
+      <div class="d">In Settings › Apps, pick an app and set its rules: cleanup on or off, drop the
+        trailing period for chat, lowercase the first letter. The text rules run after cleanup — the cleanup model never sees them.</div>
+    </div>
+    <div class="cell">
+      <div class="t">Snippets</div>
+      <div class="d">A spoken trigger — "my address" — stands for a block of text, said alone or inside a sentence. The text takes its place after cleanup, so the model never sees it and its line breaks survive.</div>
+    </div>
+  </div>
+  <p class="note">A command counts only as the whole utterance: "please send it to the team" is text. Line breaks count anywhere, so while voice commands are on "a new line of products" can't be dictated as text — turn them off in Settings › General for that. If the recognizer keeps mishearing a command, add a Dictionary pair for what it hears.</p>
 </section>
 
 <section class="wrap learns">
@@ -177,13 +217,25 @@
         each time, so add the spelling you keep seeing.</div>
     </div>
     <div class="cell">
+      <div class="t">Fix a Word</div>
+      <div class="d">History → Fix a Word… shows a recent dictation's words. Click the one
+        scribe misheard — several in a row for a phrase — type what you said, and the pair
+        is added for you. Only the pair is stored.</div>
+    </div>
+    <div class="cell">
       <div class="t">Learned terms — experimental</div>
       <div class="d">scribe can also pick up distinctive vocabulary on its own, after it
         turns up in three separate dictations. It's off by default: today it can cost you
         a word elsewhere in the sentence, so it stays opt-in until that's fixed.</div>
     </div>
+    <div class="cell">
+      <div class="t">History</div>
+      <div class="d">The last 10 dictations by default, in memory only. Click one to copy it; Option-click
+        copies what the engine heard before your corrections; Paste Again re-pastes the last
+        one into the app that has focus.</div>
+    </div>
   </div>
-  <p class="note">Stored on your Mac as individual words — never transcripts. Turn
+  <p class="note">Stored on your Mac as words and phrases — never transcripts. Turn
      learning off or clear it whenever you like.</p>
 </section>
 
@@ -197,11 +249,11 @@
       </div>
       <div class="cell">
         <div class="t">Transcripts never saved</div>
-        <div class="d">History keeps the last 10 dictations in memory only. Transcripts are never written to disk. scribe writes your dictionary (individual words), a diagnostic log that contains no dictated text, and — only when a dictation fails — one audio file you can delete. Dictations are marked transient, so clipboard managers that honor the marker skip them. Stats are per-day counts and timings, never text.</div>
+        <div class="d">History keeps the last 10 dictations by default, in memory only. Transcripts are never written to disk. scribe writes your dictionary (words and phrases), a diagnostic log that contains no dictated text, and — only when a dictation fails — one audio file you can delete. Dictations are marked transient, so clipboard managers that honor the marker skip them; a copy you make from History is an ordinary copy. Stats are per-day counts and timings, never text. App rules are app names, bundle ids and switches; snippets are your own text, stored in plain text.</div>
       </div>
       <div class="cell">
         <div class="t">Nothing sent</div>
-        <div class="d">No cloud, no accounts, no telemetry.</div>
+        <div class="d">No cloud, no accounts, no telemetry. The scribe://paste-last hook for Raycast or Stream Deck is off by default and accepts no parameters, so a URL can never carry text into scribe.</div>
       </div>
     </div>
   </div>
