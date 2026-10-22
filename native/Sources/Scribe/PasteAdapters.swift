@@ -81,8 +81,7 @@ enum SyntheticKey: Equatable {
         }
     }
 
-    /// The ANSI position: used when the layout has no such letter (a non-Latin layout), where macOS still routes
-    /// the ⌘ shortcut from this physical key.
+    /// The ANSI position: used when the layout data is unavailable or no key types the letter under ⌘.
     var fallbackKeycode: CGKeyCode {
         switch self {
         case .commandV: return 9
