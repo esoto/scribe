@@ -18,7 +18,7 @@ func pickerChoices(_ fixed: [Double], including current: Double) -> [Double] {
     fixed.contains(current) ? fixed : (fixed + [current]).sorted()
 }
 
-func holdThresholdLabel(_ seconds: Double) -> String {
+func secondsLabel(_ seconds: Double) -> String {
     let tenths = seconds * 10
     return abs(tenths - tenths.rounded()) < 1e-9 ? String(format: "%.1f s", seconds) : String(format: "%g s", seconds)
 }
@@ -84,7 +84,7 @@ private struct GeneralPane: View {
                 selection: Binding(get: { settings.holdThreshold }, set: { settings.setHoldThreshold($0) })
             ) {
                 ForEach(pickerChoices(holdThresholdChoices, including: settings.holdThreshold), id: \.self) { seconds in
-                    Text(holdThresholdLabel(seconds)).tag(seconds)
+                    Text(secondsLabel(seconds)).tag(seconds)
                 }
             }
 
@@ -93,7 +93,7 @@ private struct GeneralPane: View {
                 selection: Binding(get: { settings.restoreDelay }, set: { settings.setRestoreDelay($0) })
             ) {
                 ForEach(pickerChoices(restoreDelayChoices, including: settings.restoreDelay), id: \.self) { seconds in
-                    Text(holdThresholdLabel(seconds)).tag(seconds)
+                    Text(secondsLabel(seconds)).tag(seconds)
                 }
             }
             caption("Your previous clipboard comes back this long after a paste — raise it if a slow app pastes the old one instead.")

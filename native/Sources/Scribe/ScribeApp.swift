@@ -30,6 +30,8 @@ final class AppModel: ObservableObject {
     let cleanupModels: CleanupModelController
     let engineController: EngineController
     let enhancerLifecycle: EnhanceAudioLifecycle
+    /// Both model downloads' progress, observed directly by the glyph, the menu and Setup.
+    let downloads = DownloadStatus()
     nonisolated let logger: FileLogger
 
     @Published private(set) var cleanupEnabled: Bool
@@ -39,12 +41,6 @@ final class AppModel: ObservableObject {
     // and broke click registration on the submenu.
     @Published private(set) var microphones: [AudioInputDevice] = []
     @Published private(set) var launchAtLoginEnabled: Bool = LoginItem.isEnabled
-    /// "Downloading Parakeet Ultra… NN%" while the STT model downloads (first launch after upgrade); nil otherwise.
-    @Published private(set) var sttDownloadStatus: String?
-    /// The same download as a 0…1 fraction for the menu-bar glyph; nil once it completes.
-    @Published private(set) var sttDownloadFraction: Double?
-    /// "Downloading Enhance Audio… NN%" while its model downloads (first use after the toggle goes on); nil otherwise.
-    @Published private(set) var enhancerDownloadStatus: String?
     /// True until the launch preload ends. The download statuses cover only part of it: a load from disk reports nothing.
     @Published private(set) var startupPreloadInFlight = true
     private var lastRefusedNoticeAt: Date?
@@ -239,20 +235,12 @@ final class AppModel: ObservableObject {
 
         // All stored properties are initialized, so self can be captured by callbacks arriving off the main actor.
         dictation.onKeyDown = { [weak self] in self?.prepareForKeyDown() }
-        sttProgressRelay.set { [weak self] label, fraction in
-            Task { @MainActor in
-                guard let self else { return }
-                let status = fraction < 1 ? CleanupModelCatalog.statusText(label: label, fraction: fraction) : nil
-                // FluidAudio reports every received chunk; the status line and the glyph only change with the whole percent.
-                guard status != self.sttDownloadStatus else { return }
-                self.sttDownloadStatus = status
-                self.sttDownloadFraction = fraction < 1 ? fraction : nil
-            }
+        let downloads = self.downloads
+        sttProgressRelay.set { label, fraction in
+            Task { @MainActor in downloads.report(stt: label, fraction: fraction) }
         }
-        enhancerProgressRelay.set { [weak self] label, fraction in
-            Task { @MainActor in
-                self?.enhancerDownloadStatus = fraction < 1 ? CleanupModelCatalog.statusText(label: label, fraction: fraction) : nil
-            }
+        enhancerProgressRelay.set { label, fraction in
+            Task { @MainActor in downloads.report(enhancer: label, fraction: fraction) }
         }
 
         start()
@@ -474,8 +462,8 @@ struct ScribeApp: App {
 
         Window("scribe setup", id: onboardingWindowID) {
             OnboardingWindow(
-                permissions: model.permissions, model: model, cleanupModels: model.cleanupModels,
-                dictation: model.dictation, settingsModel: model.settingsModel)
+                permissions: model.permissions, model: model, downloads: model.downloads,
+                cleanupModels: model.cleanupModels, dictation: model.dictation, settingsModel: model.settingsModel)
         }
 
         Window("scribe dictionary", id: dictionaryWindowID) {
@@ -512,9 +500,8 @@ private struct MenuBarLabel: View {
     @ObservedObject var permissions: PermissionsModel
     @ObservedObject var dictation: DictationCoordinator
     @ObservedObject var cleanupModels: CleanupModelController
-    /// For `sttDownloadFraction`, which lives on the composition root. The label is a single Text, so the
-    /// extra rebuilds on unrelated AppModel writes cost nothing.
-    @ObservedObject var model: AppModel
+    /// For `sttFraction` only; the label never observes `AppModel`, so its writes never rebuild the glyph.
+    @ObservedObject var downloads: DownloadStatus
     @Environment(\.openWindow) private var openWindow
     @State private var didAutoOpen = false
 
@@ -522,21 +509,21 @@ private struct MenuBarLabel: View {
         self.permissions = model.permissions
         self.dictation = model.dictation
         self.cleanupModels = model.cleanupModels
-        self.model = model
+        self.downloads = model.downloads
     }
 
     var body: some View {
         Text(
             menuBarGlyph(
                 dictation.state, progress: cleanupModels.cleanupModelProgress,
-                sttProgress: model.sttDownloadFraction, needsAttention: !permissions.grantsOk)
+                sttProgress: downloads.sttFraction, needsAttention: !permissions.grantsOk)
         )
         // The glyph alone reads as "white bullet" or "warning sign"; the value says what it means.
         .accessibilityLabel("scribe")
         .accessibilityValue(
             glyphAccessibilityValue(
                 dictation.state, progress: cleanupModels.cleanupModelProgress,
-                sttProgress: model.sttDownloadFraction, needsAttention: !permissions.grantsOk)
+                sttProgress: downloads.sttFraction, needsAttention: !permissions.grantsOk)
         )
         .onAppear {
             guard !didAutoOpen else { return }
