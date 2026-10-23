@@ -4,10 +4,11 @@ import Foundation
 /// so the surface is a fixed verb list, and it is off by default (Settings › General).
 enum URLCommand: Equatable {
     case pasteLast
+    case toggle
 
     static let scheme = "scribe"
 
-    /// `scribe://paste-last` and `scribe:paste-last` both parse; a query, fragment, user, port or extra path refuses.
+    /// `scribe://paste-last` and `scribe://toggle` (or `scribe:paste-last`) parse; a query, fragment, user, port or extra path refuses.
     static func parse(_ url: URL) -> URLCommand? {
         guard url.scheme?.lowercased() == scheme, url.query == nil, url.fragment == nil, url.user == nil, url.port == nil
         else { return nil }
@@ -20,6 +21,7 @@ enum URLCommand: Equatable {
         }
         switch verb.lowercased() {
         case "paste-last": return .pasteLast
+        case "toggle": return .toggle
         default: return nil
         }
     }

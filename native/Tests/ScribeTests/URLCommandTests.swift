@@ -20,14 +20,21 @@ final class URLCommandTests: XCTestCase {
 
     func testRefusesOtherSchemesAndUnknownVerbs() {
         XCTAssertNil(URLCommand.parse(url("https://paste-last")))
-        XCTAssertNil(URLCommand.parse(url("scribe://toggle")))
+        XCTAssertNil(URLCommand.parse(url("scribe://latch")))
         XCTAssertNil(URLCommand.parse(url("scribe://")))
         XCTAssertNil(URLCommand.parse(url("scribe:")))
+    }
+
+    func testParsesToggle() {
+        XCTAssertEqual(URLCommand.parse(url("scribe://toggle")), .toggle)
+        XCTAssertEqual(URLCommand.parse(url("scribe:toggle")), .toggle)
     }
 
     func testOutcomeRunsOnlyWhenEnabled() {
         XCTAssertEqual(URLCommand.outcome(for: url("scribe://paste-last"), enabled: true), .run(.pasteLast))
         XCTAssertEqual(URLCommand.outcome(for: url("scribe://paste-last"), enabled: false), .refusedOff)
+        XCTAssertEqual(URLCommand.outcome(for: url("scribe://toggle"), enabled: true), .run(.toggle))
+        XCTAssertEqual(URLCommand.outcome(for: url("scribe://toggle"), enabled: false), .refusedOff)
         // A URL that isn't ours is ignored whether or not the scheme is on.
         XCTAssertEqual(URLCommand.outcome(for: url("scribe://nope"), enabled: true), .ignored)
         XCTAssertEqual(URLCommand.outcome(for: url("scribe://nope"), enabled: false), .ignored)

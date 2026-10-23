@@ -64,7 +64,9 @@ final class DictationCoordinatorTests: XCTestCase {
         failedAudioURL: URL? = nil,
         repasteDelay: Double = 0,
         hudResultSeconds: Double = HUDModel.resultSeconds,
-        holdThreshold: Double? = 0.05
+        holdThreshold: Double? = 0.05,
+        hotkeyMode: HotkeyMode = .hold,
+        latchMaxSeconds: Double = 240
     ) -> DictationCoordinator {
         let recorder = self.recorder!
         let clock = pipelineClock!
@@ -115,6 +117,10 @@ final class DictationCoordinatorTests: XCTestCase {
             hudEnabled: { [unowned self] in hudEnabled },
             hudResultSeconds: hudResultSeconds,
             holdThreshold: holdThreshold,
+            hotkeyMode: hotkeyMode,
+            latchMaxSeconds: latchMaxSeconds,
+            // The pipeline's clock too: a tap's length and the pipeline's discard of it then agree.
+            now: { clock.t },
             log: { [logs] in logs!.append($0) })
     }
 
@@ -914,6 +920,392 @@ final class DictationCoordinatorTests: XCTestCase {
         XCTAssertTrue(forgot)
         XCTAssertFalse(recorder.armed)
         XCTAssertEqual(watchdog?.isCancelled, true)
+    }
+
+    // MARK: - Latch mode
+
+    /// A press and release, `hold` seconds apart, then `gap` seconds of quiet.
+    private func tap(_ c: DictationCoordinator, hold: Double = 0.1, gap: Double = 0.2) {
+        c.handleKeyDown()
+        pipelineClock.t += hold
+        c.handleKeyUp()
+        pipelineClock.t += gap
+    }
+
+    /// A double tap in `holdOrLatch`: the first tap's hold is discarded by the pipeline, the second down latches.
+    private func latch(_ c: DictationCoordinator) {
+        tap(c)
+        c.handleKeyDown()
+        pipelineClock.t += 0.1
+        c.handleKeyUp()
+    }
+
+    func testHoldModeUnchanged() {
+        // A real tap threshold: at the default 0.05 s the 0.1 s presses below are not taps, and the second-tap half
+        // could never latch in any mode.
+        let c = make(holdThreshold: 0.3)
+        var hookCalls = 0
+        c.onKeyDown = { hookCalls += 1 }
+
+        c.handleKeyDown()
+        XCTAssertEqual(hookCalls, 1)
+        XCTAssertTrue(recorder.armed)
+        let watchdog = c.holdWatchdog
+        XCTAssertNotNil(watchdog)
+        pipelineClock.t += 1.0
+        c.handleKeyUp()
+
+        XCTAssertFalse(recorder.armed)
+        XCTAssertEqual(watchdog?.isCancelled, true)
+        XCTAssertEqual(jobs.value, ["job"])
+
+        // Two quick taps never latch in hold mode: the second release stops the recording.
+        tap(c, hold: 0.1, gap: 0.1)
+        c.handleKeyDown()
+        XCTAssertTrue(recorder.armed)
+        pipelineClock.t += 0.1
+        c.handleKeyUp()
+        XCTAssertFalse(recorder.armed)
+        XCTAssertEqual(jobs.value, ["job"], "both taps were discarded as taps")
+    }
+
+    func testDoubleTapLatchesAndTapStops() {
+        let c = make(holdThreshold: 0.3, hotkeyMode: .holdOrLatch)
+
+        tap(c, hold: 0.1, gap: 0.2)
+        XCTAssertFalse(recorder.armed)
+        XCTAssertEqual(jobs.value, [], "the first tap's short hold is discarded by the pipeline as today")
+
+        c.handleKeyDown()
+        XCTAssertTrue(recorder.armed)
+        pipelineClock.t += 0.1
+        c.handleKeyUp()
+        XCTAssertTrue(recorder.armed, "the latching tap's own release does not stop the recording")
+        XCTAssertEqual(jobs.value, [])
+
+        pipelineClock.t += 30
+        let watchdog = c.holdWatchdog
+        c.handleKeyDown()
+        XCTAssertFalse(recorder.armed, "the next tap stops it")
+        XCTAssertEqual(jobs.value, ["job"], "one completed job after the stopping tap")
+        XCTAssertEqual(watchdog?.isCancelled, true)
+
+        pipelineClock.t += 0.1
+        c.handleKeyUp()
+        XCTAssertEqual(jobs.value, ["job"], "the stopping tap's release means nothing")
+
+        // The stopping tap never seeds a new double tap.
+        pipelineClock.t += 0.1
+        c.handleKeyDown()
+        XCTAssertTrue(recorder.armed, "a plain start, not a second latch")
+        pipelineClock.t += 1.0
+        c.handleKeyUp()
+        XCTAssertEqual(jobs.value, ["job", "job"])
+    }
+
+    func testLatchedWatchdogUsesTheLongerCapAndItsNotice() async {
+        let c = make(
+            config: PipelineConfig(maxHold: 60), holdThreshold: 0.3, hotkeyMode: .holdOrLatch, latchMaxSeconds: 0.05)
+        latch(c)
+        pipelineClock.t += 10  // long enough to be a dictation when the watchdog stops it
+
+        let notified = await eventually { !notifier.delivered.isEmpty }
+        XCTAssertTrue(notified)
+        XCTAssertEqual(notifier.delivered.first?.body, "Stopped after 0 min — tap to start again")
+        XCTAssertFalse(recorder.armed)
+        XCTAssertEqual(jobs.value, ["job"])
+        XCTAssertEqual(monitor.forgetCalls, 1)
+
+        c.handleKeyDown()
+        XCTAssertTrue(recorder.armed, "the watchdog reset the interpreter, so this is a plain start and not a stopping tap")
+        c.handleKeyUp()
+    }
+
+    func testHoldWatchdogNoticeUnchanged() async {
+        let c = make(
+            config: PipelineConfig(maxHold: 0.05), holdThreshold: 0.3, hotkeyMode: .holdOrLatch, latchMaxSeconds: 600)
+
+        c.handleKeyDown()
+
+        let notified = await eventually { !notifier.delivered.isEmpty }
+        XCTAssertTrue(notified)
+        XCTAssertEqual(notifier.delivered.first?.body, "Stopped after 0 min — release the key")
+        XCTAssertFalse(recorder.armed)
+
+        c.handleKeyUp()  // the late release
+        c.handleKeyDown()
+        XCTAssertTrue(recorder.armed, "a plain start after the forced stop")
+        c.handleKeyUp()
+    }
+
+    func testToggleLatchedStartsAndStops() {
+        let c = make(hotkeyMode: .holdOrLatch)
+        var hookCalls = 0
+        c.onKeyDown = { hookCalls += 1 }
+
+        c.toggleLatched()
+        XCTAssertTrue(recorder.armed)
+        XCTAssertEqual(hookCalls, 1, "the key-down hook runs for a toggle start too")
+        XCTAssertNotNil(c.holdWatchdog)
+        let watchdog = c.holdWatchdog
+
+        pipelineClock.t += 5
+        c.toggleLatched()
+
+        XCTAssertFalse(recorder.armed)
+        XCTAssertEqual(jobs.value, ["job"])
+        XCTAssertEqual(watchdog?.isCancelled, true)
+
+        // The next key press is a plain start: toggling off leaves no latch behind.
+        c.handleKeyDown()
+        XCTAssertTrue(recorder.armed)
+        pipelineClock.t += 1
+        c.handleKeyUp()
+        XCTAssertEqual(jobs.value, ["job", "job"])
+    }
+
+    func testATapStopsARecordingThatToggleStarted() {
+        let c = make()
+        c.toggleLatched()
+        pipelineClock.t += 5
+
+        c.handleKeyDown()
+        XCTAssertFalse(recorder.armed)
+        XCTAssertEqual(jobs.value, ["job"])
+        c.handleKeyUp()
+        XCTAssertEqual(jobs.value, ["job"])
+    }
+
+    func testToggleLatchedEndsAHoldInProgress() {
+        let c = make()
+        c.handleKeyDown()
+        pipelineClock.t += 1
+
+        c.toggleLatched()
+        XCTAssertFalse(recorder.armed)
+        XCTAssertEqual(jobs.value, ["job"])
+
+        c.handleKeyUp()  // the physical release arrives afterwards
+        XCTAssertEqual(jobs.value, ["job"])
+    }
+
+    func testToggleLatchedUsesTheLatchCapAndNotice() async {
+        let c = make(config: PipelineConfig(maxHold: 60), latchMaxSeconds: 0.05)
+        c.toggleLatched()
+
+        let notified = await eventually { !notifier.delivered.isEmpty }
+        XCTAssertTrue(notified)
+        XCTAssertEqual(notifier.delivered.first?.body, "Stopped after 0 min — tap to start again")
+        XCTAssertFalse(recorder.armed)
+    }
+
+    func testAFailedLatchedStartLeavesNoPhantomLatch() {
+        recorder = FakeRecorder(armError: TestError(message: "no mic"))
+        let c = make(holdThreshold: 0.3, hotkeyMode: .holdOrLatch)
+        tap(c)
+        c.handleKeyDown()  // the latching tap, but the recorder cannot arm
+        pipelineClock.t += 0.1
+        c.handleKeyUp()
+        XCTAssertFalse(recorder.armed)
+        XCTAssertEqual(c.holdWatchdog?.isCancelled, true, "nothing is recording, so no cap is left running")
+
+        recorder.armError = nil
+        pipelineClock.t += 1
+        c.handleKeyDown()
+
+        XCTAssertTrue(recorder.armed, "the next tap starts a recording; it is not eaten as the tap that stops a latch")
+        c.handleKeyUp()
+    }
+
+    func testAFailedToggleStartLeavesNoPhantomLatch() {
+        recorder = FakeRecorder(armError: TestError(message: "no mic"))
+        let c = make()
+        c.toggleLatched()
+        XCTAssertFalse(recorder.armed)
+
+        recorder.armError = nil
+        c.handleKeyDown()
+
+        XCTAssertTrue(recorder.armed)
+        c.handleKeyUp()
+    }
+
+    func testModeChangeEndsAHold() {
+        let c = make(holdThreshold: 0.3, hotkeyMode: .holdOrLatch)
+        latch(c)
+        XCTAssertTrue(recorder.armed)
+        let watchdog = c.holdWatchdog
+        pipelineClock.t += 10
+
+        c.setHotkeyMode(.hold)
+
+        XCTAssertFalse(recorder.armed)
+        XCTAssertEqual(watchdog?.isCancelled, true)
+        XCTAssertEqual(jobs.value, ["job"], "the dictation so far is kept, not thrown away")
+
+        // The new mode applies at once, and the dropped latch does not eat the next press.
+        tap(c, hold: 0.1, gap: 0.1)
+        c.handleKeyDown()
+        XCTAssertTrue(recorder.armed)
+        pipelineClock.t += 0.1
+        c.handleKeyUp()
+        XCTAssertFalse(recorder.armed, "hold mode: the second tap is a plain hold, not a latch")
+    }
+
+    func testSwitchingToLatchModeMakesTheNextDoubleTapLatch() {
+        let c = make(holdThreshold: 0.3)
+        c.setHotkeyMode(.holdOrLatch)
+
+        latch(c)
+
+        XCTAssertTrue(recorder.armed)
+        pipelineClock.t += 5
+        c.handleKeyDown()
+        XCTAssertFalse(recorder.armed)
+    }
+
+    func testChangingModeWithNothingRecordingStartsNothing() {
+        let c = make(hotkeyMode: .holdOrLatch)
+
+        c.setHotkeyMode(.hold)
+
+        XCTAssertFalse(recorder.armed)
+        XCTAssertEqual(jobs.value, [])
+    }
+
+    func testSleepResetsALatch() async {
+        let c = make(holdThreshold: 0.3, hotkeyMode: .holdOrLatch)
+        c.start()
+        latch(c)
+        XCTAssertTrue(recorder.armed)
+
+        NSWorkspace.shared.notificationCenter.post(name: NSWorkspace.willSleepNotification, object: nil)
+
+        let stopped = await eventually { !recorder.armed }
+        XCTAssertTrue(stopped)
+        XCTAssertEqual(jobs.value, [], "a hold cut off by sleep must not become a dictation")
+
+        c.handleKeyDown()
+        XCTAssertTrue(recorder.armed, "after waking, a tap starts; it does not stop the latch that sleep already ended")
+        c.handleKeyUp()
+    }
+
+    func testSetHotkeyResetsALatch() {
+        let c = make(holdThreshold: 0.3, hotkeyMode: .holdOrLatch)
+        c.start()
+        latch(c)
+        XCTAssertTrue(recorder.armed)
+
+        c.setHotkey(.f13)
+
+        XCTAssertFalse(recorder.armed)
+        c.handleKeyDown()
+        XCTAssertTrue(recorder.armed, "the new key's first tap starts a recording")
+        c.handleKeyUp()
+    }
+
+    func testChangingTheMicrophoneEndsALatchAndKeepsItsWords() {
+        let c = make(holdThreshold: 0.3, hotkeyMode: .holdOrLatch)
+        latch(c)
+        let watchdog = c.holdWatchdog
+        pipelineClock.t += 10
+
+        c.selectMicrophone(uid: "usb-mic")
+
+        XCTAssertFalse(recorder.armed)
+        XCTAssertEqual(watchdog?.isCancelled, true)
+        XCTAssertEqual(jobs.value, ["job"], "what was said before the switch is kept")
+        XCTAssertEqual(recorder.preferredInputs.last, "usb-mic")
+        c.handleKeyDown()
+        XCTAssertTrue(recorder.armed, "the next tap starts a recording; it does not stop a latch that already ended")
+        c.handleKeyUp()
+    }
+
+    func testLatchedStartShowsThePillAtOnce() {
+        let c = make(holdThreshold: 60, hotkeyMode: .holdOrLatch)
+        tap(c)
+        XCTAssertEqual(hud.phase, .hidden)
+
+        c.handleKeyDown()
+
+        XCTAssertEqual(hud.phase, .listening, "the double tap has already outlasted the tap filter")
+        c.handleKeyUp()
+    }
+
+    func testAToggleStartShowsThePillAtOnce() {
+        let c = make(holdThreshold: 60)
+
+        c.toggleLatched()
+
+        XCTAssertEqual(hud.phase, .listening)
+    }
+
+    func testALatchedStartWithThePillOffShowsNothing() {
+        hudEnabled = false
+        let c = make(holdThreshold: 60, hotkeyMode: .holdOrLatch)
+        tap(c)
+
+        c.handleKeyDown()
+
+        XCTAssertEqual(hud.phase, .hidden)
+        c.handleKeyUp()
+    }
+
+    func testALatchedStartCancelsAPendingHide() {
+        let c = make(hudResultSeconds: 0.05, holdThreshold: 60, hotkeyMode: .holdOrLatch)
+        c.applyState(.processing)
+        c.playPasteCue()
+        c.applyState(.idle)
+        let pending = c.hudHide
+        XCTAssertNotNil(pending)
+        tap(c)
+        XCTAssertEqual(pending?.isCancelled, false, "nothing has cancelled it yet")
+
+        c.handleKeyDown()
+
+        XCTAssertEqual(pending?.isCancelled, true, "the verdict's hide must not blank a live recording")
+        XCTAssertEqual(hud.phase, .listening)
+        c.handleKeyUp()
+    }
+
+    func testPlainHoldStillWaitsForTheThreshold() async {
+        let c = make(holdThreshold: 60, hotkeyMode: .holdOrLatch)
+
+        c.handleKeyDown()
+        let recording = await eventually { c.state == .recording }
+        XCTAssertTrue(recording)
+
+        XCTAssertEqual(hud.phase, .hidden, "a plain hold shows the pill only once it outlasts the threshold")
+        c.handleKeyUp()
+        c.applyState(.idle)  // cancels the pending show
+    }
+
+    func testSetHoldThresholdReachesTheTapFilter() {
+        let c = make(hotkeyMode: .holdOrLatch)
+
+        // At 1.0 s a 0.6 s press is a tap, so the quick second press latches.
+        c.setHoldThreshold(1.0)
+        tap(c, hold: 0.6, gap: 0.2)
+        c.handleKeyDown()
+        pipelineClock.t += 0.1
+        c.handleKeyUp()
+        XCTAssertTrue(recorder.armed, "latched")
+        pipelineClock.t += 5
+        c.handleKeyDown()
+        XCTAssertFalse(recorder.armed)
+        c.handleKeyUp()
+        XCTAssertEqual(jobs.value, ["job"])
+
+        // At 0.3 s the same press is a real hold, so the second press is a plain one.
+        c.setHoldThreshold(0.3)
+        pipelineClock.t += 1
+        tap(c, hold: 0.6, gap: 0.2)
+        XCTAssertEqual(jobs.value, ["job", "job"])
+        c.handleKeyDown()
+        XCTAssertTrue(recorder.armed)
+        pipelineClock.t += 0.1
+        c.handleKeyUp()
+        XCTAssertFalse(recorder.armed, "not latched")
     }
 
     // MARK: - Recorder prewarm and microphone

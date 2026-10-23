@@ -16,7 +16,8 @@ struct TestError: Error, CustomStringConvertible {
 
 final class FakeRecorder: RecorderLike, RecorderPreparing {
     let pcm: [Float]
-    let armError: Error?
+    /// Settable so a test can fail one start and let the next succeed.
+    var armError: Error?
     private(set) var armed = false
     var prewarmError: Error?
     private(set) var prewarmCalls = 0
