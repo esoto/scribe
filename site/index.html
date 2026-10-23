@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>scribe — hold a key, speak, it's typed</title>
-<meta name="description" content="Personal hold-to-talk dictation for macOS — fully local, English + Spanish, with voice commands and a dictionary you can teach. No cloud, no accounts. Audio and text never leave the machine.">
+<meta name="description" content="Personal hold-to-talk dictation for macOS — fully local, English + Spanish, with voice commands, a hands-free latch and a dictionary you can teach. No cloud, no accounts. Audio and text never leave the machine.">
 <meta property="og:title" content="scribe — hold a key, speak, it's typed">
 <meta property="og:description" content="Fully local hold-to-talk dictation for macOS, with voice commands. No cloud, no accounts. Audio and text never leave the machine.">
 <meta property="og:url" content="https://scribe.estebansoto.dev">
@@ -139,7 +139,7 @@
   <div class="step">
     <div class="n">1</div>
     <div class="t">Hold Right ⌥</div>
-    <div class="d">The mic is captured only while recording — while you hold the key, or until you tap again if you latched. A small pill above the Dock shows the level, and the orange indicator turns off the moment it stops. Prefer Right ⌘ or F13? Pick it in Settings.</div>
+    <div class="d">The mic is captured only while recording — while you hold the key, or until you tap again if you latched. A small pill above the Dock shows the level, and the orange indicator turns off the moment it stops. Hands-free: set Hotkey mode to "Hold, or double-tap to latch" in Settings › General and a double-tap records until you tap again (auto-stop after 4 minutes). Prefer Right ⌘ or F13? Pick it in Settings.</div>
   </div>
   <div class="step">
     <div class="n">2</div>
@@ -182,7 +182,7 @@
     </div>
     <div class="cell">
       <div class="t">Per-app rules</div>
-      <div class="d">In Settings › Apps, pick an app and set its rules: cleanup on or off, drop the
+      <div class="d">In Settings › Apps, pick an app and set its rules: cleanup on or off, voice commands on or off, drop the
         trailing period for chat, lowercase the first letter. The text rules run after cleanup — the cleanup model never sees them.</div>
     </div>
     <div class="cell">
@@ -190,7 +190,7 @@
       <div class="d">A spoken trigger — "my address" — stands for a block of text, said alone or inside a sentence. The text takes its place after cleanup, so the model never sees it and its line breaks survive.</div>
     </div>
   </div>
-  <p class="note">A command counts only as the whole utterance: "please send it to the team" is text. Line breaks count anywhere, so while voice commands are on "a new line of products" can't be dictated as text — turn them off in Settings › General for that. If the recognizer keeps mishearing a command, add a Dictionary pair for what it hears.</p>
+  <p class="note">A command counts only as the whole utterance: "please send it to the team" is text. Line breaks count anywhere; to dictate one of these phrases as words, say "the words" first ("the words new line"; Spanish "las palabras"), or turn voice commands off for one app in Settings › Apps. If the recognizer keeps mishearing a command, add a Dictionary pair for what it hears.</p>
 </section>
 
 <section class="wrap learns">
@@ -253,7 +253,7 @@
       </div>
       <div class="cell">
         <div class="t">Nothing sent</div>
-        <div class="d">No cloud, no accounts, no telemetry. The scribe://paste-last hook for Raycast or Stream Deck is off by default and accepts no parameters, so a URL can never carry text into scribe.</div>
+        <div class="d">No cloud, no accounts, no telemetry. The scribe://paste-last and scribe://toggle hooks for Raycast or Stream Deck are off by default and accept no parameters, so a URL can never carry text into scribe. Once you turn them on, any app, or a web page you allow, can paste your last dictation or turn on the microphone and dictate what it hears into the app that has focus.</div>
       </div>
     </div>
   </div>
