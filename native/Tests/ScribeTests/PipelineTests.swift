@@ -395,10 +395,10 @@ final class PipelineTests: XCTestCase {
         // The ⋯ arrives with the release, not when job 1 finishes: nothing waits on the job ahead to show it.
         XCTAssertEqual(h.states.value, [.recording, .recording, .processing])
         runner.drain()
-        XCTAssertEqual(h.states.value, [.recording, .recording, .processing, .idle])
+        XCTAssertEqual(h.states.value, [.recording, .recording, .processing, .processing, .idle])
     }
 
-    func testAQueuedReleaseShowsProcessingOnceAndItsStartDoesNotRepeatIt() {
+    func testAQueuedJobShowsProcessingAtItsReleaseAndAgainWhenItStarts() {
         let runner = ManualRunner()
         let h = make(runner: runner.run)
         dictate(h)                      // nothing ahead: the release emits nothing, as before
@@ -408,9 +408,7 @@ final class PipelineTests: XCTestCase {
 
         runner.drain()
 
-        XCTAssertEqual(
-            h.states.value.filter { $0 == .processing }.count, 1, "job 2 starting must not emit a second ⋯")
-        XCTAssertEqual(h.states.value, [.recording, .recording, .processing, .idle])
+        XCTAssertEqual(h.states.value, [.recording, .recording, .processing, .processing, .idle])
     }
 
     func testEachJobQueuedBehindOthersShowsProcessingAtItsRelease() {
@@ -422,7 +420,18 @@ final class PipelineTests: XCTestCase {
 
         XCTAssertEqual(h.states.value, [.recording, .recording, .processing, .recording, .processing])
         runner.drain()
-        XCTAssertEqual(h.states.value, [.recording, .recording, .processing, .recording, .processing, .idle])
+        XCTAssertEqual(
+            h.states.value, [.recording, .recording, .processing, .recording, .processing, .processing, .idle])
+    }
+
+    func testATapWhileAJobWaitsLetsItsStartShowProcessingAgain() {
+        let runner = ManualRunner()
+        let h = make(runner: runner.run)
+        dictate(h)
+        dictate(h)                      // queued: ⋯ at the release
+        dictate(h, hold: 0.1)           // a discarded tap ends on .idle
+        runner.drain()
+        XCTAssertEqual(h.states.value, [.recording, .recording, .processing, .recording, .idle, .processing, .idle])
     }
 
     func testAReleaseAfterTheQueueDrainedEmitsNothingUntilItsJobStarts() {

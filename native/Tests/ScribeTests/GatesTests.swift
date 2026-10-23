@@ -50,6 +50,7 @@ final class GatesTests: XCTestCase {
         XCTAssertEqual(Gates.langScore("Creo que."), -1)
         XCTAssertEqual(Gates.langScore("¿Es esto, eso?"), -3, "inverted punctuation hides nothing either")
         XCTAssertEqual(Gates.langScore("Yes, we should, they would."), 4)
+        XCTAssertEqual(Gates.langScore("Está, según."), -2, "accented letters are letters")
     }
     func testLanguageConsistentDetectsTranslationOfPunctuatedText() {
         XCTAssertFalse(Gates.languageConsistent(
