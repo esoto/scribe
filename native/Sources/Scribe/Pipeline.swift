@@ -17,7 +17,9 @@ struct PipelineConfig {
     var sttTimeout: Double = 20.0
     /// Caps what an experimental denoise can add to a dictation; past it the raw capture is transcribed.
     var enhanceTimeout: Double = 3.0
-    /// A queued job older than this is dropped rather than pasted into whatever has focus by then.
+    /// A queued job older than this is dropped rather than pasted into whatever has focus by then. It does not grow
+    /// with the cleanup deadline: a late paste is the hazard however long the job ahead was, and a four-minute latch
+    /// (about 600 words at 25 ms a word on the default model) cleans in about 15 s.
     var queueMaxAge: Double = 30.0
     /// The ring buffer silently drops audio past 300 s, so a stuck key is cut off well before that.
     var maxHold: Double = 120.0

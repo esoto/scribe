@@ -2016,6 +2016,14 @@ final class PipelineTests: XCTestCase {
         XCTAssertEqual(DictationPipeline.cleanupDeadline(words: 5, base: 30), 30)
     }
 
+    func testOneStuckCleanupCannotByItselfMakeTheNextDictationStale() {
+        // The longest one cleanup can run stays under the queue age, so a dictation queued behind one stuck long part
+        // is still pasted.
+        let config = PipelineConfig()
+        XCTAssertLessThan(
+            DictationPipeline.cleanupDeadline(words: 100_000, base: config.cleanupTimeout), config.queueMaxAge)
+    }
+
     func testALongSegmentGetsMoreThanTheBaseCleanupTimeout() {
         let spoken = Array(repeating: "we shipped the build today", count: 24).joined(separator: " ")  // 120 words
         let cleaner = FakeCleaner(out: spoken.uppercased(), delay: 0.4)

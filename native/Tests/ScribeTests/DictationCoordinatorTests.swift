@@ -941,7 +941,9 @@ final class DictationCoordinatorTests: XCTestCase {
     }
 
     func testHoldModeUnchanged() {
-        let c = make()
+        // A real tap threshold: at the default 0.05 s the 0.1 s presses below are not taps, and the second-tap half
+        // could never latch in any mode.
+        let c = make(holdThreshold: 0.3)
         var hookCalls = 0
         c.onKeyDown = { hookCalls += 1 }
 
@@ -1199,6 +1201,23 @@ final class DictationCoordinatorTests: XCTestCase {
         XCTAssertFalse(recorder.armed)
         c.handleKeyDown()
         XCTAssertTrue(recorder.armed, "the new key's first tap starts a recording")
+        c.handleKeyUp()
+    }
+
+    func testChangingTheMicrophoneEndsALatchAndKeepsItsWords() {
+        let c = make(holdThreshold: 0.3, hotkeyMode: .holdOrLatch)
+        latch(c)
+        let watchdog = c.holdWatchdog
+        pipelineClock.t += 10
+
+        c.selectMicrophone(uid: "usb-mic")
+
+        XCTAssertFalse(recorder.armed)
+        XCTAssertEqual(watchdog?.isCancelled, true)
+        XCTAssertEqual(jobs.value, ["job"], "what was said before the switch is kept")
+        XCTAssertEqual(recorder.preferredInputs.last, "usb-mic")
+        c.handleKeyDown()
+        XCTAssertTrue(recorder.armed, "the next tap starts a recording; it does not stop a latch that already ended")
         c.handleKeyUp()
     }
 

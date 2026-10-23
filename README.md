@@ -287,6 +287,7 @@ outside scribe's process. scribe manages them on demand:
   scribe copies the text instead and notifies "press ⌘V". It does the same
   when you switch apps while it's transcribing.
 - **Recording did not stop** → a latched recording (a double-tap, or `scribe://toggle` in either Hotkey mode) stops at a single tap of the hotkey; after 4 minutes scribe stops it by itself and says so.
+- **"Dictation skipped — it waited … behind the previous one"** → it was queued behind a long dictation for more than 30 s, and scribe drops it rather than paste it that late. After a long latched dictation, wait for "Pasted" before starting the next one.
 - **The menu bar shows ⚠ while idle** → a permission was revoked. Open
   Setup / Doctor; the highlighted row is the one to fix.
 - **Hotkey does nothing** → Input Monitoring grant missing (common after

@@ -255,7 +255,13 @@ final class DictationCoordinator: ObservableObject {
     // MARK: - Settings forwarded to the recorder and pipeline
 
     /// Switches the capture device (nil = system default). The built-in mic avoids Bluetooth HFP renegotiation delay.
+    /// A recording in progress ends first and keeps its words: the engine is rebuilt for the new device and would
+    /// capture nothing for the rest of a latch, while scribe still showed it as recording.
     func selectMicrophone(uid: String?) {
+        if pipeline.isArmed {
+            endHold()
+            taps.reset()
+        }
         recorder.setPreferredInput(uid: uid)
         log("microphone set to \(uid ?? "system default")")
         prewarmRecorderIfGranted()
