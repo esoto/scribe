@@ -219,7 +219,7 @@ final class AppModel: ObservableObject {
         self.settingsModel = SettingsModel(
             settings: settings,
             onHotkeyChanged: { dictation.setHotkey($0) },
-            onHoldThresholdChanged: { dictation.pipeline.setHoldThreshold($0) },
+            onHoldThresholdChanged: { dictation.setHoldThreshold($0) },
             onIdleMinutesChanged: { idleTracker.setUnloadAfterMinutes($0) },
             onHistorySizeChanged: { history.setMaxLen($0) },
             onRestoreDelayChanged: { paster.setRestoreDelay($0) },

@@ -76,4 +76,39 @@ final class HUDModelTests: XCTestCase {
         for _ in 0..<20 { model.setLevel(rms: 0) }
         XCTAssertEqual(model.level, 0)
     }
+
+    // MARK: - Display under the pointer
+
+    private let twoDisplays = [
+        NSRect(x: 0, y: 0, width: 1000, height: 800),
+        NSRect(x: 1000, y: -100, width: 1200, height: 900),
+    ]
+
+    func testTheDisplayUnderThePointerIsTheFrameThatContainsIt() {
+        XCTAssertEqual(displayIndex(containing: NSPoint(x: 500, y: 400), frames: twoDisplays), 0)
+        XCTAssertEqual(displayIndex(containing: NSPoint(x: 1500, y: -50), frames: twoDisplays), 1)
+    }
+
+    func testThePointerOnTheSeamBelongsToTheDisplayItEntered() {
+        XCTAssertEqual(displayIndex(containing: NSPoint(x: 1000, y: 400), frames: twoDisplays), 1)
+        XCTAssertEqual(displayIndex(containing: NSPoint(x: 999.5, y: 400), frames: twoDisplays), 0)
+    }
+
+    func testTheTopRowWhereTheMenuBarIsBelongsToItsDisplay() {
+        XCTAssertEqual(displayIndex(containing: NSPoint(x: 500, y: 800), frames: twoDisplays), 0)
+    }
+
+    func testStackedDisplaysSplitTheirSeamExactlyOnce() {
+        let stacked = [
+            NSRect(x: 0, y: 0, width: 1000, height: 800),
+            NSRect(x: 0, y: 800, width: 1000, height: 800),
+        ]
+        XCTAssertEqual(displayIndex(containing: NSPoint(x: 500, y: 800), frames: stacked), 0)
+        XCTAssertEqual(displayIndex(containing: NSPoint(x: 500, y: 800.5), frames: stacked), 1)
+    }
+
+    func testAPointerOutsideEveryDisplayHasNoIndex() {
+        XCTAssertNil(displayIndex(containing: NSPoint(x: 5000, y: 5000), frames: twoDisplays))
+        XCTAssertNil(displayIndex(containing: NSPoint(x: 10, y: 10), frames: []))
+    }
 }
