@@ -65,6 +65,30 @@ test-models-e2b:
 test-models-afm:
 	$(call run-cleanup-model-tests,appleIntelligence,ignore)
 
+# Report-only measurements (M-2, M-3 in docs/superpowers/plans/2026-10-22-1.5-features.md).
+# They print numbers and assert almost nothing, so read the log. Like the cleanup targets, they
+# FAIL when the expected tag is missing from the log: an XCTSkip (fixture absent) or a dropped
+# TEST_RUNNER_CLEANUP_MODEL would otherwise "pass" with no numbers.
+measure-longform:
+	@mkdir -p $(MODEL_LOG_DIR)
+	@set -o pipefail; \
+	$(XCODEBUILD) -scheme ScribeModelTests -only-testing:ScribeModelTests/LongFormFixtureTests test 2>&1 | tee $(MODEL_LOG_DIR)/longform.log; \
+	rc=$$?; \
+	for tag in 'longform[en90]' 'longform[es90]'; do \
+	  grep -qF "$$tag" $(MODEL_LOG_DIR)/longform.log || { echo "ERROR: no $$tag output in the log - fixture missing (skipped) or the suite did not run"; exit 1; }; \
+	done; \
+	exit $$rc
+
+# One model per run: TEST_RUNNER_CLEANUP_MODEL=gemma4 make measure-cleanup-latency (default gemma3).
+measure-cleanup-latency:
+	@mkdir -p $(MODEL_LOG_DIR)
+	@set -o pipefail; \
+	model=$${TEST_RUNNER_CLEANUP_MODEL:-gemma3}; \
+	$(XCODEBUILD) -scheme ScribeModelTests -only-testing:ScribeModelTests/CleanupLatencyByLengthTests test 2>&1 | tee $(MODEL_LOG_DIR)/latency-$$model.log; \
+	rc=$$?; \
+	grep -qF "latency[$$model]" $(MODEL_LOG_DIR)/latency-$$model.log || { echo "ERROR: no latency[$$model] output in the log - CLEANUP_MODEL did not reach the tests (or the suite was skipped)"; exit 1; }; \
+	exit $$rc
+
 # Package the native app: Release build -> dist/scribe-<version>.zip.
 # `make install-app` additionally replaces /Applications/Scribe.app.
 app:
