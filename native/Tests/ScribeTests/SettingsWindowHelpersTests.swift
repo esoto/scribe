@@ -27,14 +27,14 @@ final class SettingsWindowHelpersTests: XCTestCase {
         XCTAssertEqual(pickerChoices(idleUnloadChoices, including: 120), [0, 5, 15, 30, 60, 120])
     }
 
-    func testHoldThresholdLabels() {
-        XCTAssertEqual(holdThresholdLabel(0.3), "0.3 s")
-        XCTAssertEqual(holdThresholdLabel(1.0), "1.0 s")
-        XCTAssertEqual(holdThresholdLabel(0.7), "0.7 s")
+    func testSecondsLabels() {
+        XCTAssertEqual(secondsLabel(0.3), "0.3 s")
+        XCTAssertEqual(secondsLabel(1.0), "1.0 s")
+        XCTAssertEqual(secondsLabel(0.7), "0.7 s")
     }
 
-    func testHoldThresholdLabelKeepsPrecisionForACustomValue() {
-        XCTAssertEqual(holdThresholdLabel(0.25), "0.25 s")
+    func testSecondsLabelKeepsPrecisionForACustomValue() {
+        XCTAssertEqual(secondsLabel(0.25), "0.25 s")
     }
 
     func testIdleUnloadLabels() {
