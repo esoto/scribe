@@ -46,10 +46,12 @@ enum Gates {
         "ellos", "debería", "yo", "según",
     ]
 
-    private static func langScore(_ text: String) -> Int {
-        let words = text.lowercased().split(whereSeparator: { $0.isWhitespace })
-        let enHits = words.filter { enStopwords.contains(String($0)) }.count
-        let esHits = words.filter { esStopwords.contains(String($0)) }.count
+    /// English stopword hits minus Spanish ones; internal so the tests can pin it directly.
+    static func langScore(_ text: String) -> Int {
+        // Non-letters, not whitespace: transcripts are punctuated, and "the," or "que." must still count.
+        let words = text.lowercased().split(whereSeparator: { !$0.isLetter }).map(String.init)
+        let enHits = words.filter { enStopwords.contains($0) }.count
+        let esHits = words.filter { esStopwords.contains($0) }.count
         return enHits - esHits
     }
 
