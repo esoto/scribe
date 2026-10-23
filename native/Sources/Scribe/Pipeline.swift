@@ -105,7 +105,8 @@ final class DictationPipeline {
     /// Per hold, not per pipeline: queued jobs outlive later key-downs, which would otherwise retarget them.
     private var downTarget: pid_t?
     private var downBundleID: String?
-    private var isArmed = false
+    /// True from a successful key-down until the hold ends; main-only, so the coordinator can read it synchronously.
+    private(set) var isArmed = false
     /// A job only touches the glyph while no hold is in progress and no newer job is queued, else its
     /// .processing/.idle would blank the ● of the dictation in progress. A discarded short tap starts a hold
     /// but no job, so it must not orphan the in-flight job's glyph. The lock orders a job's emission against
@@ -215,10 +216,11 @@ final class DictationPipeline {
         }
     }
 
-    /// Hold watchdog: a release the tap never reported must not record until the ring buffer overflows.
-    func forceStop() {
+    /// Hold watchdog: a release the tap never reported must not record until the ring buffer overflows. A latched
+    /// recording has no key to release, so its watchdog passes its own notice.
+    func forceStop(notice: String? = nil) {
         guard isArmed else { return }
-        onNotice("Stopped after \(Int(config.maxHold / 60)) min — release the key")
+        onNotice(notice ?? "Stopped after \(Int(config.maxHold / 60)) min — release the key")
         keyUp()
     }
 
@@ -485,12 +487,21 @@ final class DictationPipeline {
         try keyPresser.press(key, target: target)
     }
 
+    /// Latch mode makes 200-word dictations normal, and cleanup time is linear in length (about 25 ms a word on the
+    /// default model, so 200 words take 5.1 s against the 6 s base). The deadline grows 0.03 s a word past 50, capped
+    /// at 20 s, and never drops below a base the user set higher than the cap.
+    static func cleanupDeadline(words: Int, base: Double) -> Double {
+        min(base + 0.03 * Double(max(0, words - 50)), max(base, 20))
+    }
+
     /// The failure case is any gate/error that means "use raw", with the reason it was hit.
     private func tryClean(_ raw: String, cleaner: CleanupBackend) async -> Result<String, CleanupSkip> {
         let out: String
         do {
+            let words = raw.split(whereSeparator: { $0.isWhitespace }).count
+            let deadline = Self.cleanupDeadline(words: words, base: config.cleanupTimeout)
             // withDeadline also cancels the call when the deadline fires, so Gemma's token loop frees the model.
-            out = Gates.normalize(try await withDeadline(config.cleanupTimeout) { try await cleaner.clean(raw) })
+            out = Gates.normalize(try await withDeadline(deadline) { try await cleaner.clean(raw) })
         } catch {
             return .failure(error is DeadlineExceeded ? .timeout : .error)
         }

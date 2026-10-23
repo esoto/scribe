@@ -101,6 +101,11 @@ final class DictationCoordinator: ObservableObject {
     private let hudResultSeconds: Double
     /// A hold shorter than this is a discarded tap, so the pill waits it out before showing.
     private var holdThreshold: Double
+    /// Reads key-down and key-up as hold-to-talk or, in `holdOrLatch`, a double tap that latches. Main-only.
+    private var taps: TapInterpreter
+    /// A latched recording has no key to release, so it gets its own, longer cap.
+    private let latchMaxSeconds: Double
+    private let now: () -> Double
 
     init(
         recorder: RecorderPreparing,
@@ -124,6 +129,9 @@ final class DictationCoordinator: ObservableObject {
         hudResultSeconds: Double = HUDModel.resultSeconds,
         // nil follows pipelineConfig, which is also where the pipeline's tap cutoff starts.
         holdThreshold: Double? = nil,
+        hotkeyMode: HotkeyMode = .hold,
+        latchMaxSeconds: Double = 240,
+        now: @escaping () -> Double = { ProcessInfo.processInfo.systemUptime },
         log: @escaping @Sendable (String) -> Void
     ) {
         self.recorder = recorder
@@ -143,7 +151,12 @@ final class DictationCoordinator: ObservableObject {
         self.hud = hud
         self.hudEnabled = hudEnabled
         self.hudResultSeconds = hudResultSeconds
-        self.holdThreshold = holdThreshold ?? pipelineConfig.holdThreshold
+        let resolvedThreshold = holdThreshold ?? pipelineConfig.holdThreshold
+        self.holdThreshold = resolvedThreshold
+        // The tap filter and the pill's delay share one threshold: a press shorter than it is a tap.
+        self.taps = TapInterpreter(mode: hotkeyMode, tapMax: resolvedThreshold)
+        self.latchMaxSeconds = latchMaxSeconds
+        self.now = now
         self.log = log
 
         // The pipeline calls these from its own threads; each hops to the main actor.
@@ -210,6 +223,8 @@ final class DictationCoordinator: ObservableObject {
                 self?.holdWatchdog?.cancel()
                 self?.pipeline.cancelHold()
                 self?.hotkeyMonitor.forgetHeldKey()
+                // The latch's tap may never come; on wake the first tap must start a recording, not stop a dead one.
+                self?.taps.reset()
             }
         }
     }
@@ -258,10 +273,32 @@ final class DictationCoordinator: ObservableObject {
         pipeline.voiceCommandsEnabled = on
     }
 
-    /// One entry point, so the pipeline's tap cutoff and the pill's delay can't drift apart.
+    /// One entry point, so the pipeline's tap cutoff, the pill's delay and the double-tap filter can't drift apart.
     func setHoldThreshold(_ seconds: Double) {
         holdThreshold = seconds
+        taps.tapMax = seconds
         pipeline.setHoldThreshold(seconds)
+    }
+
+    /// A recording in progress ends first: its tap or release was read under the old mode, and the interpreter's
+    /// memory of it goes with the change. The dictation so far is kept, not discarded.
+    func setHotkeyMode(_ mode: HotkeyMode) {
+        if pipeline.isArmed { endHold() }
+        taps.mode = mode
+        taps.reset()
+    }
+
+    /// `scribe://toggle`: starts a latched recording, or ends whatever is recording (a latch or a held key).
+    /// `pipeline.isArmed` is the seam for "a hold is in progress": it flips synchronously with the recorder, while
+    /// `state` only follows after the pipeline's hop to the main actor, so two quick toggles would misread it.
+    func toggleLatched() {
+        if pipeline.isArmed {
+            endHold()
+            taps.reset()
+        } else {
+            taps.latchExternally()
+            beginHold(latched: true)
+        }
     }
 
     /// Turning the pill off hides it at once; turning it on needs nothing, the next dictation shows it.
@@ -284,6 +321,7 @@ final class DictationCoordinator: ObservableObject {
     func setHotkey(_ key: HotKey) {
         holdWatchdog?.cancel()
         pipeline.cancelHold()
+        taps.reset()
         hotkeyMonitor.uninstall()
 
         hotkey = key
@@ -427,26 +465,62 @@ final class DictationCoordinator: ObservableObject {
 
     // MARK: - Hotkey wiring
 
-    /// Runs the key-down hook, arms the hold watchdog, and forwards to the pipeline. Runs on main (CGEventTap callback).
+    /// Runs on main (CGEventTap callback). The interpreter decides whether this press starts a hold, starts a latch
+    /// (a double tap), or is the tap that ends one.
     func handleKeyDown() {
+        switch taps.down(at: now()) {
+        case .start: beginHold(latched: false)
+        case .startLatched: beginHold(latched: true)
+        case .stopLatched: endHold()
+        case .stop, .ignore: break
+        }
+    }
+
+    func handleKeyUp() {
+        // No reset on the way out: a short release is the first half of a double tap and the interpreter remembers it.
+        if taps.up(at: now()) == .stop { endHold() }
+    }
+
+    /// Runs the key-down hook, arms the hold watchdog, and forwards to the pipeline.
+    private func beginHold(latched: Bool) {
         // A new dictation supersedes the last one's verdict.
         hintClear?.cancel()
         if hint != nil { hint = nil }
         onKeyDown()
 
-        // A release the tap never reports must not leave the mic recording until the ring buffer overflows.
-        let maxHold = pipelineConfig.maxHold
+        // A release the tap never reports must not leave the mic recording until the ring buffer overflows; a latch
+        // nobody taps off gets the same backstop, at its own cap and with a notice that says how to start again.
+        let cap = latched ? latchMaxSeconds : pipelineConfig.maxHold
+        let notice = latched ? "Stopped after \(Int(latchMaxSeconds / 60)) min — tap to start again" : nil
         holdWatchdog?.cancel()
         holdWatchdog = Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: UInt64(maxHold * 1e9))
+            try? await Task.sleep(nanoseconds: UInt64(cap * 1e9))
             guard !Task.isCancelled else { return }
-            self?.pipeline.forceStop()
+            self?.pipeline.forceStop(notice: notice)
             self?.hotkeyMonitor.forgetHeldKey()
+            self?.taps.reset()
         }
         pipeline.keyDown()
+        guard latched else { return }
+        guard pipeline.isArmed else {
+            // The recorder would not start: nothing is latched, and the next tap must not be eaten as its stop.
+            holdWatchdog?.cancel()
+            taps.reset()
+            return
+        }
+        showListeningAtOnce()
     }
 
-    func handleKeyUp() {
+    /// The double tap has already outlasted the tap filter, and a hands-free recording needs its pill up at once.
+    /// A plain hold waits out the threshold in `applyState` instead.
+    private func showListeningAtOnce() {
+        guard let hud, hudEnabled() else { return }
+        hudShow?.cancel()
+        hudHide?.cancel()
+        hud.show(.listening)
+    }
+
+    private func endHold() {
         holdWatchdog?.cancel()
         pipeline.keyUp()
     }

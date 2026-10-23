@@ -202,6 +202,7 @@ final class AppModel: ObservableObject {
             repaste: { try guardedPaster.pasteIntoFocusedApp($0, ownPID: ProcessInfo.processInfo.processIdentifier) },
             hud: hudModel,
             hudEnabled: { settings.hudEnabled },
+            hotkeyMode: settings.hotkeyMode,
             log: log)
         lateDictation = dictation
         // The recorder calls this on the audio thread once per captured chunk, a few tens of times a second at most:
@@ -220,7 +221,8 @@ final class AppModel: ObservableObject {
             onHistorySizeChanged: { history.setMaxLen($0) },
             onRestoreDelayChanged: { paster.setRestoreDelay($0) },
             onVoiceCommandsChanged: { dictation.setVoiceCommandsEnabled($0) },
-            onHudEnabledChanged: { dictation.setHudEnabled($0) })
+            onHudEnabledChanged: { dictation.setHudEnabled($0) },
+            onHotkeyModeChanged: { dictation.setHotkeyMode($0) })
 
         let parakeet = engines["parakeet"] as? ParakeetEngine
         self.dictionaryModel = DictionaryModel(
@@ -253,8 +255,8 @@ final class AppModel: ObservableObject {
         // last_failed.wav is for debugging a recent failure, not for keeping audio around.
         FileLogger.expireFailedAudio()
         dictation.start()
-        NotificationCenter.default.addObserver(forName: .scribeOpenURL, object: nil, queue: .main) { [weak self] note in
-            guard let url = note.object as? URL else { return }
+        // Drains any URL that launched scribe before this point. Both ends run on main: the delegate callback and start().
+        URLHandoff.shared.set { [weak self] url in
             MainActor.assumeIsolated { self?.handleURL(url) }
         }
 
@@ -423,8 +425,7 @@ final class AppModel: ObservableObject {
         case .run(.pasteLast):
             pasteLastDictation()
         case .run(.toggle):
-            // Latch routing lands with the coordinator in C5-S; until then the verb is accepted and does nothing.
-            break
+            dictation.toggleLatched()
         case .refusedOff:
             // A looping opener would otherwise stack one banner per open.
             let now = Date()
@@ -444,6 +445,36 @@ final class AppleIntelligenceLostHandoff: @unchecked Sendable {
     private var handler: (() -> Void)?
     func set(_ handler: @escaping () -> Void) { lock.withLock { self.handler = handler } }
     func fire() { let h = lock.withLock { handler }; h?() }
+}
+
+/// A `scribe://` URL that launches scribe reaches the delegate before `AppModel.start()` is listening, and
+/// `scribe://toggle` must not vanish. Same shape as `AppleIntelligenceLostHandoff`, plus a buffer: URLs fired before
+/// `set` are handed to the handler, in order, when it arrives. The handler runs outside the lock.
+final class URLHandoff: @unchecked Sendable {
+    /// The delegate and the app model are built independently, so they meet here.
+    static let shared = URLHandoff()
+
+    private let lock = NSLock()
+    private var handler: ((URL) -> Void)?
+    private var buffered: [URL] = []
+
+    func set(_ handler: @escaping (URL) -> Void) {
+        let pending = lock.withLock { () -> [URL] in
+            self.handler = handler
+            let drained = buffered
+            buffered = []
+            return drained
+        }
+        for url in pending { handler(url) }
+    }
+
+    func fire(_ url: URL) {
+        let current = lock.withLock { () -> ((URL) -> Void)? in
+            if handler == nil { buffered.append(url) }
+            return handler
+        }
+        current?(url)
+    }
 }
 
 /// Scene id for the onboarding/Doctor window.
@@ -542,7 +573,6 @@ private struct MenuBarLabel: View {
 
 extension Notification.Name {
     static let scribeReopen = Notification.Name("dev.esoto.scribe.reopen")
-    static let scribeOpenURL = Notification.Name("dev.esoto.scribe.openURL")
 }
 
 /// With the menu bar item hidden behind the notch, launching scribe again from Spotlight or Finder did nothing.
@@ -558,7 +588,7 @@ final class ScribeAppDelegate: NSObject, NSApplicationDelegate {
     /// scribe has no WindowGroup or always-built view to host onOpenURL, so URL opens arrive here.
     func application(_ application: NSApplication, open urls: [URL]) {
         for url in urls {
-            NotificationCenter.default.post(name: .scribeOpenURL, object: url)
+            URLHandoff.shared.fire(url)
         }
     }
 }

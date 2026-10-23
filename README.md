@@ -236,7 +236,7 @@ Most of these have a control in **Settings…** (⌘,), the menu, or the Diction
 | `engine` | `parakeet` | `parakeet` \| `whisper` (menu) |
 | `cleanupEnabled` | true | Gemma cleanup pass on/off (menu) |
 | `minWords` | 4 | utterances shorter than this skip cleanup |
-| `cleanupTimeout` | 6.0 | seconds before falling back to raw text |
+| `cleanupTimeout` | 6.0 | seconds before falling back to raw text, plus 0.03 s per word over 50 (capped at 20 s) so long latched dictations are not cut short |
 | `restoreDelay` | 2.0 | seconds before restoring the prior clipboard (Settings) |
 | `energyGate` | 0.0005 | silence gate (anti-hallucination); speech ~0.001+ |
 | `sounds` | true | start/error sounds (Settings) |

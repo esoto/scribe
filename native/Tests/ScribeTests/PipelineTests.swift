@@ -812,6 +812,31 @@ final class PipelineTests: XCTestCase {
         XCTAssertEqual(paster.pasted, ["hello there world"])
     }
 
+    func testForceStopCarriesAGivenNoticeInPlaceOfTheDefault() {
+        let paster = FakePaster()
+        let h = make(paster: paster)
+        h.pipeline.keyDown()
+        h.clock.t += 240
+        h.pipeline.forceStop(notice: "Stopped after 4 min — tap to start again")
+        XCTAssertEqual(h.notices.value, ["Stopped after 4 min — tap to start again"])
+        XCTAssertEqual(paster.pasted, ["hello there world"], "the hold is still processed")
+    }
+
+    func testIsArmedFollowsTheHold() {
+        let h = make()
+        XCTAssertFalse(h.pipeline.isArmed)
+        h.pipeline.keyDown()
+        XCTAssertTrue(h.pipeline.isArmed)
+        h.pipeline.keyUp()
+        XCTAssertFalse(h.pipeline.isArmed)
+    }
+
+    func testIsArmedStaysFalseWhenTheRecorderCannotArm() {
+        let h = make(recorder: FakeRecorder(armError: TestError(message: "no mic")))
+        h.pipeline.keyDown()
+        XCTAssertFalse(h.pipeline.isArmed)
+    }
+
     func testReleasingTheKeyAfterForceStopStartsNoSecondJob() {
         let paster = FakePaster()
         let stt = FakeStt()
@@ -1966,6 +1991,50 @@ final class PipelineTests: XCTestCase {
             keyPresser: FakeKeyPresser())
         dictate(h)
         XCTAssertEqual(paster.pasted, ["new line"], "pairs run first, so a misheard escape is fixable")
+    }
+
+    // MARK: - Cleanup deadline grows with the segment
+
+    func testCleanupDeadlineIsTheBaseUpToFiftyWords() {
+        XCTAssertEqual(DictationPipeline.cleanupDeadline(words: 0, base: 6), 6)
+        XCTAssertEqual(DictationPipeline.cleanupDeadline(words: 20, base: 6), 6)
+        XCTAssertEqual(DictationPipeline.cleanupDeadline(words: 50, base: 6), 6)
+    }
+
+    func testCleanupDeadlineAddsThirtyMillisecondsPerWordOverFifty() {
+        XCTAssertEqual(DictationPipeline.cleanupDeadline(words: 51, base: 6), 6.03, accuracy: 1e-9)
+        XCTAssertEqual(DictationPipeline.cleanupDeadline(words: 200, base: 6), 10.5, accuracy: 1e-9)
+    }
+
+    func testCleanupDeadlineIsCappedAtTwentySeconds() {
+        XCTAssertEqual(DictationPipeline.cleanupDeadline(words: 1000, base: 6), 20)
+    }
+
+    func testCleanupDeadlineNeverFallsBelowABaseAboveTheCap() {
+        // cleanupTimeout can be imported as any number; the cap must not shorten what the user chose.
+        XCTAssertEqual(DictationPipeline.cleanupDeadline(words: 1000, base: 30), 30)
+        XCTAssertEqual(DictationPipeline.cleanupDeadline(words: 5, base: 30), 30)
+    }
+
+    func testALongSegmentGetsMoreThanTheBaseCleanupTimeout() {
+        let spoken = Array(repeating: "we shipped the build today", count: 24).joined(separator: " ")  // 120 words
+        let cleaner = FakeCleaner(out: spoken.uppercased(), delay: 0.4)
+        let paster = FakePaster()
+        let h = make(
+            stt: FakeStt(text: spoken), cleaner: cleaner, paster: paster, config: PipelineConfig(cleanupTimeout: 0.05))
+        dictateBounded(h)
+        XCTAssertEqual(paster.pasted, [spoken.uppercased()], "a 0.05 s deadline would have pasted the raw text")
+        XCTAssertFalse(h.logs.value.contains { $0.contains("cleanup_skip=timeout") }, "\(h.logs.value)")
+    }
+
+    func testAShortSegmentStillTimesOutAtTheBase() {
+        let paster = FakePaster()
+        let h = make(
+            stt: FakeStt(text: "so um hello there world"), cleaner: FakeCleaner(delay: 0.4), paster: paster,
+            config: PipelineConfig(cleanupTimeout: 0.05))
+        dictateBounded(h)
+        XCTAssertEqual(paster.pasted, ["so um hello there world"])
+        XCTAssertTrue(h.logs.value.contains { $0.contains("cleanup_skip=timeout") }, "\(h.logs.value)")
     }
 }
 
