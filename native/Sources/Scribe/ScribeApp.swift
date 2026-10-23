@@ -157,7 +157,7 @@ final class AppModel: ObservableObject {
             hotkey: settings.hotkey,
             makePipeline: { sinks in
                 let keyPresser = GuardedKeyPresser(
-                    post: postKey,
+                    post: { try postKey($0) },
                     accessibilityGranted: { TCC.accessibilityGranted() },
                     currentFrontmost: frontmostPID)
                 let pipeline = DictationPipeline(
