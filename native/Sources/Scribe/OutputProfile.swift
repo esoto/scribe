@@ -1,12 +1,13 @@
 import Foundation
 
 /// Per-app output rules, keyed by bundle id. Deterministic text tweaks only — no prompt change, so no new warm
-/// prefix and no new eval. A nil `cleanup` leaves the global toggle in charge.
+/// prefix and no new eval. A nil `cleanup` or `voiceCommands` leaves the global switch in charge.
 struct AppProfile: Codable, Equatable, Identifiable {
     var bundleID: String
     /// For the Settings list; a bundle id alone is unreadable.
     var appName: String
     var cleanup: Bool?
+    var voiceCommands: Bool?
     var stripTrailingPeriod = false
     var lowercaseFirst = false
 
@@ -52,6 +53,12 @@ enum OutputProfile {
         profile?.cleanup ?? global
     }
 
+    /// Voice commands and inline breaks for this dictation: the profile's answer when it has one, else the global
+    /// switch. A Terminal wants them off even while everything else keeps them on.
+    static func voiceCommandsEnabled(_ profile: AppProfile?, global: Bool) -> Bool {
+        profile?.voiceCommands ?? global
+    }
+
     /// Whether the cleanup model should be resident at launch: the global toggle, or any app that turns cleanup on.
     /// Otherwise that app's first dictation loads the model inside the cleanup deadline and pastes raw.
     static func warmUpNeeded(global: Bool, profiles: [AppProfile]) -> Bool {
@@ -67,6 +74,7 @@ extension AppProfile {
         bundleID = try c.decode(String.self, forKey: .bundleID)
         appName = try c.decode(String.self, forKey: .appName)
         cleanup = try c.decodeIfPresent(Bool.self, forKey: .cleanup)
+        voiceCommands = try c.decodeIfPresent(Bool.self, forKey: .voiceCommands)
         stripTrailingPeriod = try c.decodeIfPresent(Bool.self, forKey: .stripTrailingPeriod) ?? false
         lowercaseFirst = try c.decodeIfPresent(Bool.self, forKey: .lowercaseFirst) ?? false
     }

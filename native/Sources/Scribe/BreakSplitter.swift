@@ -21,6 +21,7 @@ struct Segment: Equatable {
 /// Splits a transcript at spoken break phrases so each run can be cleaned on its own and the runs joined with
 /// real line breaks — the cleanup model never sees a break phrase or a newline. Whole-token matching only,
 /// folded like `VoiceCommand` (case, accents, punctuation), so "newline" matches and "newlines" does not.
+/// A phrase right after "the words" (`EscapePhrase`) is text: the escape words are dropped and the phrase stays.
 enum BreakSplitter {
     /// Folded token sequences → break. Kept in step with `VoiceCommand`'s table by tests in both directions.
     static let phrases: [[String]: Break] = [
@@ -40,6 +41,7 @@ enum BreakSplitter {
     /// alone beside it, are ASR's guess at a pause rather than text, so the join drops them.
     static func split(_ raw: String) -> [Segment] {
         let (tokens, folded) = tokenize(raw)
+        let escapes = EscapePhrase.resolve(folded: folded, sentenceEnds: sentenceEnds(tokens))
 
         var segments: [Segment] = []
         var run: [String] = []
@@ -57,7 +59,9 @@ enum BreakSplitter {
         var i = 0
         var afterBreak = false
         while i < tokens.count {
-            if let (length, brk) = phrase(in: folded, at: i) {
+            if escapes.dropped.contains(i) {
+                i += 1
+            } else if let (length, brk) = phrase(in: folded, at: i, escaped: escapes.escaped) {
                 close(with: brk)
                 afterBreak = true
                 i += length
@@ -78,11 +82,12 @@ enum BreakSplitter {
     /// The larger break among the phrases in `raw`, nil when there are none. For an utterance made only of break
     /// phrases, where `split` leaves no run to paste but the user still asked for a break.
     static func largestBreak(in raw: String) -> Break? {
-        let folded = tokenize(raw).folded
+        let (tokens, folded) = tokenize(raw)
+        let escaped = EscapePhrase.resolve(folded: folded, sentenceEnds: sentenceEnds(tokens)).escaped
         var largest: Break?
         var i = 0
         while i < folded.count {
-            if let (length, brk) = phrase(in: folded, at: i) {
+            if let (length, brk) = phrase(in: folded, at: i, escaped: escaped) {
                 largest = largest == .paragraph ? .paragraph : brk
                 i += length
             } else {
@@ -97,16 +102,23 @@ enum BreakSplitter {
         pieces.map { $0.text + ($0.breakAfter?.text ?? "") }.joined()
     }
 
+    private static func sentenceEnds(_ tokens: [String]) -> Set<Int> {
+        Set(tokens.indices.filter { tokens[$0].last.map { ".?!".contains($0) } ?? false })
+    }
+
     private static func tokenize(_ raw: String) -> (tokens: [String], folded: [String]) {
         let tokens = raw.split(whereSeparator: { $0.isWhitespace }).map(String.init)
         return (tokens, tokens.map { VoiceCommand.fold($0) })
     }
 
-    /// Longest first, so "salto de linea" does not leave "salto de" behind as text.
-    private static func phrase(in folded: [String], at i: Int) -> (length: Int, brk: Break)? {
+    /// Longest first, so "salto de linea" does not leave "salto de" behind as text. A window that touches an
+    /// escaped word is text, including the tail of an escaped phrase ("line break" inside "new line break").
+    private static func phrase(in folded: [String], at i: Int, escaped: Set<Int>) -> (length: Int, brk: Break)? {
         for length in stride(from: min(longest, folded.count - i), through: 1, by: -1) {
             let window = Array(folded[i..<(i + length)])
-            if !window.contains(""), let brk = phrases[window] { return (length, brk) }
+            if !window.contains(""), escaped.isDisjoint(with: i..<(i + length)), let brk = phrases[window] {
+                return (length, brk)
+            }
         }
         return nil
     }

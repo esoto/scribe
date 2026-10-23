@@ -102,6 +102,81 @@ final class BreakSplitterTests: XCTestCase {
         }
     }
 
+    // MARK: - Escape phrase
+
+    func testAnEscapedPhraseIsTextAndTheEscapeWordsAreDropped() {
+        XCTAssertEqual(BreakSplitter.split("the words new line"), [seg("new line")])
+        XCTAssertEqual(BreakSplitter.split("The words, new paragraph."), [seg("new paragraph.")])
+        XCTAssertEqual(
+            BreakSplitter.split("first point the words new line second point"), [seg("first point new line second point")])
+    }
+
+    func testACommandPhraseInASentenceKeepsItsEscapeWords() {
+        XCTAssertEqual(BreakSplitter.split("type the words enter in the box"), [seg("type the words enter in the box")])
+        XCTAssertEqual(BreakSplitter.split("first the words new line second"), [seg("first new line second")])
+    }
+
+    func testTheSpanishEscapeKeepsTheOriginalAccents() {
+        XCTAssertEqual(BreakSplitter.split("las palabras nueva línea"), [seg("nueva línea")])
+        XCTAssertEqual(BreakSplitter.split("hola las palabras salto de línea adiós"), [seg("hola salto de línea adiós")])
+    }
+
+    func testAnEscapeNotFollowedByAPhraseStaysText() {
+        XCTAssertEqual(BreakSplitter.split("the words matter"), [seg("the words matter")])
+        XCTAssertEqual(BreakSplitter.split("the words"), [seg("the words")])
+        XCTAssertEqual(BreakSplitter.split("one the words two new line three"), [seg("one the words two", .line), seg("three")])
+    }
+
+    func testABreakElsewhereStillSplitsWhenOnlyOneIsEscaped() {
+        XCTAssertEqual(
+            BreakSplitter.split("one two new line the words new line three four"),
+            [seg("one two", .line), seg("new line three four")])
+        XCTAssertEqual(
+            BreakSplitter.split("one the words new line two new paragraph three"),
+            [seg("one new line two", .paragraph), seg("three")])
+    }
+
+    func testAnEscapedPhraseIsNeverMatchedByAShorterOrOverlappingWindow() {
+        // "line break" starts inside the escaped "new line break" and must not split it.
+        XCTAssertEqual(BreakSplitter.split("the words new line break"), [seg("new line break")])
+        XCTAssertEqual(BreakSplitter.split("a the words salto de línea b"), [seg("a salto de línea b")])
+    }
+
+    func testTheEscapeOnlyProtectsThePhraseRightAfterIt() {
+        XCTAssertEqual(BreakSplitter.split("the words new line new line two"), [seg("new line", .line), seg("two")])
+        XCTAssertEqual(BreakSplitter.split("new line the words new line two"), [seg("new line two")])
+    }
+
+    func testAnEscapedPhraseIsNotABreakForLargestBreak() {
+        XCTAssertNil(BreakSplitter.largestBreak(in: "the words new line"))
+        XCTAssertNil(BreakSplitter.largestBreak(in: "las palabras nuevo párrafo"))
+        XCTAssertEqual(BreakSplitter.largestBreak(in: "the words new line new paragraph"), .paragraph)
+        XCTAssertEqual(BreakSplitter.largestBreak(in: "new line the words new paragraph"), .line)
+    }
+
+    func testASentenceEndingInTheEscapeWordsIsNotAnEscape() {
+        // The full stop closes the sentence, so "the words" is text and the break after it still fires.
+        XCTAssertEqual(
+            BreakSplitter.split("I can't find the words. New line. Next one"),
+            [seg("I can't find the words.", .line), seg("Next one")])
+        XCTAssertEqual(
+            BreakSplitter.split("Remember the words? New paragraph. Then go"),
+            [seg("Remember the words?", .paragraph), seg("Then go")])
+        XCTAssertEqual(
+            BreakSplitter.split("Ya veo las palabras! Nueva línea. Sigue"),
+            [seg("Ya veo las palabras!", .line), seg("Sigue")])
+        XCTAssertEqual(BreakSplitter.largestBreak(in: "I can't find the words. New paragraph. Next one"), .paragraph)
+    }
+
+    func testAnEscapeThatOpensTheUtteranceStillWorksAfterASentenceEnd() {
+        XCTAssertEqual(BreakSplitter.split("The words. New line."), [seg("New line.")])
+        XCTAssertNil(BreakSplitter.largestBreak(in: "The words. New line."))
+    }
+
+    func testACommaAfterTheEscapeWordsDoesNotBlockIt() {
+        XCTAssertEqual(BreakSplitter.split("find the words, new line here"), [seg("find new line here")])
+    }
+
     func testJoinUsesTheBreaks() {
         XCTAssertEqual(BreakSplitter.join([("a", .line), ("b", .paragraph), ("c", nil)]), "a\nb\n\nc")
         XCTAssertEqual(BreakSplitter.join([]), "")

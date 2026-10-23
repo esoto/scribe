@@ -1,9 +1,11 @@
 import XCTest
 
 final class OutputProfileTests: XCTestCase {
-    private func profile(cleanup: Bool? = nil, period: Bool = false, lower: Bool = false) -> AppProfile {
+    private func profile(
+        cleanup: Bool? = nil, voiceCommands: Bool? = nil, period: Bool = false, lower: Bool = false
+    ) -> AppProfile {
         AppProfile(bundleID: "com.tinyspeck.slackmacgap", appName: "Slack", cleanup: cleanup,
-                   stripTrailingPeriod: period, lowercaseFirst: lower)
+                   voiceCommands: voiceCommands, stripTrailingPeriod: period, lowercaseFirst: lower)
     }
 
     func testNoProfileLeavesTextAlone() {
@@ -69,6 +71,27 @@ final class OutputProfileTests: XCTestCase {
         XCTAssertTrue(OutputProfile.cleanupEnabled(profile(cleanup: true), global: false))
     }
 
+    func testVoiceCommandsRuleOverridesTheGlobalSwitchOnlyWhenSet() {
+        XCTAssertTrue(OutputProfile.voiceCommandsEnabled(nil, global: true))
+        XCTAssertFalse(OutputProfile.voiceCommandsEnabled(nil, global: false))
+        XCTAssertTrue(OutputProfile.voiceCommandsEnabled(profile(), global: true))
+        XCTAssertFalse(OutputProfile.voiceCommandsEnabled(profile(), global: false))
+        XCTAssertFalse(OutputProfile.voiceCommandsEnabled(profile(voiceCommands: false), global: true))
+        XCTAssertTrue(OutputProfile.voiceCommandsEnabled(profile(voiceCommands: true), global: false))
+        XCTAssertTrue(OutputProfile.voiceCommandsEnabled(profile(voiceCommands: true), global: true))
+        XCTAssertFalse(OutputProfile.voiceCommandsEnabled(profile(voiceCommands: false), global: false))
+    }
+
+    func testTheVoiceCommandsRuleIsIndependentOfTheCleanupRule() {
+        let p = profile(cleanup: false, voiceCommands: true)
+        XCTAssertFalse(OutputProfile.cleanupEnabled(p, global: true))
+        XCTAssertTrue(OutputProfile.voiceCommandsEnabled(p, global: false))
+    }
+
+    func testWarmUpIgnoresTheVoiceCommandsRule() {
+        XCTAssertFalse(OutputProfile.warmUpNeeded(global: false, profiles: [profile(voiceCommands: true)]))
+    }
+
     func testWarmUpAtLaunchFollowsTheToggleOrAnAppThatTurnsCleanupOn() {
         XCTAssertTrue(OutputProfile.warmUpNeeded(global: true, profiles: []))
         XCTAssertFalse(OutputProfile.warmUpNeeded(global: false, profiles: []))
@@ -76,11 +99,11 @@ final class OutputProfileTests: XCTestCase {
         XCTAssertTrue(OutputProfile.warmUpNeeded(global: false, profiles: [profile(cleanup: false), profile(cleanup: true)]))
     }
 
-    func testCleanupRulePickerTagsRoundTrip() {
-        for cleanup in [nil, true, false] as [Bool?] {
-            XCTAssertEqual(cleanupRule(fromTag: cleanupRuleTag(cleanup)), cleanup)
+    func testRulePickerTagsRoundTrip() {
+        for setting in [nil, true, false] as [Bool?] {
+            XCTAssertEqual(rule(fromTag: ruleTag(setting)), setting)
         }
-        XCTAssertEqual(cleanupRuleChoices.map(\.label), ["Default", "On", "Off"])
+        XCTAssertEqual(ruleChoices.map(\.label), ["Default", "On", "Off"])
     }
 
     func testProfileFromABundleReadsIdAndName() {
@@ -168,6 +191,38 @@ final class AppProfileStoreTests: XCTestCase {
         XCTAssertEqual(
             makeStore().profile(for: "a"),
             AppProfile(bundleID: "a", appName: "Slack", cleanup: false, lowercaseFirst: true))
+    }
+
+    func testTheVoiceCommandsRuleSurvivesAReload() {
+        let store = makeStore()
+        store.upsert(AppProfile(bundleID: "a", appName: "Terminal", voiceCommands: false))
+        store.upsert(AppProfile(bundleID: "b", appName: "Notes", voiceCommands: true))
+        store.upsert(AppProfile(bundleID: "c", appName: "Zed"))
+        XCTAssertEqual(store.all.count, 3, "the write has landed before the file is read back")
+
+        let reopened = makeStore()
+        XCTAssertEqual(reopened.profile(for: "a")?.voiceCommands, false)
+        XCTAssertEqual(reopened.profile(for: "b")?.voiceCommands, true)
+        XCTAssertNil(reopened.profile(for: "c")?.voiceCommands)
+    }
+
+    func testTheVoiceCommandsRuleIsReadFromTheFile() throws {
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try Data(#"{"version":1,"profiles":[{"bundleID":"a","appName":"Terminal","voiceCommands":false}]}"#.utf8)
+            .write(to: dir.appendingPathComponent("profiles.json"))
+        XCTAssertEqual(
+            makeStore().profile(for: "a"), AppProfile(bundleID: "a", appName: "Terminal", voiceCommands: false))
+    }
+
+    func testAProfileEncodesAndDecodesWithEveryRule() throws {
+        let full = AppProfile(
+            bundleID: "a", appName: "Slack", cleanup: false, voiceCommands: true, stripTrailingPeriod: true,
+            lowercaseFirst: true)
+        let bare = AppProfile(bundleID: "b", appName: "Zed")
+        for profile in [full, bare] {
+            let data = try JSONEncoder().encode(profile)
+            XCTAssertEqual(try JSONDecoder().decode(AppProfile.self, from: data), profile)
+        }
     }
 
     @MainActor

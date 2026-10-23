@@ -24,6 +24,20 @@ final class VoiceCommandTests: XCTestCase {
         XCTAssertNil(VoiceCommand.match("enter the building"))
     }
 
+    func testAnEscapedUtteranceIsNeverACommand() {
+        XCTAssertNil(VoiceCommand.match("the words enter"))
+        XCTAssertNil(VoiceCommand.match("The words, new line."))
+        XCTAssertNil(VoiceCommand.match("las palabras nueva línea"))
+        XCTAssertNil(VoiceCommand.match("the words scratch that"))
+    }
+
+    func testPhraseTokensAreThePhrasesSplitIntoFoldedWords() {
+        XCTAssertEqual(VoiceCommand.phraseTokens.count, VoiceCommand.phrases.count)
+        XCTAssertTrue(VoiceCommand.phraseTokens.contains(["send", "it"]))
+        XCTAssertTrue(VoiceCommand.phraseTokens.contains(["enter"]))
+        XCTAssertTrue(VoiceCommand.phraseTokens.contains(["salto", "de", "linea"]))
+    }
+
     func testBareSendIsText() {
         // "Send." is a plausible one-word reply, so only "send it" / "send that" are commands.
         XCTAssertNil(VoiceCommand.match("Send."))
