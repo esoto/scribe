@@ -392,8 +392,76 @@ final class PipelineTests: XCTestCase {
         h.pipeline.keyDown()
         h.clock.t += 1.0
         h.pipeline.keyUp()              // job 2 queued behind job 1
+        // The ⋯ arrives with the release, not when job 1 finishes: nothing waits on the job ahead to show it.
+        XCTAssertEqual(h.states.value, [.recording, .recording, .processing])
         runner.drain()
         XCTAssertEqual(h.states.value, [.recording, .recording, .processing, .idle])
+    }
+
+    func testAQueuedReleaseShowsProcessingOnceAndItsStartDoesNotRepeatIt() {
+        let runner = ManualRunner()
+        let h = make(runner: runner.run)
+        dictate(h)                      // nothing ahead: the release emits nothing, as before
+        XCTAssertEqual(h.states.value, [.recording])
+        dictate(h)                      // queued behind job 1
+        XCTAssertEqual(h.states.value, [.recording, .recording, .processing])
+
+        runner.drain()
+
+        XCTAssertEqual(
+            h.states.value.filter { $0 == .processing }.count, 1, "job 2 starting must not emit a second ⋯")
+        XCTAssertEqual(h.states.value, [.recording, .recording, .processing, .idle])
+    }
+
+    func testEachJobQueuedBehindOthersShowsProcessingAtItsRelease() {
+        let runner = ManualRunner()
+        let h = make(runner: runner.run)
+        dictate(h)
+        dictate(h)
+        dictate(h)                      // queued behind jobs 1 and 2
+
+        XCTAssertEqual(h.states.value, [.recording, .recording, .processing, .recording, .processing])
+        runner.drain()
+        XCTAssertEqual(h.states.value, [.recording, .recording, .processing, .recording, .processing, .idle])
+    }
+
+    func testAReleaseAfterTheQueueDrainedEmitsNothingUntilItsJobStarts() {
+        let runner = ManualRunner()
+        let h = make(runner: runner.run)
+        dictate(h)
+        runner.drain()
+        XCTAssertEqual(h.states.value, [.recording, .processing, .idle])
+
+        dictate(h)                      // the queue is empty again, so this is an unqueued hold
+
+        XCTAssertEqual(h.states.value, [.recording, .processing, .idle, .recording])
+        runner.drain()
+        XCTAssertEqual(h.states.value, [.recording, .processing, .idle, .recording, .processing, .idle])
+    }
+
+    func testAReleaseAfterAFailedJobIsUnqueuedAndKeepsTheErrorUntilItStartsRecording() {
+        let runner = ManualRunner()
+        let h = make(stt: FakeStt(err: SttError(message: "boom")), runner: runner.run)
+        dictate(h)
+        runner.drain()
+        XCTAssertEqual(h.states.value, [.recording, .processing, .error])
+
+        dictate(h)
+
+        XCTAssertEqual(h.states.value, [.recording, .processing, .error, .recording])
+    }
+
+    func testAQueuedJobThatGoesStaleStillReleasesTheGlyphItAnnounced() {
+        let runner = ManualRunner()
+        let h = make(runner: runner.run)
+        dictate(h)
+        dictate(h)                      // queued: the ⋯ is already showing
+        h.clock.t += 31
+
+        runner.drain()
+
+        XCTAssertEqual(h.states.value, [.recording, .recording, .processing, .idle])
+        XCTAssertEqual(h.notices.value.count, 2, "both jobs waited past the limit")
     }
 
     func testShortTapDuringProcessingKeepsTheErrorGlyph() {

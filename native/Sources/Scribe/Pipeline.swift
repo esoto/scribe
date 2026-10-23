@@ -116,6 +116,10 @@ final class DictationPipeline {
     private let stateLock = NSLock()
     private var holding = false
     private var latestJob = 0
+    /// Jobs a key-up enqueued that have not finished; a key-up that finds one ahead of it is queued. Under `stateLock`.
+    private var jobsInFlight = 0
+    /// The queued job whose ⋯ was shown at its key-up, so its start does not emit a second one. Under `stateLock`.
+    private var announcedJob = 0
 
     init(
         recorder: RecorderLike,
@@ -208,6 +212,13 @@ final class DictationPipeline {
         let job = stateLock.withLock {
             holding = false
             latestJob += 1
+            // The job ahead stops touching the glyph once this one is the latest, so without this the ● and
+            // "Listening" would stay until it finishes, however long that takes.
+            if jobsInFlight > 0 {
+                announcedJob = latestJob
+                onState(.processing)
+            }
+            jobsInFlight += 1
             return latestJob
         }
         let target = downTarget
@@ -267,6 +278,9 @@ final class DictationPipeline {
         func emit(_ state: PipelineState) {
             stateLock.withLock { if !holding, latestJob == job { onState(state) } }
         }
+        // Declared first so it runs last: every exit below, the early returns included, frees the slot.
+        defer { stateLock.withLock { jobsInFlight -= 1 } }
+        let announced = stateLock.withLock { announcedJob == job }
         let age = clock() - enqueuedAt
         if age > config.queueMaxAge {
             // Pasting a dictation this stale into whatever has focus now is worse than dropping it.
@@ -274,7 +288,7 @@ final class DictationPipeline {
             emit(.idle)
             return
         }
-        emit(.processing)
+        if !announced { emit(.processing) }
         var terminal = false   // .error is terminal: no trailing .idle, so the ⚠ stays visible
         defer { if !terminal { emit(.idle) } }
 
