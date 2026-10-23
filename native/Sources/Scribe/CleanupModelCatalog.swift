@@ -174,7 +174,7 @@ enum CleanupModelCatalog {
     /// Menu status line while a cleanup model downloads/loads.
     static func statusText(label: String, fraction: Double) -> String {
         fraction < 1
-            ? "Downloading \(label)… \(Int((fraction * 100).rounded(.down)))%"
+            ? "Downloading \(label)… \(DownloadStatus.wholePercent(fraction))%"
             : "Loading \(label)…"
     }
 }

@@ -647,6 +647,67 @@ final class CleanupModelControllerTests: XCTestCase {
         XCTAssertNil(c.cleanupModelProgress)
     }
 
+    // MARK: - 7b. download progress publishes once per whole percent
+
+    func testChunksWithinTheSameWholePercentPublishNothingAndACrossingPublishes() async {
+        let c = h.makeController()
+        _ = beginSwitch(c, to: .gemma4)
+        h.relay.report(model: "Gemma 4 E4B", fraction: 0.421)
+        let started = await eventually { c.cleanupModelProgress == 0.421 }
+        XCTAssertTrue(started)
+        let publishes = countPublishes(c)
+
+        // The downloader reports every received chunk of a multi-GB file, and the menu-bar glyph observes this controller.
+        h.relay.report(model: "Gemma 4 E4B", fraction: 0.425)
+        h.relay.report(model: "Gemma 4 E4B", fraction: 0.429)
+        // Queued behind both, so once it lands the two same-percent hops have already run.
+        h.relay.report(model: "Gemma 4 E4B", fraction: 0.431)
+        let crossed = await eventually { c.cleanupModelProgress == 0.431 }
+
+        XCTAssertTrue(crossed)
+        XCTAssertEqual(c.cleanupModelStatus, "Downloading Gemma 4 E4B… 43%")
+        XCTAssertEqual(publishes(), 2, "only the 43% chunk wrote: the status and the fraction")
+    }
+
+    func testCompletionPublishesOnceAndALaterRestartPublishesAgain() async {
+        let c = h.makeController()
+        _ = beginSwitch(c, to: .gemma4)
+        h.relay.report(model: "Gemma 4 E4B", fraction: 0.991)
+        let started = await eventually { c.cleanupModelProgress == 0.991 }
+        XCTAssertTrue(started)
+        let publishes = countPublishes(c)
+
+        h.relay.report(model: "Gemma 4 E4B", fraction: 0.999)
+        h.relay.report(model: "Gemma 4 E4B", fraction: 1)
+        let completed = await eventually { c.cleanupModelProgress == 1 }
+        XCTAssertTrue(completed)
+        XCTAssertEqual(c.cleanupModelStatus, "Loading Gemma 4 E4B…")
+        XCTAssertEqual(publishes(), 2, "0.999 stayed in the 99% bucket; reaching 1 wrote the status and the fraction")
+
+        // A second completion chunk is a repeat; the restart queued behind it proves it was already handled.
+        h.relay.report(model: "Gemma 4 E4B", fraction: 1)
+        h.relay.report(model: "Gemma 4 E4B", fraction: 0)
+        let restarted = await eventually { c.cleanupModelProgress == 0 }
+        XCTAssertTrue(restarted)
+        XCTAssertEqual(c.cleanupModelStatus, "Downloading Gemma 4 E4B… 0%")
+        XCTAssertEqual(publishes(), 4)
+    }
+
+    func testTheFirstChunkUnderOneStillArmsTheCompletionNotice() async {
+        let c = h.makeController()
+        let (task, backend) = beginSwitch(c, to: .gemma4)
+
+        h.relay.report(model: "Gemma 4 E4B", fraction: 0.001)
+        let started = await eventually { c.cleanupModelProgress == 0.001 }
+        XCTAssertTrue(started)
+        XCTAssertEqual(c.cleanupModelStatus, "Downloading Gemma 4 E4B… 0%")
+
+        backend.releasePreload(loaded: true)
+        await task.value
+
+        XCTAssertEqual(h.notifications, ["Gemma 4 E4B is ready."])
+    }
+
     // MARK: - 8. Apple Intelligence lost
 
     private func makeAppleIntelligenceController() -> CleanupModelController {

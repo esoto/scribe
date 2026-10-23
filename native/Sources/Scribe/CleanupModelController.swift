@@ -119,9 +119,12 @@ final class CleanupModelController: ObservableObject {
         progressRelay.set { [weak self] label, fraction in
             Task { @MainActor in
                 guard let self, self.cleanupLoadInFlight else { return }
+                // Before the gate: any chunk under 1 proves something downloaded, however few reach the status line.
+                if fraction < 1 { self.cleanupModelDidDownload = true }
+                // Every received chunk of a multi-GB download lands here, and the menu-bar glyph observes this controller.
+                guard DownloadStatus.wholePercentChanged(from: self.cleanupModelProgress, to: fraction) else { return }
                 self.cleanupModelStatus = CleanupModelCatalog.statusText(label: label, fraction: fraction)
                 self.cleanupModelProgress = fraction
-                if fraction < 1 { self.cleanupModelDidDownload = true }
             }
         }
         lostHandoff.set { [weak self] in

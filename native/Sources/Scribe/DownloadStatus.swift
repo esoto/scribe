@@ -30,4 +30,16 @@ final class DownloadStatus: ObservableObject {
     private static func status(label: String, fraction: Double) -> String? {
         fraction < 1 ? CleanupModelCatalog.statusText(label: label, fraction: fraction) : nil
     }
+
+    /// The one definition of a whole percent, so the status text and every publish gate move together.
+    nonisolated static func wholePercent(_ fraction: Double) -> Int {
+        Int((fraction * 100).rounded(.down))
+    }
+
+    /// Whether a chunk's fraction is worth publishing after `previous` was. Nothing published yet counts as a change,
+    /// and 1 is its own percent, so completion always gets through once.
+    nonisolated static func wholePercentChanged(from previous: Double?, to fraction: Double) -> Bool {
+        guard let previous else { return true }
+        return wholePercent(previous) != wholePercent(fraction)
+    }
 }

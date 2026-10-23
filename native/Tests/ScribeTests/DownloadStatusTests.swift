@@ -129,6 +129,38 @@ final class DownloadStatusTests: XCTestCase {
         XCTAssertEqual(publishes(), 0)
     }
 
+    // MARK: - Whole-percent rule
+
+    func testNothingPublishedYetCountsAsAChange() {
+        XCTAssertTrue(DownloadStatus.wholePercentChanged(from: nil, to: 0.0))
+        XCTAssertTrue(DownloadStatus.wholePercentChanged(from: nil, to: 0.5))
+    }
+
+    func testWithinOneWholePercentIsNotAChange() {
+        XCTAssertFalse(DownloadStatus.wholePercentChanged(from: 0.421, to: 0.429))
+        XCTAssertFalse(DownloadStatus.wholePercentChanged(from: 0.421, to: 0.421))
+    }
+
+    func testCrossingAWholePercentIsAChangeInEitherDirection() {
+        XCTAssertTrue(DownloadStatus.wholePercentChanged(from: 0.429, to: 0.431))
+        XCTAssertTrue(DownloadStatus.wholePercentChanged(from: 0.9, to: 0.1), "a retried download starts over")
+    }
+
+    func testCompletionIsAChangeFromTheLastPercentAndRepeatsAreNot() {
+        XCTAssertTrue(DownloadStatus.wholePercentChanged(from: 0.999, to: 1.0))
+        XCTAssertFalse(DownloadStatus.wholePercentChanged(from: 1.0, to: 1.0))
+    }
+
+    func testTheStatusTextAndTheGateShareOneDefinitionOfAWholePercent() {
+        // Half a percent in, so no value sits on a floating-point boundary.
+        for percent in 0..<100 {
+            let fraction = (Double(percent) + 0.5) / 100
+            XCTAssertEqual(DownloadStatus.wholePercent(fraction), percent)
+            XCTAssertEqual(
+                CleanupModelCatalog.statusText(label: "Model", fraction: fraction), "Downloading Model… \(percent)%")
+        }
+    }
+
     // MARK: - Independence
 
     func testTheTwoDownloadsDoNotTouchEachOther() {
