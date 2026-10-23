@@ -2,7 +2,10 @@ import XCTest
 
 /// REPORT-ONLY (M-3 in the 1.5 plan): cleanup latency as the input grows, for the model named by
 /// `CLEANUP_MODEL` (`make measure-cleanup-latency`). Latch mode makes long utterances normal,
-/// and the golden set only times 10-30 word inputs. Asserts only that the model returned text.
+/// and the golden set only times 10-30 word inputs. The text is the first N words of the en90
+/// script (`tests_models/fixtures/en90.txt`): plain dictation prose, so the model cleans rather
+/// than answers (a 200-word window over the golden pool, which holds an injection case and
+/// questions, made gemma4 return ten words). Asserts only that the model returned text.
 final class CleanupLatencyByLengthTests: XCTestCase {
     private static let lengths = [20, 50, 100, 200]
     private static let runsPerLength = 3
@@ -10,8 +13,10 @@ final class CleanupLatencyByLengthTests: XCTestCase {
     func testCleanupLatencyByInputLength() async throws {
         let backend = try cleanupBackendUnderTest()
         backend.setDictionary(.empty)
-        let pool = try loadGoldenSet("golden.json").cases.flatMap { $0.input.split(whereSeparator: { $0.isWhitespace }) }
-        try XCTSkipIf(pool.isEmpty, "golden.json has no inputs")
+        let script = repoRoot().appendingPathComponent("tests_models/fixtures/en90.txt")
+        let pool = (try? String(contentsOf: script, encoding: .utf8))?.split(whereSeparator: { $0.isWhitespace }) ?? []
+        let longest = Self.lengths.max() ?? 0
+        try XCTSkipIf(pool.count < longest, "tests_models/fixtures/en90.txt is missing or has fewer than \(longest) words")
         let model = cleanupSpecUnderTest().id.rawValue
 
         // Weights and prefix cache first, then one untimed call so the first timed run isn't a cold generation.
@@ -36,8 +41,8 @@ final class CleanupLatencyByLengthTests: XCTestCase {
         }
     }
 
-    /// The golden inputs end to end, wrapping around: they hold fewer than 200 words in all.
+    /// The first `words` words of the script, as one utterance.
     private func input(words: Int, from pool: [Substring]) -> String {
-        (0..<words).map { String(pool[$0 % pool.count]) }.joined(separator: " ")
+        pool.prefix(words).map(String.init).joined(separator: " ")
     }
 }
