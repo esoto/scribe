@@ -86,7 +86,7 @@ private struct GeneralPane: View {
                     Text(mode.displayName).tag(mode)
                 }
             }
-            caption("Latched: double-tap to start, tap to stop, auto-stop after 4 minutes. The mic stays on until you tap — the pill and the orange indicator show it.")
+            caption("Latched: double-tap to start, tap to stop, auto-stop after 4 minutes. The mic stays on until you tap — the orange indicator shows it, and so does the pill when it is on.")
 
             Picker(
                 "Ignore taps shorter than",
@@ -111,7 +111,7 @@ private struct GeneralPane: View {
             Toggle(
                 "Allow scribe:// URLs",
                 isOn: Binding(get: { settings.urlSchemeEnabled }, set: { settings.setURLSchemeEnabled($0) }))
-            caption("Lets Raycast, Stream Deck or a foot pedal open scribe://paste-last. Off by default: while it is on, any app, or a web page you allow, can paste your last dictation into the app that has focus.")
+            caption("Lets Raycast, Stream Deck or a foot pedal open scribe://paste-last or scribe://toggle. Off by default: while it is on, any app, or a web page you allow, can paste your last dictation into the app that has focus, or turn on the microphone and dictate what it hears into that app.")
             Toggle(
                 "Voice commands",
                 isOn: Binding(get: { settings.voiceCommandsEnabled }, set: { settings.setVoiceCommandsEnabled($0) }))
@@ -119,7 +119,7 @@ private struct GeneralPane: View {
             Toggle(
                 "Recording pill",
                 isOn: Binding(get: { settings.hudEnabled }, set: { settings.setHudEnabled($0) }))
-            caption("A small pill above the Dock shows the level while you hold the key, then the result.")
+            caption("A small pill above the Dock shows the level while you record, then the result.")
             Toggle(
                 "Launch at Login",
                 isOn: Binding(get: { model.launchAtLoginEnabled }, set: { model.setLaunchAtLogin($0) }))

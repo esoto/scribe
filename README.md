@@ -65,16 +65,16 @@ Upgrading from a v3 install downloads Ultra on first launch (progress shows in t
 - Hold **Right ⌥** (≥ 0.3 s), speak, release. Text lands in the focused app. With **Hotkey mode** set to "Hold, or double-tap to latch" (Settings › General), a double-tap records hands-free until you tap again (auto-stop at 4 min).
 - Menu bar: ◦ idle · ● recording · ⋯ processing · ⚠ error or a missing
   permission, plus a live status line while recording/transcribing.
-- **Recording pill** (Settings › General, on by default): while you hold
-  the key a pill above the Dock shows the microphone level — five flat
+- **Recording pill** (Settings › General, on by default): while you record
+  a pill above the Dock shows the microphone level — five flat
   bars mean the mic isn't picking you up (dead, muted or wrong device) —
   then "Transcribing…", then "Pasted" or the raw-fallback verdict. It
   shows on every Space and over full-screen apps and never takes focus.
   It appears on the screen where your pointer is, once a hold outlasts the
-  tap threshold, so a brief tap never flashes it.
+  tap threshold, so a brief tap never flashes it. A latched recording (a double-tap or `scribe://toggle`) shows it at once and keeps it up until the recording stops.
 - **Engine** picker: Parakeet (fast, default) ↔ Whisper (better for
   Spanish-heavy dictation; loads on first switch).
-- **Settings…** (⌘,) has three tabs. **General** holds the hotkey, hold delay, sounds, scribe:// URLs, voice commands, the recording pill, Launch at Login, idle unload, and history size. **Audio** picks the microphone and holds the experimental **Enhance Audio** toggle (LocalVQE noise suppression before transcription — off by default because it lowered accuracy on synthetic noise in tests). **Models** downloads, switches, and deletes the cleanup model.
+- **Settings…** (⌘,) has three tabs. **General** holds the hotkey and Hotkey mode, hold delay, sounds, scribe:// URLs, voice commands, the recording pill, Launch at Login, idle unload, and history size. **Audio** picks the microphone and holds the experimental **Enhance Audio** toggle (LocalVQE noise suppression before transcription — off by default because it lowered accuracy on synthetic noise in tests). **Models** downloads, switches, and deletes the cleanup model.
 - **Cleanup (remove fillers)** toggle: off = verbatim transcription pasted raw.
 - **Voice commands** (Settings › General, on by default): say one of these
   as the whole utterance and scribe acts instead of pasting — "enter" /
@@ -91,9 +91,13 @@ Upgrading from a v3 install downloads Ultra on first launch (progress shows in t
   into the app that has focus.
 - **Automation**: with **Allow scribe:// URLs** on (Settings › General, off
   by default), `open -g scribe://paste-last` pastes the last dictation into
-  the app that has focus (`-g` keeps that app in front). No parameters are
-  accepted, so a URL can never carry text into scribe. While it is on, any
-  app, or a web page you allow, can paste your last dictation the same way.
+  the app that has focus (`-g` keeps that app in front), and
+  `open -g scribe://toggle` starts a hands-free recording or stops the one in
+  progress, in either Hotkey mode (a tap of the hotkey stops it too). No
+  parameters are accepted, so a URL can never carry text into scribe. While it
+  is on, any app, or a web page you allow, can paste your last dictation the
+  same way, or turn on the microphone and dictate what it hears into the app
+  that has focus.
 - **Stats** (Settings › Stats): dictations and words today / 7 days / 30
   days, median and slowest-5% transcription and cleanup times, and how
   often cleanup came back raw — that last number tells you whether the
@@ -115,8 +119,9 @@ Upgrading from a v3 install downloads Ultra on first launch (progress shows in t
 - If cleanup ever misbehaves (timeout, length/language sanity gates), the
   raw transcript is pasted instead — you never lose words.
 - The microphone is captured **only while recording** — while the key is held,
-  or, if you latched, until you tap again — and the orange mic indicator turns
-  off at once.
+  or, after a double-tap or `scribe://toggle`, until a tap, another toggle or
+  the 4-minute cap stops it — and the orange mic indicator turns off the
+  moment it stops.
 
 ## Cleanup models
 
@@ -236,7 +241,7 @@ Most of these have a control in **Settings…** (⌘,), the menu, or the Diction
 | `engine` | `parakeet` | `parakeet` \| `whisper` (menu) |
 | `cleanupEnabled` | true | Gemma cleanup pass on/off (menu) |
 | `minWords` | 4 | utterances shorter than this skip cleanup |
-| `cleanupTimeout` | 6.0 | seconds before falling back to raw text, plus 0.03 s per word over 50 (capped at 20 s) so long latched dictations are not cut short |
+| `cleanupTimeout` | 6.0 | seconds before falling back to raw text; each part of a dictation gets 0.03 s more per word over 50, up to 20 s (a value set above 20 is used as is), so long latched dictations are not cut short |
 | `restoreDelay` | 2.0 | seconds before restoring the prior clipboard (Settings) |
 | `energyGate` | 0.0005 | silence gate (anti-hallucination); speech ~0.001+ |
 | `sounds` | true | start/error sounds (Settings) |
@@ -281,7 +286,7 @@ outside scribe's process. scribe manages them on demand:
 - **Nothing types, but the icon reacts** → Accessibility grant missing.
   scribe copies the text instead and notifies "press ⌘V". It does the same
   when you switch apps while it's transcribing.
-- **Recording did not stop** → in latch mode a single tap stops it; after 4 minutes scribe stops by itself and says so.
+- **Recording did not stop** → a latched recording (a double-tap, or `scribe://toggle` in either Hotkey mode) stops at a single tap of the hotkey; after 4 minutes scribe stops it by itself and says so.
 - **The menu bar shows ⚠ while idle** → a permission was revoked. Open
   Setup / Doctor; the highlighted row is the one to fix.
 - **Hotkey does nothing** → Input Monitoring grant missing (common after

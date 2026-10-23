@@ -1,7 +1,7 @@
 import Foundation
 
-/// How the hotkey starts and stops a dictation. Hold is the default and what the privacy copy promises
-/// ("the mic is captured only while the key is held"); latching is opt-in and says so in Settings.
+/// How the hotkey starts and stops a dictation. Hold is the default; latching is opt-in and says so in Settings.
+/// The privacy copy promises the mic only while recording, so every way a recording starts has a way it ends.
 enum HotkeyMode: String, CaseIterable {
     case hold = "hold"
     case holdOrLatch = "hold_or_latch"

@@ -33,6 +33,8 @@ final class URLCommandTests: XCTestCase {
     func testOutcomeRunsOnlyWhenEnabled() {
         XCTAssertEqual(URLCommand.outcome(for: url("scribe://paste-last"), enabled: true), .run(.pasteLast))
         XCTAssertEqual(URLCommand.outcome(for: url("scribe://paste-last"), enabled: false), .refusedOff)
+        XCTAssertEqual(URLCommand.outcome(for: url("scribe://toggle"), enabled: true), .run(.toggle))
+        XCTAssertEqual(URLCommand.outcome(for: url("scribe://toggle"), enabled: false), .refusedOff)
         // A URL that isn't ours is ignored whether or not the scheme is on.
         XCTAssertEqual(URLCommand.outcome(for: url("scribe://nope"), enabled: true), .ignored)
         XCTAssertEqual(URLCommand.outcome(for: url("scribe://nope"), enabled: false), .ignored)
