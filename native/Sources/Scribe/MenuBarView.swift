@@ -92,7 +92,9 @@ func cleanupModelLabel(_ activeCleanupModel: String) -> String {
 }
 
 struct MenuBarView: View {
+    /// For `cleanupEnabled`, the history and the actions; the download statuses come from `downloads`.
     @ObservedObject var model: AppModel
+    @ObservedObject var downloads: DownloadStatus
     @ObservedObject var permissions: PermissionsModel
     @ObservedObject var dictation: DictationCoordinator
     @ObservedObject var cleanupModels: CleanupModelController
@@ -101,6 +103,7 @@ struct MenuBarView: View {
 
     init(model: AppModel) {
         self.model = model
+        self.downloads = model.downloads
         self.permissions = model.permissions
         self.dictation = model.dictation
         self.cleanupModels = model.cleanupModels
@@ -109,7 +112,7 @@ struct MenuBarView: View {
 
     private var statusText: String? {
         menuStatusText(
-            dictation.state, sttDownload: model.sttDownloadStatus, enhancerDownload: model.enhancerDownloadStatus,
+            dictation.state, sttDownload: downloads.sttStatus, enhancerDownload: downloads.enhancerStatus,
             engineStatus: engineController.engineStatus, hint: dictation.hint,
             cleanupStatus: cleanupModels.cleanupModelStatus,
             attention: attentionText(for: permissions.grants))

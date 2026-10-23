@@ -58,8 +58,10 @@ enum TCC {
 /// Doctor rows (hotkey, microphone, last problem). Polls the probes every 2 s while open.
 struct OnboardingWindow: View {
     @ObservedObject var permissions: PermissionsModel
-    /// Read for `sttDownloadStatus` and `startupPreloadInFlight`.
+    /// Read for `startupPreloadInFlight` and the microphone Doctor row.
     @ObservedObject var model: AppModel
+    /// Read for `sttStatus`.
+    @ObservedObject var downloads: DownloadStatus
     @ObservedObject var cleanupModels: CleanupModelController
     /// Read for the held-key state and the last notice.
     @ObservedObject var dictation: DictationCoordinator
@@ -76,7 +78,7 @@ struct OnboardingWindow: View {
 
     private var models: (detail: String, ready: Bool) {
         OnboardingState.modelsRow(
-            sttDownload: model.sttDownloadStatus, cleanupStatus: cleanupModels.cleanupModelStatus,
+            sttDownload: downloads.sttStatus, cleanupStatus: cleanupModels.cleanupModelStatus,
             loading: model.startupPreloadInFlight || cleanupModels.pendingCleanupModel != nil)
     }
 

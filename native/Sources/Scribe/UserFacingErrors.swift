@@ -4,6 +4,10 @@ import Foundation
 enum UserFacingError {
     static func transcriptionNotice(engineMessage: String) -> String {
         let m = engineMessage.lowercased()
+        // Checked first: a download that runs out of disk would otherwise read as a network failure ("try again online").
+        if m.contains("no space left on device") || m.contains("enospc") || m.contains("nscocoaerrordomain code=640") {
+            return "Not enough free disk space for the speech model — free some space and relaunch; audio saved"
+        }
         if m.contains("offline") || m.contains("network") || m.contains("download") || m.contains("urlerror")
             || m.contains("internet")
         {
