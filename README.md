@@ -81,7 +81,7 @@ Upgrading from a v3 install downloads Ultra on first launch (progress shows in t
   "send it" presses Return; "new line" and "new paragraph" insert breaks;
   "scratch that" / "undo" sends ⌘Z (best-effort: terminals ignore it). Return, ⌘V and ⌘Z work with your keyboard layout.
   Spanish: "enviar" / "envíalo", "nueva línea", "nuevo párrafo", "borra
-  eso" / "deshacer". Also accepted: "press enter", "send that", "newline", "line break", "new line break", "new lines", "undo that"; "mándalo", "presiona enter", "línea nueva", "salto de línea", "párrafo nuevo", "deshace eso". If the recognizer keeps hearing a command wrong, add a Dictionary pair for what it hears (for example "neal lines" → "new line") — pairs apply before commands are matched. The break phrases also work inside a sentence: "first point new line second point" pastes as two lines. Each part is cleaned on its own, so a dictation with breaks takes a little longer. They break wherever they are said, so "a new line of products" or "una nueva línea de crédito" cannot be dictated as text: turn voice commands off for that. The other commands count only as the entire utterance, so "please send it to the team" is still text. Spoken punctuation ("comma", "period")
+  eso" / "deshacer". Also accepted: "press enter", "send that", "newline", "line break", "new line break", "new lines", "undo that"; "mándalo", "presiona enter", "línea nueva", "salto de línea", "párrafo nuevo", "deshace eso". If the recognizer keeps hearing a command wrong, add a Dictionary pair for what it hears (for example "neal lines" → "new line") — pairs apply before commands are matched. The break phrases also work inside a sentence: "first point new line second point" pastes as two lines. Each part is cleaned on its own, so a dictation with breaks takes a little longer. They break wherever they are said. The other commands count only as the entire utterance, so "please send it to the team" is still text. To dictate any of these phrases as words, say "the words" first ("the words new line"; Spanish "las palabras"). Settings › Apps can turn voice commands off for one app. Spoken punctuation ("comma", "period")
   is not a command: transcription and cleanup already punctuate. Return
   goes to whatever has focus — in a terminal it runs the line, and a pasted break can too in a shell without bracketed paste.
 - **History**: the last 10 dictations by default (Settings › General), in
@@ -101,7 +101,8 @@ Upgrading from a v3 install downloads Ultra on first launch (progress shows in t
   timings only, in `~/Library/Application Support/scribe/stats.json`; no
   text, no app names. **Reset Stats** empties it.
 - **Apps** (Settings › Apps): rules for the app you dictate into — cleanup
-  on, off or as the menu toggle says; drop the trailing period (an
+  on, off or as the menu toggle says; voice commands on, off or as
+  Settings › General says; drop the trailing period (an
   ellipsis, "?", "!" and the last period of "p.m." or "U.S." stay);
   lowercase the first letter, names included ("I", "OK" and
   "McDonald" stay as they are). Add an app from /Applications.
