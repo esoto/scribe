@@ -20,9 +20,14 @@ final class URLCommandTests: XCTestCase {
 
     func testRefusesOtherSchemesAndUnknownVerbs() {
         XCTAssertNil(URLCommand.parse(url("https://paste-last")))
-        XCTAssertNil(URLCommand.parse(url("scribe://toggle")))
+        XCTAssertNil(URLCommand.parse(url("scribe://latch")))
         XCTAssertNil(URLCommand.parse(url("scribe://")))
         XCTAssertNil(URLCommand.parse(url("scribe:")))
+    }
+
+    func testParsesToggle() {
+        XCTAssertEqual(URLCommand.parse(url("scribe://toggle")), .toggle)
+        XCTAssertEqual(URLCommand.parse(url("scribe:toggle")), .toggle)
     }
 
     func testOutcomeRunsOnlyWhenEnabled() {

@@ -78,6 +78,15 @@ private struct GeneralPane: View {
                 }
             }
             caption("Right ⌥ is rarely used alone and leaves Right ⌘ free.")
+            Picker(
+                "Hotkey mode",
+                selection: Binding(get: { settings.hotkeyMode }, set: { settings.setHotkeyMode($0) })
+            ) {
+                ForEach(HotkeyMode.allCases, id: \.self) { mode in
+                    Text(mode.displayName).tag(mode)
+                }
+            }
+            caption("Latched: double-tap to start, tap to stop, auto-stop after 4 minutes. The mic stays on until you tap — the pill and the orange indicator show it.")
 
             Picker(
                 "Ignore taps shorter than",

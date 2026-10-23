@@ -62,7 +62,7 @@ Upgrading from a v3 install downloads Ultra on first launch (progress shows in t
 
 ## Usage
 
-- Hold **Right ⌥** (≥ 0.3 s), speak, release. Text lands in the focused app.
+- Hold **Right ⌥** (≥ 0.3 s), speak, release. Text lands in the focused app. With **Hotkey mode** set to "Hold, or double-tap to latch" (Settings › General), a double-tap records hands-free until you tap again (auto-stop at 4 min).
 - Menu bar: ◦ idle · ● recording · ⋯ processing · ⚠ error or a missing
   permission, plus a live status line while recording/transcribing.
 - **Recording pill** (Settings › General, on by default): while you hold
@@ -114,8 +114,9 @@ Upgrading from a v3 install downloads Ultra on first launch (progress shows in t
   so names and jargon come out spelled right — see below.
 - If cleanup ever misbehaves (timeout, length/language sanity gates), the
   raw transcript is pasted instead — you never lose words.
-- The microphone is captured **only while the key is held** — the orange
-  mic indicator turns off at key-up.
+- The microphone is captured **only while recording** — while the key is held,
+  or, if you latched, until you tap again — and the orange mic indicator turns
+  off at once.
 
 ## Cleanup models
 
@@ -246,6 +247,7 @@ Most of these have a control in **Settings…** (⌘,), the menu, or the Diction
 | `cleanupModelPath` | _(unset)_ | local MLX model folder to use for cleanup instead of stock Gemma; when set, overrides `cleanupModel` and disables switching in **Settings › Models** |
 | `vocabularyBiasingEnabled` | false | acoustic vocabulary biasing for Parakeet (experimental) (Dictionary window) |
 | `enhanceAudioEnabled` | false | LocalVQE noise suppression before transcription — experimental (Settings › Audio) |
+| `hotkeyMode` | `hold` | `hold` \| `hold_or_latch` — double-tap to latch a recording (Settings) |
 | `urlSchemeEnabled` | false | allow `scribe://` URLs from other apps (Settings) |
 | `voiceCommandsEnabled` | true | voice commands ("enter", "new line", …), including breaks inside a sentence — see Usage (Settings) |
 | `hudEnabled` | true | the recording pill above the Dock (Settings) |
@@ -279,6 +281,7 @@ outside scribe's process. scribe manages them on demand:
 - **Nothing types, but the icon reacts** → Accessibility grant missing.
   scribe copies the text instead and notifies "press ⌘V". It does the same
   when you switch apps while it's transcribing.
+- **Recording did not stop** → in latch mode a single tap stops it; after 4 minutes scribe stops by itself and says so.
 - **The menu bar shows ⚠ while idle** → a permission was revoked. Open
   Setup / Doctor; the highlighted row is the one to fix.
 - **Hotkey does nothing** → Input Monitoring grant missing (common after

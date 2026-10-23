@@ -422,6 +422,9 @@ final class AppModel: ObservableObject {
         switch URLCommand.outcome(for: url, enabled: settings.urlSchemeEnabled) {
         case .run(.pasteLast):
             pasteLastDictation()
+        case .run(.toggle):
+            // Latch routing lands with the coordinator in C5-S; until then the verb is accepted and does nothing.
+            break
         case .refusedOff:
             // A looping opener would otherwise stack one banner per open.
             let now = Date()
