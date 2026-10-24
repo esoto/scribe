@@ -1,3 +1,4 @@
+import CoreGraphics
 import XCTest
 
 final class KeyStateMachineTests: XCTestCase {
@@ -27,7 +28,7 @@ final class KeyStateMachineTests: XCTestCase {
 
     func testRightCommandDownUp() {
         let m = KeyStateMachine(key: .rightCommand)
-        XCTAssertEqual(m.handle(eventType: 12, keycode: 54, flags: cmd), .down)
+        XCTAssertEqual(m.handle(eventType: 12, keycode: 54, flags: cmd), .down(chord: false))
         XCTAssertEqual(m.handle(eventType: 12, keycode: 54, flags: 0), .up)
     }
 
@@ -39,7 +40,7 @@ final class KeyStateMachineTests: XCTestCase {
 
     func testDuplicateFlagsEventsIgnored() {
         let m = KeyStateMachine(key: .rightCommand)
-        XCTAssertEqual(m.handle(eventType: 12, keycode: 54, flags: cmd), .down)
+        XCTAssertEqual(m.handle(eventType: 12, keycode: 54, flags: cmd), .down(chord: false))
         XCTAssertNil(m.handle(eventType: 12, keycode: 54, flags: cmd))
         XCTAssertEqual(m.handle(eventType: 12, keycode: 54, flags: 0), .up)
         XCTAssertNil(m.handle(eventType: 12, keycode: 54, flags: 0))
@@ -47,14 +48,14 @@ final class KeyStateMachineTests: XCTestCase {
 
     func testF13UsesKeyDownKeyUp() {
         let m = KeyStateMachine(key: .f13)
-        XCTAssertEqual(m.handle(eventType: 10, keycode: 105, flags: 0), .down)
+        XCTAssertEqual(m.handle(eventType: 10, keycode: 105, flags: 0), .down(chord: false))
         XCTAssertEqual(m.handle(eventType: 11, keycode: 105, flags: 0), .up)
         XCTAssertNil(m.handle(eventType: 12, keycode: 105, flags: 0))
     }
 
     func testRightOption() {
         let m = KeyStateMachine(key: .rightOption)
-        XCTAssertEqual(m.handle(eventType: 12, keycode: 61, flags: opt), .down)
+        XCTAssertEqual(m.handle(eventType: 12, keycode: 61, flags: opt), .down(chord: false))
         XCTAssertEqual(m.handle(eventType: 12, keycode: 61, flags: 0), .up)
     }
 
@@ -67,14 +68,14 @@ final class KeyStateMachineTests: XCTestCase {
         let m = KeyStateMachine(key: .rightOption)
         // Real flags from scribe.log: Right ⌥ down = 0x80140. With Left ⌥ still held, the release
         // event keeps the generic 0x80000 bit — only the device bit 0x40 drops.
-        XCTAssertEqual(m.handle(eventType: 12, keycode: 61, flags: 0x80140), .down)
+        XCTAssertEqual(m.handle(eventType: 12, keycode: 61, flags: 0x80140), .down(chord: false))
         XCTAssertEqual(m.handle(eventType: 12, keycode: 61, flags: genericOpt | leftOpt | 0x100), .up)
     }
 
     func testRightCommandReleaseWhileLeftCommandHeld() {
         let m = KeyStateMachine(key: .rightCommand)
         // Real flags from scribe.log: Right ⌘ down = 0x100110; released while Left ⌘ held = 0x100108.
-        XCTAssertEqual(m.handle(eventType: 12, keycode: 54, flags: 0x100110), .down)
+        XCTAssertEqual(m.handle(eventType: 12, keycode: 54, flags: 0x100110), .down(chord: false))
         XCTAssertEqual(m.handle(eventType: 12, keycode: 54, flags: 0x100108), .up)
     }
 
@@ -86,9 +87,40 @@ final class KeyStateMachineTests: XCTestCase {
     func testResetReportsAndClearsHeldKey() {
         let m = KeyStateMachine(key: .rightOption)
         XCTAssertFalse(m.reset())
-        XCTAssertEqual(m.handle(eventType: 12, keycode: 61, flags: opt), .down)
+        XCTAssertEqual(m.handle(eventType: 12, keycode: 61, flags: opt), .down(chord: false))
         XCTAssertTrue(m.reset())
         XCTAssertNil(m.handle(eventType: 12, keycode: 61, flags: 0))
-        XCTAssertEqual(m.handle(eventType: 12, keycode: 61, flags: opt), .down)
+        XCTAssertEqual(m.handle(eventType: 12, keycode: 61, flags: opt), .down(chord: false))
+    }
+
+    func testShiftHeldAtKeyDownReportsAChord() {
+        let m = KeyStateMachine(key: .rightOption)
+        // flagsChanged for keycode 61 with Right ⌥ (0x40) and ⇧ (0x20000 generic, 0x2 left device bit) set.
+        XCTAssertEqual(m.handle(eventType: 12, keycode: 61, flags: 0x40 | 0x20000 | 0x2 | 0x80000), .down(chord: true))
+        XCTAssertEqual(m.handle(eventType: 12, keycode: 61, flags: 0x20000 | 0x2), .up)
+    }
+
+    func testPlainPressReportsNoChord() {
+        let m = KeyStateMachine(key: .rightOption)
+        XCTAssertEqual(m.handle(eventType: 12, keycode: 61, flags: 0x40 | 0x80000), .down(chord: false))
+    }
+
+    func testShiftPressedAfterTheKeyIsNotAChord() {
+        let m = KeyStateMachine(key: .rightOption)
+        XCTAssertEqual(m.handle(eventType: 12, keycode: 61, flags: 0x40 | 0x80000), .down(chord: false))
+        // The later Shift press arrives with Shift's own keycode and is dropped, as every other key is.
+        XCTAssertNil(m.handle(eventType: 12, keycode: 56, flags: 0x40 | 0x80000 | 0x20000 | 0x2))
+    }
+
+    func testTheShiftBitIsCoreGraphicsOwnShiftMask() {
+        let m = KeyStateMachine(key: .rightOption)
+        XCTAssertEqual(
+            m.handle(eventType: 12, keycode: 61, flags: 0x40 | CGEventFlags.maskShift.rawValue), .down(chord: true))
+    }
+
+    func testF13WithShiftIsAChord() {
+        let m = KeyStateMachine(key: .f13)
+        XCTAssertEqual(m.handle(eventType: 10, keycode: 105, flags: 0x20000), .down(chord: true))
+        XCTAssertEqual(m.handle(eventType: 11, keycode: 105, flags: 0), .up)
     }
 }
