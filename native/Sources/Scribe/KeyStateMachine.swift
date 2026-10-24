@@ -34,10 +34,14 @@ enum HotKey: String, CaseIterable {
     }
 }
 
-enum KeyAction {
-    case down
+enum KeyAction: Equatable {
+    /// `chord`: ⇧ was already down when the hotkey went down — read from the hotkey's own event, so the tap never
+    /// has to watch Shift's keycodes. Edits use it; a Shift pressed after the key is a plain hold.
+    case down(chord: Bool)
     case up
 }
+
+private let shiftFlag: UInt64 = 0x20000
 
 private let keyDownEventType = 10
 private let keyUpEventType = 11
@@ -70,7 +74,7 @@ final class KeyStateMachine {
 
         if pressed && !isDown {
             isDown = true
-            return .down
+            return .down(chord: (flags & shiftFlag) != 0)
         }
         if !pressed && isDown {
             isDown = false
