@@ -105,6 +105,12 @@ final class KeyStateMachineTests: XCTestCase {
         XCTAssertEqual(m.handle(eventType: 12, keycode: 61, flags: 0x40 | 0x80000), .down(chord: false))
     }
 
+    func testCapsLockIsNotAChord() {
+        // Caps Lock is the adjacent 0x10000 bit; only Shift (0x20000) makes a chord.
+        let m = KeyStateMachine(key: .rightOption)
+        XCTAssertEqual(m.handle(eventType: 12, keycode: 61, flags: 0x40 | 0x80000 | 0x10000), .down(chord: false))
+    }
+
     func testShiftPressedAfterTheKeyIsNotAChord() {
         let m = KeyStateMachine(key: .rightOption)
         XCTAssertEqual(m.handle(eventType: 12, keycode: 61, flags: 0x40 | 0x80000), .down(chord: false))
