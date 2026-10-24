@@ -334,6 +334,18 @@ final class DictationCoordinatorTests: XCTestCase {
         XCTAssertTrue(hidden)
     }
 
+    func testAQueuedJobsStartTakesThePillBackFromTheVerdictAhead() {
+        let c = make()
+        c.applyState(.recording)
+        c.applyState(.processing)       // the queued release
+        c.playPasteCue()                // the job ahead pasted; its own .idle is suppressed
+        XCTAssertEqual(hud.phase, .result("Pasted"))
+
+        c.applyState(.processing)       // the queued job starts
+
+        XCTAssertEqual(hud.phase, .processing)
+    }
+
     func testPillShowsTheRawVerdict() {
         let c = make()
 

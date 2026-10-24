@@ -205,8 +205,8 @@ func glyphAccessibilityValue(
     case .error: return "error"
     case .idle:
         if needsAttention { return "needs attention" }
-        if let progress, progress < 1 { return "downloading, \(Int((progress * 100).rounded(.down))) percent" }
-        if let sttProgress, sttProgress < 1 { return "downloading, \(Int((sttProgress * 100).rounded(.down))) percent" }
+        if let progress, progress < 1 { return "downloading, \(DownloadStatus.wholePercent(progress)) percent" }
+        if let sttProgress, sttProgress < 1 { return "downloading, \(DownloadStatus.wholePercent(sttProgress)) percent" }
         return "idle"
     }
 }

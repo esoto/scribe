@@ -18,8 +18,8 @@ func glyphFor(_ state: PipelineState) -> String {
 func menuBarGlyph(_ state: PipelineState, progress: Double?, sttProgress: Double? = nil, needsAttention: Bool) -> String {
     guard state == .idle else { return glyphFor(state) }
     if needsAttention { return glyphFor(.error) }
-    if let progress, progress < 1 { return "\(Int((progress * 100).rounded(.down)))%" }
-    if let sttProgress, sttProgress < 1 { return "\(Int((sttProgress * 100).rounded(.down)))%" }
+    if let progress, progress < 1 { return "\(DownloadStatus.wholePercent(progress))%" }
+    if let sttProgress, sttProgress < 1 { return "\(DownloadStatus.wholePercent(sttProgress))%" }
     return glyphFor(state)
 }
 

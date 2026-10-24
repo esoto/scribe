@@ -45,4 +45,27 @@ final class GatesTests: XCTestCase {
     func testLanguageConsistentNeutralPasses() {
         XCTAssertTrue(Gates.languageConsistent(raw: "ok deploy prod 123", cleaned: "Ok, deploy prod 123."))
     }
+    func testLangScoreCountsStopwordsThatCarryPunctuation() {
+        XCTAssertEqual(Gates.langScore("The, dog."), 1)
+        XCTAssertEqual(Gates.langScore("Creo que."), -1)
+        XCTAssertEqual(Gates.langScore("¿Es esto, eso?"), -3, "inverted punctuation hides nothing either")
+        XCTAssertEqual(Gates.langScore("Yes, we should, they would."), 4)
+        XCTAssertEqual(Gates.langScore("Está, según."), -2, "accented letters are letters")
+    }
+    func testLanguageConsistentDetectsTranslationOfPunctuatedText() {
+        XCTAssertFalse(Gates.languageConsistent(
+            raw: "Creo que el reporte es para el lunes.", cleaned: "I think the report is for Monday."))
+        // Every stopword carries punctuation, so a whitespace split saw none of them and both sides scored 0.
+        XCTAssertFalse(Gates.languageConsistent(
+            raw: "Que, se, eso, es. Yo, ellos.", cleaned: "It is, we do, they would."))
+    }
+    func testLanguageConsistentPunctuatedSameLanguagePasses() {
+        XCTAssertTrue(Gates.languageConsistent(
+            raw: "so um, move the, meeting to friday.", cleaned: "Move the meeting to Friday."))
+        XCTAssertTrue(Gates.languageConsistent(
+            raw: "pues, el, código está listo, según el equipo.", cleaned: "El código está listo, según el equipo."))
+    }
+    func testLanguageConsistentPunctuatedNeutralPasses() {
+        XCTAssertTrue(Gates.languageConsistent(raw: "ok, deploy, prod.", cleaned: "Ok. Deploy prod."))
+    }
 }
