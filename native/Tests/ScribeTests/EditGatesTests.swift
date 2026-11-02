@@ -184,4 +184,21 @@ final class EditGatesTests: XCTestCase {
     func testListNormalisationSplitsOnCRLFToo() {
         XCTAssertEqual(EditGates.normalize("- one\r\n- two\r\n\r\n\r\n- three\r\n", verb: .list), "- one\n- two\n\n- three")
     }
+
+    func testToEnglishResultMustBeEnglish() {
+        let es = "El informe sale el martes y Marcos lo manda al equipo después de la reunión de las 3 pm."
+        XCTAssertEqual(EditGates.accept(verb: .toEnglish, selection: es, result: es), .rejected(.language))
+    }
+
+    func testATranslationMayNotInventANumber() {
+        let en = "The report is due Tuesday, and Marcos will send it to the team after the 3 pm meeting."
+        let es = "El informe se entrega el martes y Marcos lo enviará al equipo después de la reunión de las 4 pm."
+        XCTAssertEqual(EditGates.accept(verb: .toSpanish, selection: en, result: es), .rejected(.newFacts))
+    }
+
+    func testAStemExcusesOnlyAShortTailAfterTheApostrophe() {
+        // A three-letter tail is not a contraction, so "O'Bri" is a new name even with "o" in the selection.
+        let es = "O sea, el informe sale el martes."
+        XCTAssertEqual(EditGates.accept(verb: .formal, selection: es, result: "O sea, el informe de O'Bri sale el martes."), .rejected(.newFacts))
+    }
 }
