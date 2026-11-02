@@ -50,8 +50,18 @@ enum EditVerb: String, CaseIterable, Equatable {
     /// Lists and translations can legitimately grow; the rest should not.
     var maxTokensFactor: Double { isTranslation || self == .list ? 2.0 : 1.5 }
 
-    /// What scribe.log records; never the utterance.
-    var logName: String { rawValue }
+    /// What scribe.log records; never the utterance. snake_case like VoiceCommand.logName so log greps do not mix styles.
+    var logName: String {
+        switch self {
+        case .shorter: return "shorter"
+        case .fixGrammar: return "fix_grammar"
+        case .formal: return "formal"
+        case .casual: return "casual"
+        case .list: return "list"
+        case .toSpanish: return "to_spanish"
+        case .toEnglish: return "to_english"
+        }
+    }
 
     /// Folded (lowercase, no accents, no punctuation) phrases, EN and ES side by side. Whole utterance only.
     static let phrases: [String: EditVerb] = [

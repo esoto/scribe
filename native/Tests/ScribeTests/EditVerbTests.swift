@@ -28,9 +28,7 @@ final class EditVerbTests: XCTestCase {
         XCTAssertNil(EditVerb.match(""))
     }
 
-    func testDisplayNamesAndFlags() {
-        XCTAssertEqual(EditVerb.list.displayName, "List")
-        XCTAssertEqual(EditVerb.toSpanish.displayName, "To Spanish")
+    func testFlagsAndCaseCount() {
         XCTAssertTrue(EditVerb.list.keepsNewlines)
         XCTAssertFalse(EditVerb.formal.keepsNewlines)
         XCTAssertTrue(EditVerb.toEnglish.isTranslation)
@@ -38,12 +36,42 @@ final class EditVerbTests: XCTestCase {
         XCTAssertEqual(EditVerb.allCases.count, 7)
     }
 
-    func testLengthBandsAndTokenFactors() {
-        XCTAssertEqual(EditVerb.shorter.lengthBand.low, 0.3); XCTAssertEqual(EditVerb.shorter.lengthBand.high, 0.9)
-        XCTAssertEqual(EditVerb.fixGrammar.lengthBand.low, 0.8); XCTAssertEqual(EditVerb.fixGrammar.lengthBand.high, 1.25)
-        XCTAssertEqual(EditVerb.toEnglish.lengthBand.high, 1.3)
+    func testEveryLengthBandBoundIsPinned() {
+        let bands: [(EditVerb, Double, Double)] = [
+            (.shorter, 0.3, 0.9), (.fixGrammar, 0.8, 1.25), (.formal, 0.7, 1.4), (.casual, 0.7, 1.4),
+            (.list, 0.6, 1.6), (.toSpanish, 0.8, 1.6), (.toEnglish, 0.6, 1.3),
+        ]
+        for (verb, low, high) in bands {
+            XCTAssertEqual(verb.lengthBand.low, low, "\(verb) low")
+            XCTAssertEqual(verb.lengthBand.high, high, "\(verb) high")
+        }
+    }
+
+    func testTokenFactors() {
         XCTAssertEqual(EditVerb.list.maxTokensFactor, 2.0)
         XCTAssertEqual(EditVerb.formal.maxTokensFactor, 1.5)
+    }
+
+    func testEveryDisplayNameIsThePillCopy() {
+        let names: [(EditVerb, String)] = [
+            (.shorter, "Shorter"), (.fixGrammar, "Fix grammar"), (.formal, "Formal"), (.casual, "Casual"),
+            (.list, "List"), (.toSpanish, "To Spanish"), (.toEnglish, "To English"),
+        ]
+        for (verb, name) in names { XCTAssertEqual(verb.displayName, name, "\(verb)") }
+    }
+
+    func testLogNamesAreSnakeCaseLikeVoiceCommands() {
+        let names: [(EditVerb, String)] = [
+            (.shorter, "shorter"), (.fixGrammar, "fix_grammar"), (.formal, "formal"), (.casual, "casual"),
+            (.list, "list"), (.toSpanish, "to_spanish"), (.toEnglish, "to_english"),
+        ]
+        for (verb, name) in names { XCTAssertEqual(verb.logName, name, "\(verb)") }
+    }
+
+    func testEveryPhraseKeyIsItsOwnFold() {
+        for phrase in EditVerb.phrases.keys {
+            XCTAssertEqual(VoiceCommand.fold(phrase), phrase, "an unfolded key can never match")
+        }
     }
 
     func testNoPhraseCollidesWithAVoiceCommand() {

@@ -16,8 +16,7 @@ enum EditGates {
         let out = normalize(result, verb: verb)
         guard !out.isEmpty else { return .rejected(.empty) }
         guard !answered(out, selection: selection, verb: verb) else { return .rejected(.answered) }
-        let ratio = Double(out.count) / Double(max(1, selection.count))
-        guard ratio >= verb.lengthBand.low, ratio <= verb.lengthBand.high else { return .rejected(.length) }
+        guard Gates.lengthOk(raw: selection, cleaned: out, band: verb.lengthBand) else { return .rejected(.length) }
         guard languageOk(selection: selection, result: out, verb: verb) else { return .rejected(.language) }
         guard !introducesNewFacts(selection: selection, result: out, verb: verb) else { return .rejected(.newFacts) }
         return .accepted(out)
@@ -26,7 +25,7 @@ enum EditGates {
     /// A list keeps its line structure (at most one blank line in a row); everything else collapses like cleanup does.
     static func normalize(_ text: String, verb: EditVerb) -> String {
         guard verb.keepsNewlines else { return Gates.normalize(text) }
-        let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+        let lines = text.split(omittingEmptySubsequences: false, whereSeparator: { $0.isNewline })
             .map { $0.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ") }
         var kept: [String] = []
         for line in lines {
@@ -38,13 +37,14 @@ enum EditGates {
         return kept.joined(separator: "\n")
     }
 
-    private static let preambles = ["here is", "here's", "sure", "of course", "certainly", "claro", "aqui tienes", "por supuesto"]
+    /// Stored folded because the result is folded before matching, and folding turns the apostrophe of "here's" into a space.
+    static let preambles = ["here s", "here is", "sure", "of course", "certainly", "claro", "aqui tienes", "por supuesto"]
 
     /// The model talked instead of editing: a tag, the instruction echoed, or a preamble the selection itself did not
     /// open with ("Claro que sí…" as a selection is not an answer).
     static func answered(_ result: String, selection: String, verb: EditVerb) -> Bool {
         let lower = result.lowercased()
-        if lower.contains("<text") || lower.contains("<instruction") { return true }
+        if ["<text", "<instruction", "</text", "</instruction"].contains(where: { lower.contains($0) }) { return true }
         if VoiceCommand.fold(result).hasPrefix(VoiceCommand.fold(verb.instruction)) { return true }
         return opensWithPreamble(result) && !opensWithPreamble(selection)
     }
@@ -62,38 +62,55 @@ enum EditGates {
         }
     }
 
-    /// Numbers (digit runs) absent from the selection are new facts for every verb; capitalised words absent from
-    /// the selection are new facts unless the verb translates (Monday → lunes) or the word opens a sentence.
+    /// Numbers (digit runs) absent from the selection are new facts for every verb. A capitalised word is a new fact
+    /// only if the selection never had it in any case or accent (fix grammar may capitalise "monday" or restore "Lucía"),
+    /// unless the verb translates (Monday → lunes) or the word opens a sentence.
     static func introducesNewFacts(selection: String, result: String, verb: EditVerb) -> Bool {
         let selectionNumbers = Set(numbers(in: selection))
         if numbers(in: result).contains(where: { !selectionNumbers.contains($0) }) { return true }
         guard !verb.isTranslation else { return false }
-        let selectionCaps = Set(capitalisedWords(in: selection, includingSentenceStarts: true).map { $0.lowercased() })
-        return capitalisedWords(in: result, includingSentenceStarts: false)
-            .contains { !selectionCaps.contains($0.lowercased()) }
+        let known = Set(words(in: selection).flatMap { [VoiceCommand.fold($0.text), VoiceCommand.fold(stemAndTail($0.text).stem)] })
+        return words(in: result).contains { word in
+            guard !word.opensSentence, word.text.first?.isUppercase == true else { return false }
+            if known.contains(VoiceCommand.fold(word.text)) { return false }
+            // "I'll" and "Marcos's" are a known word plus a clitic; "O'Brien" is not "O" plus anything.
+            let (stem, tail) = stemAndTail(word.text)
+            return !((1...2).contains(tail.count) && known.contains(VoiceCommand.fold(stem)))
+        }
     }
 
     static func numbers(in text: String) -> [String] {
         text.split(whereSeparator: { !$0.isNumber }).map(String.init)
     }
 
-    /// Words starting with an uppercase letter; with `includingSentenceStarts` false, a word right after the start of
-    /// the text, ".", "?", "!", ":" or a newline is skipped, because it is capitalised by position, not by meaning.
-    static func capitalisedWords(in text: String, includingSentenceStarts: Bool) -> [String] {
-        var out: [String] = []
+    private static func isApostrophe(_ ch: Character) -> Bool { ch == "'" || ch == "’" }
+
+    /// "I'll" → ("I", "ll"); a word without an apostrophe has an empty tail.
+    private static func stemAndTail(_ word: String) -> (stem: String, tail: String) {
+        guard let apostrophe = word.firstIndex(where: isApostrophe) else { return (word, "") }
+        return (String(word[..<apostrophe]), String(word[word.index(after: apostrophe)...]))
+    }
+
+    /// Words in order, with edge apostrophes trimmed so a quote mark ('Lucía') cannot hide a capital, each flagged when it
+    /// opens a sentence: at the start of the text or after ".", "?", "!" or a newline (CRLF included). A colon does not,
+    /// because "due Tuesday: Lucía will send it" is exactly where a model slips in a name.
+    static func words(in text: String) -> [(text: String, opensSentence: Bool)] {
+        var out: [(text: String, opensSentence: Bool)] = []
         var atSentenceStart = true
-        var word = ""
+        var token = ""
         func flush() {
-            if let first = word.first, first.isUppercase, includingSentenceStarts || !atSentenceStart { out.append(word) }
-            if !word.isEmpty { atSentenceStart = false }
-            word = ""
+            let word = token.trimmingCharacters(in: CharacterSet(charactersIn: "'’"))
+            token = ""
+            guard !word.isEmpty else { return }
+            out.append((word, atSentenceStart))
+            atSentenceStart = false
         }
         for ch in text {
-            if ch.isLetter || ch == "'" || ch == "’" {
-                word.append(ch)
+            if ch.isLetter || isApostrophe(ch) {
+                token.append(ch)
             } else {
                 flush()
-                if ".?!:\n".contains(ch) { atSentenceStart = true }
+                if ".?!".contains(ch) || ch.isNewline { atSentenceStart = true }
             }
         }
         flush()
