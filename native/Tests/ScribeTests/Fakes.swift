@@ -298,6 +298,8 @@ final class FakeCleanupModelBackend: CleanupModelBackend, @unchecked Sendable {
     }
 
     func clean(_ text: String) async throws -> String { text }
+
+    func edit(instruction: String, text: String, maxTokens: Int) async throws -> String { text }
 }
 
 /// An `UnloadableEngine` whose `preload()` can be held open, so a test drives the cancel/supersede/commit
