@@ -20,4 +20,6 @@ protocol PasteboardLike {
     /// Puts `s` on the pasteboard flagged transient + auto-generated (nspasteboard.org), so history apps skip it.
     func setTransient(_ s: String)
     func changeCount() -> Int
+    /// The plain string on the pasteboard, nil when there is none.
+    func string() -> String?
 }

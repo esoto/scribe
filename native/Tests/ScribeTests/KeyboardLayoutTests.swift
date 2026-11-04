@@ -55,10 +55,10 @@ final class KeyboardLayoutTests: XCTestCase {
     }
 
     func test_installed_layouts_resolve_the_key_their_command_layer_types() throws {
-        let expected: [(id: String, v: CGKeyCode, z: CGKeyCode)] = [
-            ("com.apple.keylayout.US", 9, 6), ("com.apple.keylayout.German", 9, 16),
-            ("com.apple.keylayout.French", 9, 13), ("com.apple.keylayout.Dvorak", 47, 44),
-            ("com.apple.keylayout.DVORAK-QWERTYCMD", 9, 6), ("com.apple.keylayout.Russian", 9, 6),
+        let expected: [(id: String, v: CGKeyCode, z: CGKeyCode, c: CGKeyCode)] = [
+            ("com.apple.keylayout.US", 9, 6, 8), ("com.apple.keylayout.German", 9, 16, 8),
+            ("com.apple.keylayout.French", 9, 13, 8), ("com.apple.keylayout.Dvorak", 47, 44, 34),
+            ("com.apple.keylayout.DVORAK-QWERTYCMD", 9, 6, 8), ("com.apple.keylayout.Russian", 9, 6, 8),
         ]
         for layout in expected {
             let data = try installedLayout(layout.id)
@@ -67,6 +67,7 @@ final class KeyboardLayoutTests: XCTestCase {
             }
             XCTAssertEqual(resolve("v"), layout.v, layout.id)
             XCTAssertEqual(resolve("z"), layout.z, layout.id)
+            XCTAssertEqual(resolve("c"), layout.c, layout.id)
         }
     }
 }

@@ -31,6 +31,10 @@ final class PasteCoreTests: XCTestCase {
             count
         }
 
+        func string() -> String? {
+            items.first?["public.utf8-plain-text"].flatMap { String(data: $0, encoding: .utf8) }
+        }
+
         /// Simulates the user copying something else.
         func userCopies(_ items: [PasteboardItemData]) {
             self.items = items

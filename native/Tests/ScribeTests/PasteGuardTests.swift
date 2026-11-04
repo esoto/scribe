@@ -190,6 +190,24 @@ final class PasteGuardTests: XCTestCase {
         XCTAssertEqual(SyntheticKey.commandV.spoken, "\u{2318}V")
     }
 
+    func test_command_c_is_the_copy_shortcut() {
+        XCTAssertEqual(SyntheticKey.commandC.character, "c")
+        XCTAssertEqual(SyntheticKey.commandC.fallbackKeycode, 8)
+        XCTAssertEqual(SyntheticKey.commandC.flags, .maskCommand)
+        XCTAssertEqual(SyntheticKey.commandC.spoken, "\u{2318}C")
+    }
+
+    func test_key_press_refusal_names_the_copy_shortcut() {
+        let posted = Box<SyntheticKey>()
+        XCTAssertThrowsError(try keyPresser(posted, accessibility: false).press(.commandC, target: 42)) { error in
+            XCTAssertEqual((error as? PasteGuardError)?.notice, "Accessibility is off — \u{2318}C not sent")
+        }
+        XCTAssertThrowsError(try keyPresser(posted, current: 99).press(.commandC, target: 42)) { error in
+            XCTAssertEqual((error as? PasteGuardError)?.notice, "Focus changed — \u{2318}C not sent")
+        }
+        XCTAssertEqual(posted.value, [])
+    }
+
     // MARK: - Keycode resolution
 
     func test_command_keys_look_up_their_character() {
@@ -212,6 +230,13 @@ final class PasteGuardTests: XCTestCase {
     func test_a_layout_without_the_key_falls_back_to_ansi() {
         XCTAssertEqual(SyntheticKey.commandV.keycode(resolve: { _ in nil }), 9)
         XCTAssertEqual(SyntheticKey.commandZ.keycode(resolve: { _ in nil }), 6)
+        XCTAssertEqual(SyntheticKey.commandC.keycode(resolve: { _ in nil }), 8)
+    }
+
+    func test_copy_asks_the_layout_for_c() {
+        var asked: [Character] = []
+        XCTAssertEqual(SyntheticKey.commandC.keycode(resolve: { asked.append($0); return 34 }), 34)
+        XCTAssertEqual(asked, ["c"])
     }
 
     func test_return_never_consults_the_layout() {
