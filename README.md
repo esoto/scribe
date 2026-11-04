@@ -296,7 +296,7 @@ outside scribe's process. scribe manages them on demand:
   goes there). Hold the key with Setup / Doctor open: the Hotkey row reads
   "Held" while you hold it.
   The log records only presses of the hotkey itself. If pressing it logs
-  `flagsChanged keycode=61 ... -> down`, the tap is alive and the grant is
+  `flagsChanged keycode=61 ... -> down(chord: false)`, the tap is alive and the grant is
   fine. If it logs nothing, the key isn't reaching scribe as Right ⌥ (**61**):
   an external keyboard may report its Option key as 58 (Left ⌥), which won't
   match. Pick **Right ⌘** or **F13** in Settings › General instead — it

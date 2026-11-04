@@ -9,7 +9,7 @@ struct HotkeyError: Error {
 final class HotkeyMonitor {
     private let machine: KeyStateMachine
     private let keycode: Int
-    private let onDown: () -> Void
+    private let onDown: (Bool) -> Void
     private let onUp: () -> Void
 
     /// Fires only for the hotkey's own modifier key, so logging it can never capture typed text.
@@ -18,7 +18,7 @@ final class HotkeyMonitor {
     private var tap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
 
-    init(key: HotKey, onDown: @escaping () -> Void, onUp: @escaping () -> Void) {
+    init(key: HotKey, onDown: @escaping (Bool) -> Void, onUp: @escaping () -> Void) {
         self.machine = KeyStateMachine(key: key)
         self.keycode = key.keycode
         self.onDown = onDown
@@ -132,7 +132,7 @@ final class HotkeyMonitor {
             )
         }
         switch action {
-        case .down: monitor.onDown()
+        case .down(let chord): monitor.onDown(chord)
         case .up: monitor.onUp()
         case nil: break
         }
