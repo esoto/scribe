@@ -81,7 +81,7 @@ final class DictationCoordinator: ObservableObject {
     private let recorder: RecorderPreparing
     private let pipelineConfig: PipelineConfig
     private(set) var hotkey: HotKey
-    private let makeHotkeyMonitor: (HotKey, @escaping () -> Void, @escaping () -> Void) -> HotkeyMonitoring
+    private let makeHotkeyMonitor: (HotKey, @escaping (Bool) -> Void, @escaping () -> Void) -> HotkeyMonitoring
     private let notifier: Notifier
     private let playSound: (String) -> Void
     private let soundsEnabled: () -> Bool
@@ -112,7 +112,7 @@ final class DictationCoordinator: ObservableObject {
         pipelineConfig: PipelineConfig,
         hotkey: HotKey,
         makePipeline: (PipelineSinks) -> DictationPipeline,
-        makeHotkeyMonitor: @escaping (_ key: HotKey, _ onDown: @escaping () -> Void, _ onUp: @escaping () -> Void)
+        makeHotkeyMonitor: @escaping (_ key: HotKey, _ onDown: @escaping (Bool) -> Void, _ onUp: @escaping () -> Void)
             -> HotkeyMonitoring,
         notifier: Notifier,
         playSound: @escaping (String) -> Void,
@@ -193,7 +193,7 @@ final class DictationCoordinator: ObservableObject {
     private func buildHotkeyMonitor(for key: HotKey) -> HotkeyMonitoring {
         makeHotkeyMonitor(
             key,
-            { [weak self] in self?.handleKeyDown() },
+            { [weak self] chord in self?.handleKeyDown(chord: chord) },
             { [weak self] in self?.handleKeyUp() })
     }
 
@@ -473,7 +473,7 @@ final class DictationCoordinator: ObservableObject {
 
     /// Runs on main (CGEventTap callback). The interpreter decides whether this press starts a hold, starts a latch
     /// (a double tap), or is the tap that ends one.
-    func handleKeyDown() {
+    func handleKeyDown(chord: Bool = false) {
         switch taps.down(at: now()) {
         case .start: beginHold(latched: false)
         case .startLatched: beginHold(latched: true)

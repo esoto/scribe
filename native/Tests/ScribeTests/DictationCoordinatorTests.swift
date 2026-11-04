@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import XCTest
 
 @MainActor
@@ -21,7 +22,7 @@ final class DictationCoordinatorTests: XCTestCase {
     private var hud: HUDModel!
     private var hudEnabled = true
     private var sinks: PipelineSinks!
-    private var monitorDown: (() -> Void)!
+    private var monitorDown: ((Bool) -> Void)!
     private var monitorUp: (() -> Void)!
     private var pipelineClock: FakeClock!
     private var directory: URL!
@@ -788,7 +789,7 @@ final class DictationCoordinatorTests: XCTestCase {
         var hookCalls = 0
         c.onKeyDown = { hookCalls += 1 }
 
-        monitorDown()
+        monitorDown(false)
         XCTAssertEqual(hookCalls, 1)
         XCTAssertTrue(recorder.armed)
         monitorUp()
@@ -873,7 +874,7 @@ final class DictationCoordinatorTests: XCTestCase {
         var hookCalls = 0
         c.onKeyDown = { hookCalls += 1 }
 
-        monitorDown()
+        monitorDown(false)
         XCTAssertEqual(hookCalls, 1)
         XCTAssertTrue(recorder.armed)
 
@@ -979,6 +980,77 @@ final class DictationCoordinatorTests: XCTestCase {
         c.handleKeyUp()
         XCTAssertFalse(recorder.armed)
         XCTAssertEqual(jobs.value, ["job"], "both taps were discarded as taps")
+    }
+
+    /// Everything a hold touches, so a chord hold can be compared with a plain one as a whole.
+    private struct HoldTrace: Equatable {
+        var states: [PipelineState] = []
+        var hookCalls = 0
+        var armedWhileHeld = false
+        var watchdogSet = false
+        var armedAfterRelease = true
+        var watchdogCancelledByRelease = false
+        var jobs: [String] = []
+        var sounds: [String] = []
+    }
+
+    /// Starts from fresh fixtures, so two traces in one test never see each other's recorder, jobs or clock.
+    private func traceHold(_ press: (DictationCoordinator) -> Void) async -> HoldTrace {
+        recorder = FakeRecorder()
+        jobs = Box<String>()
+        sounds = Box<String>()
+        pipelineClock = FakeClock()
+        monitors = []
+        let c = make(holdThreshold: 0.3)
+        let seen = Box<PipelineState>()
+        let subscription = c.$state.sink { seen.append($0) }
+        var hookCalls = 0
+        c.onKeyDown = { hookCalls += 1 }
+
+        press(c)
+        let recording = await eventually { c.state == .recording }
+        XCTAssertTrue(recording)
+        var trace = HoldTrace()
+        trace.hookCalls = hookCalls
+        trace.armedWhileHeld = recorder.armed
+        let watchdog = c.holdWatchdog
+        trace.watchdogSet = watchdog != nil
+        pipelineClock.t += 1.0
+        c.handleKeyUp()
+        trace.armedAfterRelease = recorder.armed
+        trace.watchdogCancelledByRelease = watchdog?.isCancelled == true
+        trace.jobs = jobs.value
+        trace.sounds = sounds.value
+        trace.states = seen.value
+        subscription.cancel()
+        return trace
+    }
+
+    func testAChordDownIsAPlainHoldUntilEditsExist() async {
+        let plain = await traceHold { $0.handleKeyDown() }
+        let chord = await traceHold { $0.handleKeyDown(chord: true) }
+
+        // The plain hold `testHoldModeUnchanged` pins: hook once, armed with a watchdog, released into one job.
+        XCTAssertEqual(
+            plain,
+            HoldTrace(
+                states: [.idle, .recording], hookCalls: 1, armedWhileHeld: true, watchdogSet: true,
+                armedAfterRelease: false, watchdogCancelledByRelease: true, jobs: ["job"], sounds: ["Pop"]))
+        XCTAssertEqual(chord, plain)
+    }
+
+    func testTheMonitorsChordCallbackStartsAPlainHold() {
+        let c = make()
+        var hookCalls = 0
+        c.onKeyDown = { hookCalls += 1 }
+
+        monitorDown(true)
+        XCTAssertEqual(hookCalls, 1)
+        XCTAssertTrue(recorder.armed)
+        XCTAssertNotNil(c.holdWatchdog)
+
+        monitorUp()
+        XCTAssertFalse(recorder.armed)
     }
 
     func testDoubleTapLatchesAndTapStops() {
