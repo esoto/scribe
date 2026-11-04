@@ -40,16 +40,23 @@ final class Paster {
     }
 
     /// Pastes over a selection that a ⌘C just read. `snapshot` is the clipboard from before that ⌘C: snapshotting
-    /// now would save the copied selection and put it back after the edit. nil falls back to today's paste.
-    func replaceSelection(_ text: String, target: pid_t? = nil, restoring snapshot: [PasteboardItemData]?) throws {
-        try paste(text, target: target, saved: snapshot)
+    /// now would save the copied selection and put it back after the edit. nil means the clipboard was empty, so
+    /// it is cleared again after the paste — never "snapshot now", which is exactly that mistake.
+    /// `copiedChangeCount` is the count the ⌘C left. If the clipboard has moved since, the user copied something
+    /// during the model call: that copy is the clipboard to keep, so the pending-or-snapshot rule applies instead.
+    func replaceSelection(
+        _ text: String, target: pid_t? = nil, restoring snapshot: [PasteboardItemData]?, copiedChangeCount: Int
+    ) throws {
+        try paste(text, target: target, saved: (snapshot ?? [], copiedChangeCount))
     }
 
-    private func paste(_ text: String, target: pid_t?, saved external: [PasteboardItemData]?) throws {
+    private func paste(
+        _ text: String, target: pid_t?, saved external: (items: [PasteboardItemData], copiedChangeCount: Int)?
+    ) throws {
         let (saved, setCount, delay) = lock.withLock {
             let saved: [PasteboardItemData]?
-            if let external {
-                saved = external
+            if let external, pasteboard.changeCount() == external.copiedChangeCount {
+                saved = external.items
             } else if let pending, pasteboard.changeCount() == pending.setCount {
                 saved = pending.items
             } else {
@@ -79,6 +86,18 @@ final class Paster {
         lock.withLock {
             pending = nil
             pasteboard.setTransient(text)
+        }
+    }
+
+    /// Puts the user's clipboard back now when it still shows our own paste. The selection reader runs this before
+    /// its ⌘C: otherwise it would snapshot our transient text as the user's clipboard, and the scheduled restore
+    /// could fire during the copy wait and hand the user's old text to the edit as the selection.
+    func restorePendingNow() {
+        lock.withLock {
+            guard let current = pending else { return }
+            pending = nil
+            guard pasteboard.changeCount() == current.setCount else { return }
+            pasteboard.restore(current.items)
         }
     }
 

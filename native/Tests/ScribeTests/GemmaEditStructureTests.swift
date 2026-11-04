@@ -74,6 +74,24 @@ final class GemmaEditStructureTests: XCTestCase {
         XCTAssertNotEqual(samples[0].text, samples[1].text)
     }
 
+    /// A tokenizer or template error can quote the prompt, and the prompt holds the user's selection. The Apple
+    /// Intelligence edit path already reports the type alone; this backend must give the same guarantee.
+    func testAnEditFailureCarriesTheErrorTypeAndNeverItsText() {
+        struct Leaky: Error, CustomStringConvertible {
+            var description: String { "template failed on: the confidential selection" }
+        }
+        let secret = "the confidential selection"
+
+        let structured = GemmaBackend.editFailure(Leaky())
+        XCTAssertFalse(structured.message.contains(secret))
+        XCTAssertTrue(structured.message.contains("Leaky"), structured.message)
+
+        let bridged = GemmaBackend.editFailure(
+            NSError(domain: "x", code: 1, userInfo: [NSLocalizedDescriptionKey: secret]))
+        XCTAssertFalse(bridged.message.contains(secret))
+        XCTAssertTrue(bridged.message.hasPrefix("edit failed: "), bridged.message)
+    }
+
     func testNothingIsWarmBeforeUse() {
         let backend = GemmaBackend()
         XCTAssertFalse(backend.isWarm)

@@ -61,6 +61,19 @@ final class WarmSlotsTests: XCTestCase {
         XCTAssertEqual(slots.prefix(in: .cleanup), 3)
     }
 
+    func testAFailedAttemptIsRecordedPerSlot() {
+        var slots = WarmSlots<Int>()
+        XCTAssertTrue(slots.beginWarmUp(.edit, systemPrompt: "E"))  // failed: nothing stored
+
+        XCTAssertTrue(
+            slots.beginWarmUp(.cleanup, systemPrompt: "E"),
+            "an attempt in the edit slot does not block the cleanup slot, even for an equal prompt")
+        _ = slots.beginWarmUp(.cleanup, systemPrompt: "C")
+        XCTAssertFalse(
+            slots.beginWarmUp(.edit, systemPrompt: "E"),
+            "and a later cleanup attempt does not clear the edit slot's failure")
+    }
+
     func testRemoveAllForgetsPrefixesAndFailedAttempts() {
         var slots = WarmSlots<Int>()
         _ = slots.beginWarmUp(.cleanup, systemPrompt: "C")

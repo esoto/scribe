@@ -217,8 +217,14 @@ final class GemmaBackend: CleanupModelBackend, @unchecked Sendable {
         } catch let error as CleanupError {
             throw error
         } catch {
-            throw CleanupError(message: "\(error)")
+            throw GemmaBackend.editFailure(error)
         }
+    }
+
+    /// The error type only, as the Apple Intelligence edit reports it: a tokenizer or template error can quote its
+    /// input, and the input holds the user's selection.
+    static func editFailure(_ error: Error) -> CleanupError {
+        CleanupError(message: "edit failed: \(type(of: error))")
     }
 
     /// The EN and ES warm-up chats of a slot, whose common leading tokens are its fixed prefix.

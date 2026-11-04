@@ -4,7 +4,12 @@ import Foundation
 struct Selection: Equatable {
     let text: String
     /// The user's clipboard before the ⌘C, so the final paste restores it rather than the copied selection.
+    /// nil when the clipboard was empty, or held only non-text data above the snapshot's 32 MiB cap (above it
+    /// `MacPasteboard.snapshot` keeps plain text only). The paste then clears the clipboard instead of refilling it.
     let snapshot: [PasteboardItemData]?
+    /// The change count once the copy landed. While the clipboard still shows it, `snapshot` is the clipboard to
+    /// put back; once it moves, the user copied something else and that copy is the one to keep.
+    let copiedChangeCount: Int
 }
 
 protocol SelectionReader {
@@ -20,20 +25,26 @@ final class PasteboardSelectionReader: SelectionReader {
     private let keys: KeyPressing
     private let waitSeconds: Double
     private let pollSeconds: Double
+    private let settle: () -> Void
     private let sleep: (Double) async -> Void
 
+    /// `settle` runs first in `read`, before the snapshot: scribe's own recent paste (and the restore it has
+    /// pending) must be out of the way, or the snapshot would be scribe's text rather than the user's clipboard.
     init(
         pasteboard: PasteboardLike, keys: KeyPressing, waitSeconds: Double = 0.3, pollSeconds: Double = 0.02,
+        settle: @escaping () -> Void = {},
         sleep: @escaping (Double) async -> Void = { try? await Task.sleep(nanoseconds: UInt64($0 * 1e9)) }
     ) {
         self.pasteboard = pasteboard
         self.keys = keys
         self.waitSeconds = waitSeconds
         self.pollSeconds = pollSeconds
+        self.settle = settle
         self.sleep = sleep
     }
 
     func read(target: pid_t?) async throws -> Selection? {
+        settle()
         let snapshot = pasteboard.snapshot()
         let before = pasteboard.changeCount()
         try keys.press(.commandC, target: target)
@@ -43,11 +54,12 @@ final class PasteboardSelectionReader: SelectionReader {
             await sleep(pollSeconds)
             waited += pollSeconds
         }
-        guard pasteboard.changeCount() != before else { return nil }
+        let copiedChangeCount = pasteboard.changeCount()
+        guard copiedChangeCount != before else { return nil }
         guard let text = pasteboard.string()?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else {
             if let snapshot { pasteboard.restore(snapshot) }
             return nil
         }
-        return Selection(text: text, snapshot: snapshot)
+        return Selection(text: text, snapshot: snapshot, copiedChangeCount: copiedChangeCount)
     }
 }

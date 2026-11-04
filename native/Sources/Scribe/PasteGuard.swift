@@ -6,9 +6,12 @@ struct PasteGuardError: Error {
     let notice: String
 }
 
-/// Pastes over a selection the reader just copied, then puts back the clipboard from before that copy.
+/// Pastes over a selection the reader just copied, then puts back the clipboard from before that copy (an empty
+/// one when `snapshot` is nil), unless the user copied something else meanwhile: `copiedChangeCount` tells.
 protocol SelectionReplacing {
-    func replaceSelection(_ text: String, target: pid_t?, restoring snapshot: [PasteboardItemData]?) throws
+    func replaceSelection(
+        _ text: String, target: pid_t?, restoring snapshot: [PasteboardItemData]?, copiedChangeCount: Int
+    ) throws
 }
 
 extension Paster: SelectionReplacing {}
@@ -44,9 +47,12 @@ final class GuardedPaster: Pasting, SelectionReplacing {
 
     /// The same two guards as `paste`, and the same copy-only fallback: the selection is still selected, so ⌘V by hand
     /// replaces it.
-    func replaceSelection(_ text: String, target: pid_t?, restoring snapshot: [PasteboardItemData]?) throws {
+    func replaceSelection(
+        _ text: String, target: pid_t?, restoring snapshot: [PasteboardItemData]?, copiedChangeCount: Int
+    ) throws {
         try refuseUnlessReachable(text, target: target)
-        try inner.replaceSelection(text, target: target, restoring: snapshot)
+        try inner.replaceSelection(
+            text, target: target, restoring: snapshot, copiedChangeCount: copiedChangeCount)
     }
 
     private func refuseUnlessReachable(_ text: String, target: pid_t?) throws {

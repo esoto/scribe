@@ -22,11 +22,14 @@ final class PasteGuardTests: XCTestCase {
             copied.append(text)
         }
 
-        private(set) var replaced: [(text: String, target: pid_t?, snapshot: [PasteboardItemData]?)] = []
+        private(set) var replaced:
+            [(text: String, target: pid_t?, snapshot: [PasteboardItemData]?, copiedChangeCount: Int)] = []
 
-        func replaceSelection(_ text: String, target: pid_t?, restoring snapshot: [PasteboardItemData]?) throws {
+        func replaceSelection(
+            _ text: String, target: pid_t?, restoring snapshot: [PasteboardItemData]?, copiedChangeCount: Int
+        ) throws {
             if let err { throw err }
-            replaced.append((text, target, snapshot))
+            replaced.append((text, target, snapshot, copiedChangeCount))
         }
     }
 
@@ -140,12 +143,15 @@ final class PasteGuardTests: XCTestCase {
     // MARK: - replaceSelection
 
     private let snapshot: [PasteboardItemData] = [["public.utf8-plain-text": Data("mine".utf8)]]
+    private let copiedCount = 7
 
     func test_replacing_a_selection_without_accessibility_copies_instead() {
         let inner = FakeDeliverer()
         let paster = guarded(inner, accessibility: false)
 
-        XCTAssertThrowsError(try paster.replaceSelection("edited", target: 42, restoring: snapshot)) { error in
+        XCTAssertThrowsError(
+            try paster.replaceSelection("edited", target: 42, restoring: snapshot, copiedChangeCount: copiedCount)
+        ) { error in
             XCTAssertEqual((error as? PasteGuardError)?.notice, "Accessibility is off — text copied, press ⌘V")
         }
         XCTAssertEqual(inner.copied, ["edited"])
@@ -156,7 +162,9 @@ final class PasteGuardTests: XCTestCase {
         let inner = FakeDeliverer()
         let paster = guarded(inner, current: 99)
 
-        XCTAssertThrowsError(try paster.replaceSelection("edited", target: 42, restoring: snapshot)) { error in
+        XCTAssertThrowsError(
+            try paster.replaceSelection("edited", target: 42, restoring: snapshot, copiedChangeCount: copiedCount)
+        ) { error in
             XCTAssertEqual((error as? PasteGuardError)?.notice, "Focus changed — text copied, press ⌘V")
         }
         XCTAssertEqual(inner.copied, ["edited"])
@@ -167,20 +175,24 @@ final class PasteGuardTests: XCTestCase {
         let inner = FakeDeliverer()
         let paster = guarded(inner, accessibility: false, current: 99)
 
-        XCTAssertThrowsError(try paster.replaceSelection("edited", target: 42, restoring: snapshot)) { error in
+        XCTAssertThrowsError(
+            try paster.replaceSelection("edited", target: 42, restoring: snapshot, copiedChangeCount: copiedCount)
+        ) { error in
             XCTAssertEqual((error as? PasteGuardError)?.notice, "Accessibility is off — text copied, press ⌘V")
         }
     }
 
-    func test_replacing_a_selection_in_the_same_app_forwards_the_snapshot() throws {
+    func test_replacing_a_selection_in_the_same_app_forwards_the_snapshot_and_the_copy_count() throws {
         let inner = FakeDeliverer()
 
-        try guarded(inner, current: 42).replaceSelection("edited", target: 42, restoring: snapshot)
+        try guarded(inner, current: 42).replaceSelection(
+            "edited", target: 42, restoring: snapshot, copiedChangeCount: copiedCount)
 
         XCTAssertEqual(inner.replaced.count, 1)
         XCTAssertEqual(inner.replaced.first?.text, "edited")
         XCTAssertEqual(inner.replaced.first?.target, 42)
         XCTAssertEqual(inner.replaced.first?.snapshot, snapshot)
+        XCTAssertEqual(inner.replaced.first?.copiedChangeCount, copiedCount)
         XCTAssertTrue(inner.copied.isEmpty)
         XCTAssertTrue(inner.pasted.isEmpty, "a replacement is not a plain paste")
     }
@@ -188,7 +200,8 @@ final class PasteGuardTests: XCTestCase {
     func test_replacing_a_selection_with_no_recorded_app_has_no_focus_guard_and_forwards_nil() throws {
         let inner = FakeDeliverer()
 
-        try guarded(inner, current: 99).replaceSelection("edited", target: nil, restoring: nil)
+        try guarded(inner, current: 99).replaceSelection(
+            "edited", target: nil, restoring: nil, copiedChangeCount: copiedCount)
 
         XCTAssertEqual(inner.replaced.count, 1)
         XCTAssertNil(inner.replaced.first?.snapshot)
@@ -197,7 +210,10 @@ final class PasteGuardTests: XCTestCase {
     func test_inner_replace_failure_is_not_disguised_as_a_guard_failure() {
         let inner = FakeDeliverer(err: PasteError(message: "secure input"))
 
-        XCTAssertThrowsError(try guarded(inner).replaceSelection("edited", target: 42, restoring: snapshot)) { error in
+        XCTAssertThrowsError(
+            try guarded(inner).replaceSelection(
+                "edited", target: 42, restoring: snapshot, copiedChangeCount: copiedCount)
+        ) { error in
             XCTAssertTrue(error is PasteError)
         }
         XCTAssertTrue(inner.copied.isEmpty)

@@ -11,7 +11,13 @@ final class SelectionReaderTests: XCTestCase {
             self.items = items
         }
 
-        func snapshot() -> [PasteboardItemData]? { items }
+        /// Lets a test see when the reader looks at the clipboard.
+        var onSnapshot: () -> Void = {}
+
+        func snapshot() -> [PasteboardItemData]? {
+            onSnapshot()
+            return items
+        }
 
         func restore(_ items: [PasteboardItemData]) {
             self.items = items
@@ -62,14 +68,16 @@ final class SelectionReaderTests: XCTestCase {
     }
 
     private let mine: [PasteboardItemData] = [["public.utf8-plain-text": Data("mine".utf8)]]
+    /// What scribe's own paste leaves on the clipboard until its restore fires.
+    private let justDictated: [PasteboardItemData] = [["public.utf8-plain-text": Data("just dictated".utf8)]]
 
     /// Power-of-two fractions: the accumulated wait is exact, so the poll count is too.
     private func reader(
         _ pasteboard: Clipboard, _ keys: Keys, sleeps: Box<Double> = Box(), wait: Double = 0.5, poll: Double = 0.125,
-        onSleep: @escaping (Int) -> Void = { _ in }
+        settle: @escaping () -> Void = {}, onSleep: @escaping (Int) -> Void = { _ in }
     ) -> PasteboardSelectionReader {
         PasteboardSelectionReader(
-            pasteboard: pasteboard, keys: keys, waitSeconds: wait, pollSeconds: poll,
+            pasteboard: pasteboard, keys: keys, waitSeconds: wait, pollSeconds: poll, settle: settle,
             sleep: { seconds in
                 sleeps.append(seconds)
                 onSleep(sleeps.value.count)
@@ -82,7 +90,9 @@ final class SelectionReaderTests: XCTestCase {
 
         let selection = try await reader(pasteboard, keys).read(target: 42)
 
-        XCTAssertEqual(selection, Selection(text: "the selected words", snapshot: mine))
+        XCTAssertEqual(
+            selection,
+            Selection(text: "the selected words", snapshot: mine, copiedChangeCount: pasteboard.changeCount()))
         XCTAssertTrue(pasteboard.restored.isEmpty, "the final paste restores; the reader leaves the copy in place")
     }
 
@@ -114,7 +124,7 @@ final class SelectionReaderTests: XCTestCase {
 
         let selection = try await reader(pasteboard, keys).read(target: 42)
 
-        XCTAssertEqual(selection, Selection(text: "words", snapshot: nil))
+        XCTAssertEqual(selection, Selection(text: "words", snapshot: nil, copiedChangeCount: pasteboard.changeCount()))
     }
 
     func test_a_clipboard_that_never_changes_means_nothing_was_selected() async throws {
@@ -199,6 +209,54 @@ final class SelectionReaderTests: XCTestCase {
         XCTAssertEqual(pasteboard.items, mine)
         XCTAssertTrue(pasteboard.restored.isEmpty)
         XCTAssertTrue(sleeps.value.isEmpty, "no key, no wait")
+    }
+
+    func test_the_selection_carries_the_change_count_the_copy_left() async throws {
+        let pasteboard = Clipboard(items: mine)
+        let countBefore = pasteboard.changeCount()
+        let keys = Keys()
+
+        let selection = try await reader(pasteboard, keys) { polls in
+            if polls == 2 { pasteboard.appCopies("late but in time") }
+        }.read(target: 42)
+
+        XCTAssertEqual(selection?.copiedChangeCount, countBefore + 1)
+    }
+
+    func test_the_reader_settles_before_it_snapshots_and_before_it_presses() async throws {
+        let events = Box<String>()
+        let pasteboard = Clipboard(items: mine)
+        pasteboard.onSnapshot = { events.append("snapshot") }
+        let keys = Keys(onPress: {
+            events.append("press")
+            pasteboard.appCopies("words")
+        })
+
+        _ = try await reader(pasteboard, keys, settle: { events.append("settle") }).read(target: 42)
+
+        XCTAssertEqual(events.value, ["settle", "snapshot", "press"])
+    }
+
+    func test_the_snapshot_is_the_clipboard_settle_left_not_scribes_own_paste() async throws {
+        let pasteboard = Clipboard(items: justDictated)
+        let keys = Keys(onPress: { pasteboard.appCopies("the selected words") })
+
+        let selection = try await reader(pasteboard, keys, settle: { pasteboard.restore(self.mine) })
+            .read(target: 42)
+
+        XCTAssertEqual(selection?.snapshot, mine)
+        XCTAssertEqual(selection?.text, "the selected words")
+    }
+
+    func test_a_settle_that_moves_the_change_count_does_not_look_like_a_copy() async throws {
+        let pasteboard = Clipboard(items: justDictated)
+        let keys = Keys()
+
+        let selection = try await reader(pasteboard, keys, settle: { pasteboard.restore(self.mine) })
+            .read(target: 42)
+
+        XCTAssertNil(selection, "the restore happened before the baseline count was read")
+        XCTAssertEqual(pasteboard.items, mine)
     }
 
     func test_the_default_sleep_really_waits() async throws {
