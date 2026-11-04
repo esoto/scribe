@@ -6,8 +6,15 @@ struct PasteGuardError: Error {
     let notice: String
 }
 
+/// Pastes over a selection the reader just copied, then puts back the clipboard from before that copy.
+protocol SelectionReplacing {
+    func replaceSelection(_ text: String, target: pid_t?, restoring snapshot: [PasteboardItemData]?) throws
+}
+
+extension Paster: SelectionReplacing {}
+
 /// A paster that can also leave text on the clipboard without pasting it.
-protocol PasteDelivering: Pasting {
+protocol PasteDelivering: Pasting, SelectionReplacing {
     func copyOnly(_ text: String)
 }
 
@@ -15,7 +22,7 @@ extension Paster: PasteDelivering {}
 
 /// Posts ⌘V only when it would reach the app the user was dictating into.
 /// Without Accessibility the event is dropped silently, and after a focus change it would land in the wrong app.
-final class GuardedPaster: Pasting {
+final class GuardedPaster: Pasting, SelectionReplacing {
     private let inner: PasteDelivering
     private let accessibilityGranted: () -> Bool
     private let currentFrontmost: () -> pid_t?
@@ -31,6 +38,18 @@ final class GuardedPaster: Pasting {
     }
 
     func paste(_ text: String, target: pid_t?) throws {
+        try refuseUnlessReachable(text, target: target)
+        try inner.paste(text, target: target)
+    }
+
+    /// The same two guards as `paste`, and the same copy-only fallback: the selection is still selected, so ⌘V by hand
+    /// replaces it.
+    func replaceSelection(_ text: String, target: pid_t?, restoring snapshot: [PasteboardItemData]?) throws {
+        try refuseUnlessReachable(text, target: target)
+        try inner.replaceSelection(text, target: target, restoring: snapshot)
+    }
+
+    private func refuseUnlessReachable(_ text: String, target: pid_t?) throws {
         guard accessibilityGranted() else {
             inner.copyOnly(text)
             throw PasteGuardError(notice: "Accessibility is off — text copied, press ⌘V")
@@ -40,7 +59,6 @@ final class GuardedPaster: Pasting {
             inner.copyOnly(text)
             throw PasteGuardError(notice: "Focus changed — text copied, press ⌘V")
         }
-        try inner.paste(text, target: target)
     }
 
     /// Paste Again has no key-down app to compare against. It still refuses scribe itself: `open scribe://…`

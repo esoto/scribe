@@ -36,9 +36,21 @@ final class Paster {
 
     /// `target` is GuardedPaster's concern; the default keeps direct callers unchanged.
     func paste(_ text: String, target: pid_t? = nil) throws {
+        try paste(text, target: target, saved: nil)
+    }
+
+    /// Pastes over a selection that a ⌘C just read. `snapshot` is the clipboard from before that ⌘C: snapshotting
+    /// now would save the copied selection and put it back after the edit. nil falls back to today's paste.
+    func replaceSelection(_ text: String, target: pid_t? = nil, restoring snapshot: [PasteboardItemData]?) throws {
+        try paste(text, target: target, saved: snapshot)
+    }
+
+    private func paste(_ text: String, target: pid_t?, saved external: [PasteboardItemData]?) throws {
         let (saved, setCount, delay) = lock.withLock {
             let saved: [PasteboardItemData]?
-            if let pending, pasteboard.changeCount() == pending.setCount {
+            if let external {
+                saved = external
+            } else if let pending, pasteboard.changeCount() == pending.setCount {
                 saved = pending.items
             } else {
                 saved = pasteboard.snapshot()
