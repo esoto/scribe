@@ -12,6 +12,9 @@ enum EditVerdict: Equatable {
 /// Deterministic checks on an edit result. The first failure rejects; a rejection pastes nothing, so these are
 /// deliberately strict — a wrong edit in the user's document costs more than a retry.
 enum EditGates {
+    /// Under this many words a translation skips the stopword gate: a greeting scores about 0, so ±2 would reject it.
+    static let minWordsForTranslationLanguageGate = 6
+
     static func accept(verb: EditVerb, selection: String, result: String) -> EditVerdict {
         let out = normalize(result, verb: verb)
         guard !out.isEmpty else { return .rejected(.empty) }
@@ -40,11 +43,15 @@ enum EditGates {
     /// Stored folded because the result is folded before matching, and folding turns the apostrophe of "here's" into a space.
     static let preambles = ["here s", "here is", "sure", "of course", "certainly", "claro", "aqui tienes", "por supuesto"]
 
+    private static let promptTags = ["<text", "<instruction", "</text", "</instruction"]
+
     /// The model talked instead of editing: a tag, the instruction echoed, or a preamble the selection itself did not
-    /// open with ("Claro que sí…" as a selection is not an answer).
+    /// open with ("Claro que sí…" as a selection is not an answer). A tag counts the same way — only when the selection
+    /// does not carry that tag itself, because a faithful edit of a pasted prompt keeps the literal "</text>" it was given.
     static func answered(_ result: String, selection: String, verb: EditVerb) -> Bool {
         let lower = result.lowercased()
-        if ["<text", "<instruction", "</text", "</instruction"].contains(where: { lower.contains($0) }) { return true }
+        let selectionLower = selection.lowercased()
+        if promptTags.contains(where: { lower.contains($0) && !selectionLower.contains($0) }) { return true }
         if VoiceCommand.fold(result).hasPrefix(VoiceCommand.fold(verb.instruction)) { return true }
         return opensWithPreamble(result) && !opensWithPreamble(selection)
     }
@@ -56,10 +63,14 @@ enum EditGates {
 
     static func languageOk(selection: String, result: String, verb: EditVerb) -> Bool {
         switch verb {
-        case .toSpanish: return Gates.langScore(result) <= -2
-        case .toEnglish: return Gates.langScore(result) >= 2
+        case .toSpanish: return isTooShortToScore(result) || Gates.langScore(result) <= -2
+        case .toEnglish: return isTooShortToScore(result) || Gates.langScore(result) >= 2
         default: return Gates.languageConsistent(raw: selection, cleaned: result)
         }
+    }
+
+    private static func isTooShortToScore(_ result: String) -> Bool {
+        result.split(whereSeparator: { $0.isWhitespace }).count < minWordsForTranslationLanguageGate
     }
 
     /// Numbers (digit runs) absent from the selection are new facts for every verb. A capitalised word is a new fact

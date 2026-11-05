@@ -11,6 +11,30 @@ final class GoldenSetTests: XCTestCase {
         }
     }
 
+    /// The edit sets obey the same rule: the default model is never excused from an edit or edit-guard case.
+    func testDefaultModelHasNoKnownFailuresInTheEditSets() throws {
+        let defaultID = CleanupModelCatalog.defaultID.rawValue
+        for file in ["edit.json", "edit_guard.json"] {
+            for testCase in try loadEditSet(file).cases {
+                XCTAssertFalse(testCase.knownFailures?.contains(defaultID) ?? false, "\(file) [\(testCase.id)]")
+            }
+        }
+    }
+
+    func testEveryEditCaseVerbDecodesToAnEditVerb() throws {
+        for file in ["edit.json", "edit_guard.json"] {
+            for testCase in try loadEditSet(file).cases {
+                XCTAssertNotNil(testCase.editVerb, "\(file) [\(testCase.id)] verb '\(testCase.verb)'")
+            }
+        }
+    }
+
+    func testEveryEditGuardCaseForbidsSomethingOrRequiresAFact() throws {
+        for testCase in try loadEditSet("edit_guard.json").cases {
+            XCTAssertFalse(testCase.mustNotContain.isEmpty && testCase.mustContain.isEmpty, testCase.id)
+        }
+    }
+
     private func guardCase(_ id: String) throws -> GoldenCase {
         try XCTUnwrap(try loadGoldenSet("injection_guard.json").cases.first { $0.id == id }, id)
     }

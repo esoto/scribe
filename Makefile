@@ -3,6 +3,11 @@ XCODEBUILD := xcodebuild -project native/Scribe.xcodeproj -destination 'platform
 
 MODEL_LOG_DIR ?= dist/model-logs
 
+# The edit-by-voice eval classes, listed once: test-models-edit runs exactly these and test-models skips exactly these.
+EDIT_TEST_CLASSES := EditGoldenEvalTests EditGuardTests EditLatencyTests
+EDIT_MODEL_TESTS := $(addprefix -only-testing:ScribeModelTests/,$(EDIT_TEST_CLASSES))
+SKIP_EDIT_TESTS := $(addprefix -skip-testing:ScribeModelTests/,$(EDIT_TEST_CLASSES))
+
 # Regenerate the Xcode project after adding/removing source files.
 generate:
 	cd native && xcodegen generate
@@ -12,8 +17,10 @@ test:
 	$(XCODEBUILD) -scheme ScribeTests test
 
 # Real-model tests: golden cleanup eval, STT fixtures, memory reclaim.
+# The edit evals are skipped here: they take CLEANUP_MODEL and the latency class alone adds dozens of edit calls, so
+# they run under `make test-models-edit` and this target keeps the meaning and runtime it had before they existed.
 test-models:
-	$(XCODEBUILD) -scheme ScribeModelTests test
+	$(XCODEBUILD) -scheme ScribeModelTests $(SKIP_EDIT_TESTS) test
 
 # Compile-check the real-model test target without running it (no GPU).
 # `make test` builds only ScribeTests, so ScribeModelTests breakage is otherwise invisible.
@@ -64,6 +71,24 @@ test-models-e2b:
 # above still applies, so an unavailable/skipped run is an error, not a pass.
 test-models-afm:
 	$(call run-cleanup-model-tests,appleIntelligence,ignore)
+
+# Edit-by-voice evals for ONE cleanup model per run: CLEANUP_MODEL=gemma4 make test-models-edit
+# (default gemma3). Golden (28 cases) and guard (8) hold the model to the gates plus phrase checks;
+# the latency class only reports. Like the cleanup targets it FAILS when a class's tag is missing from the
+# log, so a dropped CLEANUP_MODEL (the tests silently fall back to gemma3) or a skipped suite cannot pass
+# as a green run. These classes honour CLEANUP_MODEL through cleanupBackendUnderTest(); GemmaEditWarmTests
+# hard-wires Gemma 3 and runs under `make test-models` (or its own -only-testing), never here.
+# The class list (EDIT_MODEL_TESTS) is defined at the top, next to the skip list `make test-models` uses.
+test-models-edit:
+	@mkdir -p $(MODEL_LOG_DIR)
+	@set -o pipefail; \
+	model=$${CLEANUP_MODEL:-gemma3}; \
+	TEST_RUNNER_CLEANUP_MODEL=$$model $(XCODEBUILD) -scheme ScribeModelTests $(EDIT_MODEL_TESTS) test 2>&1 | tee $(MODEL_LOG_DIR)/edit-$$model.log; \
+	rc=$$?; \
+	for tag in "edit[$$model]" "edit_guard[$$model]" "edit_latency[$$model]"; do \
+	  grep -qF "$$tag" $(MODEL_LOG_DIR)/edit-$$model.log || { echo "ERROR: no $$tag output in the log - CLEANUP_MODEL did not reach the tests (or the suite was skipped)"; exit 1; }; \
+	done; \
+	exit $$rc
 
 # Report-only measurements (M-2, M-3 in docs/superpowers/plans/2026-10-22-1.5-features.md).
 # They print numbers and assert almost nothing, so read the log. Like the cleanup targets, they
