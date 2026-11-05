@@ -2,6 +2,10 @@ import XCTest
 
 /// The pass/fail rule behind `edit.json` and `edit_guard.json`. Pure, so a broken checker is caught here and not by a
 /// GPU run that reports every model green.
+private struct LatencyBoom: Error, CustomStringConvertible {
+    let description = "the user's selection text"
+}
+
 final class EditGoldenSupportTests: XCTestCase {
     private let shorterSelection =
         "I just wanted to quickly let you know that Marcos will present the quarterly numbers on Thursday at 10 in the main room, and it would be great if everybody could arrive 5 minutes early."
@@ -99,6 +103,29 @@ final class EditGoldenSupportTests: XCTestCase {
         XCTAssertFalse(editCasePassed(flat))
     }
 
+    // MARK: an indented bullet is still a bullet
+
+    private let listSelection = "Marcos needs to book the hotel, pack the 2 laptops, and print the tickets for everyone on Saturday."
+
+    func testAnIndentedBulletCountsForTheNewlinePhrase() {
+        let testCase = makeCase(verb: "list", text: listSelection, mustContain: ["\n- ", "hotel"])
+        XCTAssertTrue(passed(testCase, "  - Marcos books the hotel\n  - Marcos packs the 2 laptops\n\t- Marcos prints the tickets for everyone"), "spaces and tabs before the dash")
+        XCTAssertTrue(passed(testCase, "- Marcos books the hotel\r\n   - Marcos packs the 2 laptops\r\n- Marcos prints the tickets for everyone"), "CRLF line ends")
+    }
+
+    func testAnIndentedForbiddenMarkerIsStillForbidden() {
+        let testCase = makeCase(verb: "list", text: listSelection, mustContain: ["\n- "], mustNotContain: ["\n* "])
+        let result = evaluateEditCase(testCase, rawOutput: "- Marcos books the hotel\n  * Marcos packs the 2 laptops\n  * Marcos prints the tickets for everyone")
+        XCTAssertEqual(result.present, ["\n* "])
+        XCTAssertFalse(editCasePassed(result))
+    }
+
+    func testAListWithoutAnyBulletStillMissesTheBulletPhrase() {
+        let testCase = makeCase(verb: "list", text: listSelection, mustContain: ["\n- "])
+        let result = evaluateEditCase(testCase, rawOutput: "Marcos books the hotel\n   packs the 2 laptops\n   prints the tickets for everyone")
+        XCTAssertEqual(result.missing, ["\n- "])
+    }
+
     // MARK: case-sensitive phrases, for what a lowercase compare cannot see
 
     func testACasedPhraseMatchesCaseSensitively() {
@@ -113,6 +140,31 @@ final class EditGoldenSupportTests: XCTestCase {
     func testAbsentCasedListMeansNothingIsChecked() {
         XCTAssertTrue(passed(makeCase(mustNotContainCased: nil), shorterGood))
         XCTAssertTrue(passed(makeCase(mustNotContainCased: []), shorterGood))
+    }
+
+    // MARK: what a failed case reports
+
+    func testTheFailureMessageNamesAGateRejectionAndShowsInputAndOutput() {
+        let testCase = makeCase(mustContain: ["marcos"])
+        let raw = "Sure! \(shorterGood)"
+        let message = editFailureMessage(testCase, evaluateEditCase(testCase, rawOutput: raw), shown: raw)
+        XCTAssertTrue(message.hasPrefix("[x] gate rejected the output: answered"), message)
+        XCTAssertTrue(message.contains("input:  \(shorterSelection)"), message)
+        XCTAssertTrue(message.contains("output: \(raw)"), message)
+    }
+
+    func testTheFailureMessageListsBothPhraseListsWhenTheGatesAccepted() {
+        let testCase = makeCase(mustContain: ["marcos", "friday"], mustNotContain: ["quarterly"])
+        let message = editFailureMessage(testCase, evaluateEditCase(testCase, rawOutput: shorterGood), shown: shorterGood)
+        XCTAssertTrue(message.contains("missing [\"friday\"]"), message)
+        XCTAssertTrue(message.contains("must not contain [\"quarterly\"]"), message)
+        XCTAssertFalse(message.contains("gate rejected"), message)
+    }
+
+    func testTheLatencyErrorLineNamesTheErrorTypeAndNeverItsText() {
+        let line = editLatencyErrorLine(model: "gemma3", verb: .fixGrammar, error: LatencyBoom())
+        XCTAssertEqual(line, "edit_latency[gemma3] verb=fixGrammar error=LatencyBoom")
+        XCTAssertFalse(line.contains("selection"), "an error can quote the prompt; a selection never reaches a log line")
     }
 
     // MARK: verbs

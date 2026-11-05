@@ -63,6 +63,9 @@ func runGoldenCases(_ cases: [GoldenCase], backend: any CleanupModelBackend, tag
 ///
 /// The output is printed for every failure and for every case that carries a `comment`: those cases exist to measure
 /// a known gate hole, and the reading is in the text the model produced.
+///
+/// ONE assertion per case, on the same `ok` the PASS/FAIL line prints: a gate rejection carries empty phrase lists, so
+/// separate asserts per list would let a deleted rejection check leave the class green while the log says FAIL.
 func runEditCases(_ cases: [EditCase], backend: any CleanupModelBackend, tag: String) async throws -> Int {
     let modelID = cleanupSpecUnderTest().id.rawValue
     var passed = 0
@@ -93,12 +96,7 @@ func runEditCases(_ cases: [EditCase], backend: any CleanupModelBackend, tag: St
         if !ok || testCase.comment != nil { print("    out: \(shown)") }
         if case .rejected(let reason) = result.verdict { print("    gate: rejected (\(reason.rawValue))") }
         guard !known else { continue }
-        let context = "\n  input:  \(testCase.text)\n  output: \(shown)"
-        if case .rejected(let reason) = result.verdict {
-            XCTFail("[\(testCase.id)] gate rejected the output: \(reason.rawValue)\(context)")
-        }
-        XCTAssertTrue(result.missing.isEmpty, "[\(testCase.id)] missing \(result.missing)\(context)")
-        XCTAssertTrue(result.present.isEmpty, "[\(testCase.id)] must not contain \(result.present)\(context)")
+        XCTAssertTrue(ok, editFailureMessage(testCase, result, shown: shown))
     }
     print("[\(tag)] \(passed)/\(cases.count) passed")
     return passed

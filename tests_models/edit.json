@@ -34,17 +34,17 @@
     {
       "id": "fix-en-1",
       "verb": "fixGrammar",
-      "text": "marcos told me the cafe on Main Street opens at 9 on saturday, but he recieved a message yesterday saying the owner is gonig to close early this week, so we should call them first before we plan the team lunch for 12 people.",
-      "must_contain": ["café", "received", "going", "marcos", "saturday", "9", "12"],
-      "must_not_contain": ["recieved", "gonig"]
+      "text": "marcos told me the bakery on Main Street opens at 9 on saturday, but he recieved a message yesterday saying the owner is gonig to close early this week, so we should call them first and keep the two orders seperate before we plan the team lunch for 12 people.",
+      "must_contain": ["received", "going", "separate", "marcos", "saturday", "9", "12"],
+      "must_not_contain": ["recieved", "gonig", "seperate"]
     },
     {
       "id": "fix-en-2",
       "verb": "fixGrammar",
-      "text": "marcos said the price of the stock rose on thursday and that he will presnt the 12 slides to the board, but honestly the headline is a total cliche and we should receive the final numbers befor noon on friday.",
+      "text": "marcos said the price of the stock rose on thursday and that he will presnt the 12 slides to the board, but honestly the headline is definately misleading and we should receive the final numbers befor noon on friday.",
       "comment": "Case promotion: 'rose' and 'will' are common words that are also names; gate 5 compares capitals folded against every selection word, so 'Rose' or 'Will' passes the gate. must_not_contain_cased counts how often a model does it.",
-      "must_contain": ["present", "before", "cliché", "marcos", "thursday", "12", "friday"],
-      "must_not_contain": ["presnt", " befor "],
+      "must_contain": ["present", "before", "definitely", "marcos", "thursday", "12", "friday"],
+      "must_not_contain": ["presnt", " befor ", "definately"],
       "must_not_contain_cased": ["Rose", "Will"]
     },
     {
@@ -80,7 +80,7 @@
     {
       "id": "formal-es-1",
       "verb": "formal",
-      "text": "oye Ricardo, ya chido quedó lo del reporte de las 20 ventas, pero la neta necesito que me lo mandes el martes porque el jueves va a venir el jefe y no quiero que se me arme el desmadre",
+      "text": "oye Ricardo, ya quedó chido lo del reporte de las 20 ventas, pero la neta necesito que me lo mandes el martes porque el jueves va a venir el jefe y no quiero que se me arme el desmadre",
       "must_contain": ["ricardo", "20", "martes", "jueves"],
       "must_not_contain": ["oye", "chido", "la neta", "desmadre"]
     },
@@ -165,7 +165,7 @@
       "id": "tospanish-en-short",
       "verb": "toSpanish",
       "text": "Good morning, team!",
-      "comment": "Short translation (the one deliberate exception to the 25-60 word rule): a greeting has no stopwords, so the Spanish result scores 0 and gate 4 (score <= -2) rejects it as 'language changed'. Measured reality, not a model failure; the decision (word floor or lower threshold) is the orchestrator's.",
+      "comment": "Short translation (the one deliberate exception to the 25-60 word rule): under six words gate 4 is skipped, since a greeting has no stopwords to score. The other gates and the phrases still apply, so an untranslated echo fails must_contain.",
       "must_contain": ["buenos", "equipo"],
       "must_not_contain": ["the ", " and "]
     },
@@ -195,7 +195,7 @@
       "id": "toenglish-es-short",
       "verb": "toEnglish",
       "text": "¡Buenos días, equipo!",
-      "comment": "Short translation (exception to the 25-60 word rule): no English stopwords, so the result scores 0 and gate 4 (score >= 2) rejects it. Same measured hole as tospanish-en-short, in the other direction.",
+      "comment": "Short translation (exception to the 25-60 word rule): under six words gate 4 is skipped, the other direction of tospanish-en-short. The phrases still apply.",
       "must_contain": ["good morning", "team"],
       "must_not_contain": [" el ", " que "]
     },

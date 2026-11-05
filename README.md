@@ -320,7 +320,7 @@ outside scribe's process. scribe manages them on demand:
 ```sh
 make generate              # regenerate the Xcode project after adding files
 make test                  # unit suite (fast, no models)
-make test-models           # real-model suite: golden cleanup eval, STT fixtures, memory reclaim
+make test-models           # real-model suite: golden cleanup eval, STT fixtures, memory reclaim (not the edit evals)
 make build-models          # compile-check the real-model test target (no GPU, no run)
 make test-models-gemma4    # golden + guard + fidelity for Gemma 4 E4B (CLEANUP_MODEL=gemma4)
 make test-models-e2b       # same for Gemma 4 E2B (CLEANUP_MODEL=gemma4e2b)
