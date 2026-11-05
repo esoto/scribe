@@ -403,9 +403,10 @@ final class DictationCoordinator: ObservableObject {
     // MARK: - Pipeline callbacks (always entered on @MainActor — see the sinks in init)
 
     func applyState(_ newState: PipelineState, from source: PipelineSource = .dictation) {
-        // Before anything is touched: a job finishing in the other pipeline under a live hold must not flip the glyph,
-        // cancel the delayed Listening pill, or hide the pill.
-        if newState == .processing || newState == .idle, microphoneIsHeldByTheOther(than: source) { return }
+        // Before anything is touched: a job in the other pipeline under a live hold, whatever it ends in, must not flip
+        // the glyph, cancel the delayed Listening pill, hide the pill, or sound a failure over the hold. Only the
+        // hold's own .recording is news.
+        if newState != .recording, microphoneIsHeldByTheOther(than: source) { return }
         state = newState
         errorRevert?.cancel()
         hudShow?.cancel()
@@ -445,8 +446,8 @@ final class DictationCoordinator: ObservableObject {
         }
     }
 
-    /// The other pipeline's `.processing` and `.idle` are ignored while this one is armed, so a held dictation never
-    /// sees an edit job's states and a held edit never sees a dictation job's.
+    /// Every state of the other pipeline but `.recording` is ignored while this one is armed, so a held dictation never
+    /// sees an edit job's states (a sticky `.error` included) and a held edit never sees a dictation job's.
     private func microphoneIsHeldByTheOther(than source: PipelineSource) -> Bool {
         switch source {
         case .dictation: return editing

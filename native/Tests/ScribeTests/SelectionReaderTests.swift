@@ -330,7 +330,7 @@ final class SelectionReaderTests: XCTestCase {
         let started = ContinuousClock.now
 
         let selection = try await PasteboardSelectionReader(
-            pasteboard: Clipboard(items: mine), keys: Keys(), waitSeconds: 0.01, pollSeconds: 0.005
+            pasteboard: Clipboard(items: mine), keys: Keys(), waitSeconds: 0.01, pollSeconds: 0.005, settle: {}
         ).read(target: 42)
 
         XCTAssertNil(selection)

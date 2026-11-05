@@ -1408,6 +1408,36 @@ final class DictationCoordinatorTests: XCTestCase {
         XCTAssertEqual(c.state, .idle)
     }
 
+    func testADictationJobEndingInAnErrorDuringAnEditHoldLeavesTheMenuStateThePillAndTheSounds() async {
+        let c = make(errorStickySeconds: 0.05, withEdits: true)
+        c.handleKeyDown(chord: true)
+        let recording = await eventually { c.state == .recording }
+        XCTAssertTrue(recording)
+
+        sinks.onState(.error)   // an earlier dictation's transcription failed while this edit is being said
+        try? await Task.sleep(nanoseconds: 200_000_000)   // longer than the sticky error would last
+
+        XCTAssertEqual(c.state, .recording, "that error is not the edit hold's news, and neither is its revert to idle")
+        XCTAssertEqual(hud.phase, .editing)
+        XCTAssertEqual(sounds.value, ["Pop"], "no Basso mid-hold")
+        c.handleKeyUp()
+    }
+
+    func testAnEditJobEndingInAnErrorDuringADictationHoldLeavesTheMenuStateThePillAndTheSounds() async {
+        let c = make(errorStickySeconds: 0.05, holdThreshold: 0.05, withEdits: true)
+        c.handleKeyDown()
+        let listening = await eventually { [unowned self] in hud.phase == .listening }
+        XCTAssertTrue(listening)
+
+        editSinks.onState(.error)   // an earlier edit failed while this dictation is being said
+        try? await Task.sleep(nanoseconds: 200_000_000)
+
+        XCTAssertEqual(c.state, .recording, "that error is not the dictation hold's news, and neither is its revert to idle")
+        XCTAssertEqual(hud.phase, .listening)
+        XCTAssertEqual(sounds.value, ["Pop"], "no Basso mid-hold")
+        c.handleKeyUp()
+    }
+
     func testTheLevelReachesThePillWhileEditing() {
         let c = make(withEdits: true)
         c.handleKeyDown(chord: true)

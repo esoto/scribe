@@ -30,10 +30,11 @@ final class PasteboardSelectionReader: SelectionReader {
 
     /// `settle` is awaited first in `read`, before the snapshot: scribe's own recent paste (and the restore it has
     /// pending) must be out of the way, or the snapshot would be scribe's text rather than the user's clipboard.
-    /// It may wait out a paste that is still being consumed, so it is async.
+    /// It may wait out a paste that is still being consumed, so it is async. It has no default: a reader left
+    /// unwired would snapshot scribe's own paste, and that must not compile.
     init(
         pasteboard: PasteboardLike, keys: KeyPressing, waitSeconds: Double = 0.3, pollSeconds: Double = 0.02,
-        settle: @escaping () async -> Void = {},
+        settle: @escaping () async -> Void,
         sleep: @escaping (Double) async -> Void = { try? await Task.sleep(nanoseconds: UInt64($0 * 1e9)) }
     ) {
         self.pasteboard = pasteboard
