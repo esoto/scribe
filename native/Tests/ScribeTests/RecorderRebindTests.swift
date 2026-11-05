@@ -12,6 +12,12 @@ final class RecorderRebindTests: XCTestCase {
     private var logs: [String] = []
     /// Applied to every engine made from now on, so a test can fail the bind of a rebuilt engine.
     private var bindStatusForNewEngines: OSStatus = noErr
+    /// Applied to every engine made from now on, like `bindStatusForNewEngines`.
+    private var postsConfigurationChangeOnBindForNewEngines = false
+    private var rebindOnStartForNewEngines: AudioDeviceID?
+    private var resolveCalls = 0
+    private let didNotStick = "recorder: input usb did not stick; keeping the current engine"
+    private let couldNotSelect = "recorder: could not select input device usb: OSStatus -50"
     private var control: AVEngineControl!
     private var recorder: Recorder!
 
@@ -23,12 +29,20 @@ final class RecorderRebindTests: XCTestCase {
         engines = []
         logs = []
         bindStatusForNewEngines = noErr
+        postsConfigurationChangeOnBindForNewEngines = false
+        rebindOnStartForNewEngines = nil
+        resolveCalls = 0
         control = AVEngineControl(
             onLog: { [unowned self] in logs.append($0) },
-            resolveDevice: { [unowned self] in devices[$0] },
+            resolveDevice: { [unowned self] in
+                resolveCalls += 1
+                return devices[$0]
+            },
             makeEngine: { [unowned self] in
                 let fake = FakeCaptureEngine()
                 fake.bindStatus = bindStatusForNewEngines
+                fake.postsConfigurationChangeOnBind = postsConfigurationChangeOnBindForNewEngines
+                fake.rebindOnStart = rebindOnStartForNewEngines
                 engines.append(fake)
                 return fake
             })
@@ -264,6 +278,21 @@ final class RecorderRebindTests: XCTestCase {
         XCTAssertEqual(logs.count, 2)
     }
 
+    func testDeviceVanishingFromAnAlreadyBoundEngineWithoutAConfigurationChangeIsLoggedOnceNotRebuilt() throws {
+        try chooseUSBMicAndPrewarm()
+        devices = [:]
+
+        try dictate()
+        try dictate()
+
+        XCTAssertEqual(engines.count, 2, "only a configuration change rebuilds; the miss is reported")
+        XCTAssertEqual(engine.bindRequests, [usbMic])
+        XCTAssertEqual(engine.startCalls, 2, "capture still starts")
+        XCTAssertEqual(
+            logs, ["recorder: input usb not found; keeping the current engine"],
+            "once per engine; it stays bound to the vanished device, so the line must not claim the system default")
+    }
+
     // MARK: re-picking
 
     func testRepickingTheSameInputRebuildsTheEngine() throws {
@@ -288,6 +317,131 @@ final class RecorderRebindTests: XCTestCase {
         try recorder.prewarm()
         XCTAssertEqual(engines.count, 3)
         XCTAssertEqual(engine.bindRequests, [])
+    }
+
+    // MARK: a bind that does not stick is tried once
+
+    func testABindThatAlwaysFailsRebuildsOnceAndThenKeepsTheEngine() throws {
+        bindStatusForNewEngines = -50
+        try chooseUSBMicAndPrewarm()
+
+        for _ in 0..<4 { try dictate() }
+
+        XCTAssertEqual(engines.count, 3, "the initial engine, the selection's, and exactly one rebuild")
+        XCTAssertEqual(engine.startCalls, 4, "capture still starts every time")
+        XCTAssertEqual(logs, [couldNotSelect, couldNotSelect, didNotStick])
+    }
+
+    func testAnEngineThatRebindsItselfOnEveryStartIsRebuiltOnceAndThenKept() throws {
+        rebindOnStartForNewEngines = headset
+        try chooseUSBMicAndPrewarm()
+
+        for _ in 0..<5 { try dictate() }
+
+        XCTAssertEqual(engines.count, 3, "the initial engine, the selection's, and exactly one rebuild")
+        XCTAssertEqual(logs, ["recorder: input rebound to usb", didNotStick])
+    }
+
+    func testANewDeviceIDForTheSameInputStillRebuildsAfterABindDidNotStick() throws {
+        bindStatusForNewEngines = -50
+        try chooseUSBMicAndPrewarm()
+        try dictate()
+        try dictate()
+        XCTAssertEqual(engines.count, 3)
+
+        devices["usb"] = 43
+        try dictate()
+
+        XCTAssertEqual(engines.count, 4)
+        XCTAssertEqual(engine.bindRequests, [43])
+    }
+
+    func testAConfigurationChangeStillRebuildsOnceAfterABindDidNotStick() throws {
+        bindStatusForNewEngines = -50
+        try chooseUSBMicAndPrewarm()
+        try dictate()
+        try dictate()
+        XCTAssertEqual(engines.count, 3)
+
+        engine.simulateConfigurationChange()
+        for _ in 0..<3 { try dictate() }
+
+        XCTAssertEqual(engines.count, 4, "one rebuild for the change, none for the dictations after it")
+    }
+
+    func testSelectingTheInputAgainEarnsAnotherRebuildAfterABindDidNotStick() throws {
+        bindStatusForNewEngines = -50
+        try chooseUSBMicAndPrewarm()
+        try dictate()
+        try dictate()
+        XCTAssertEqual(engines.count, 3)
+
+        recorder.setPreferredInput(uid: "usb")
+        try dictate()
+        try dictate()
+
+        XCTAssertEqual(engines.count, 5, "the new selection's engine, then one rebuild")
+    }
+
+    func testDriftingAgainAfterABindThatStuckIsRebuiltAgain() throws {
+        try chooseUSBMicAndPrewarm()
+        engine.drift(to: headset)
+        try dictate()
+        try dictate()
+        engine.drift(to: headset)
+        try dictate()
+
+        XCTAssertEqual(engines.count, 4, "the first rebuild stuck, so the second drift is a new problem")
+        XCTAssertEqual(engine.boundDevice, usbMic)
+        XCTAssertFalse(logs.contains(didNotStick))
+    }
+
+    // MARK: the configuration change our own bind posts
+
+    func testTheConfigurationChangeOurOwnFirstBindPostsDoesNotRebuildTheNextArm() throws {
+        postsConfigurationChangeOnBindForNewEngines = true
+        try chooseUSBMicAndPrewarm()
+        XCTAssertEqual(logs, ["recorder: audio configuration changed"], "still logged: it is a fact worth seeing")
+
+        try dictate()
+        try dictate()
+
+        XCTAssertEqual(engines.count, 2)
+    }
+
+    func testTheConfigurationChangeOurOwnRebuildBindPostsDoesNotRebuildTheNextArm() throws {
+        try chooseUSBMicAndPrewarm()
+        postsConfigurationChangeOnBindForNewEngines = true
+        engine.drift(to: headset)
+
+        try dictate()
+        try dictate()
+        try dictate()
+
+        XCTAssertEqual(engines.count, 3)
+        XCTAssertEqual(logs, ["recorder: audio configuration changed", "recorder: input rebound to usb"])
+    }
+
+    // MARK: one device lookup per start
+
+    func testAFirstBindResolvesTheChosenDeviceOnce() throws {
+        recorder.setPreferredInput(uid: "usb")
+        resolveCalls = 0
+
+        try recorder.prewarm()
+
+        XCTAssertEqual(resolveCalls, 1)
+    }
+
+    func testARebuildResolvesTheChosenDeviceOnce() throws {
+        try chooseUSBMicAndPrewarm()
+        engine.drift(to: headset)
+        resolveCalls = 0
+
+        try recorder.arm()
+
+        XCTAssertEqual(engines.count, 3)
+        XCTAssertEqual(resolveCalls, 1, "the id that was compared is the id that is bound")
     }
 
     // MARK: failures worth a log line

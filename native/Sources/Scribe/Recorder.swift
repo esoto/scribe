@@ -64,7 +64,8 @@ final class Recorder: RecorderLike {
         return pcm
     }
 
-    /// Preallocates engine resources without starting capture.
+    /// Preallocates engine resources without starting capture. Never while armed: once macOS stops the engine
+    /// mid-hold it reads as not running, and preparing it would rebuild the engine under the recording.
     func prewarm() throws {
         guard !engineControl.isRunning else { return }
         engineControl.prepare()
@@ -78,6 +79,10 @@ final class Recorder: RecorderLike {
 /// AVAudioEngine adapter. Before every start it re-checks that the engine still captures from the chosen microphone,
 /// because macOS can move it to the system default behind scribe's back (a headset connecting, a Bluetooth profile switch).
 /// The checks run against a `CaptureEngine`, so they are tested with a fake; `LiveCaptureEngine` is verified manually.
+/// Callers run on the main actor and never `prepare` or `start` while armed, between key-down and key-up. That
+/// discipline is what keeps a rebuild off a live recording: once macOS stops the engine mid-hold, `isRunning` is
+/// false although the recording is still armed, so the running check in `InputRebind` alone would not protect it.
+/// Only the notification and audio threads touch the flags behind `stateLock`.
 final class AVEngineControl: EngineControl {
     var onSamples: (([Float]) -> Void)?
 
@@ -88,6 +93,8 @@ final class AVEngineControl: EngineControl {
     private var tapInstalled = false
     private var preferredInputUID: String?
     private var missLogged = false
+    private var lastRebuildTarget: InputRebind.Target?
+    private var didNotStickLogged = false
 
     /// Guards the flags that the notification and audio threads write and the starting thread reads.
     private let stateLock = NSLock()
@@ -129,32 +136,49 @@ final class AVEngineControl: EngineControl {
 
     func setPreferredInput(uid: String?) {
         preferredInputUID = uid
-        // Re-picking the same device rebuilds too: the engine may have drifted off it, and this is the manual way back.
+        // A same-UID call rebuilds too, so selecting always makes a fresh bind, and a new selection earns one more
+        // attempt after a bind that did not stick.
+        lastRebuildTarget = nil
         rebuildEngine()
     }
 
     /// Binds a fresh engine, or checks that a bound one still captures from the chosen device and rebuilds it if not.
     private func readyForCapture() {
+        // Looked up once: the id that is compared is the id that gets bound.
+        let resolved = preferredInputUID.flatMap(resolveDevice)
         // A fresh engine is bound by its first tap install; comparing it first would only rebuild it again.
         guard tapInstalled else {
-            installTap(announcingRebind: false)
+            installTap(resolved: resolved, announcingRebind: false)
             return
         }
+        let bound = engine.boundDevice
+        // The binding held, so a later mismatch is a new problem and earns a rebuild.
+        if let resolved, bound == resolved { lastRebuildTarget = nil }
         let action = InputRebind.decide(
             wantedUID: preferredInputUID,
-            resolved: preferredInputUID.flatMap(resolveDevice),
-            bound: engine.boundDevice,
+            resolved: resolved,
+            bound: bound,
             configurationChanged: stateLock.withLock { configurationChanged },
+            lastRebuildTarget: lastRebuildTarget,
             running: engine.isRunning)
         switch action {
         case .keep, .deferWhileRunning:
             break
         case .useSystemDefault(let uid):
-            logMissOnce(uid)
+            // This engine is already bound and nothing rebuilds it here, so it stays on its binding.
+            logMissOnce(uid, outcome: "keeping the current engine")
+        case .bindingDidNotStick(let uid):
+            logDidNotStickOnce(uid)
         case .rebuild:
             rebuildEngine()
-            installTap(announcingRebind: true)
+            lastRebuildTarget = rebuildTarget(resolved: resolved)
+            installTap(resolved: resolved, announcingRebind: true)
         }
+    }
+
+    private func rebuildTarget(resolved: AudioDeviceID?) -> InputRebind.Target? {
+        guard let uid = preferredInputUID, let resolved else { return nil }
+        return InputRebind.Target(uid: uid, device: resolved)
     }
 
     /// AVAudioEngine can't swap the input device under a live tap, so any rebind is a new engine.
@@ -163,27 +187,28 @@ final class AVEngineControl: EngineControl {
         engine = makeEngine()
         tapInstalled = false
         missLogged = false
-        stateLock.withLock {
-            configurationChanged = false
-            convertErrorLogged = false
-        }
+        didNotStickLogged = false
+        stateLock.withLock { convertErrorLogged = false }
         watchConfigurationChanges()
     }
 
-    private func installTap(announcingRebind: Bool) {
+    private func installTap(resolved: AudioDeviceID?, announcingRebind: Bool) {
         tapInstalled = true
         // Must run before the tap reads the input format, which is the device's native format.
-        bindPreferredInput(announcingRebind: announcingRebind)
+        bindPreferredInput(resolved: resolved, announcingRebind: announcingRebind)
+        // The bind can make the engine post a configuration change of its own. The tap installed next already reads
+        // the format that change produced, so keeping the flag would rebuild a second time on the next start.
+        stateLock.withLock { configurationChanged = false }
         engine.installTap(
             onSamples: { [weak self] chunk in self?.onSamples?(chunk) },
             onConvertError: { [weak self] description in self?.reportConvertError(description) })
     }
 
     /// Falls back to the system default if the preferred device is unplugged.
-    private func bindPreferredInput(announcingRebind: Bool) {
+    private func bindPreferredInput(resolved: AudioDeviceID?, announcingRebind: Bool) {
         guard let uid = preferredInputUID else { return }
-        guard let device = resolveDevice(uid) else {
-            logMissOnce(uid)
+        guard let device = resolved else {
+            logMissOnce(uid, outcome: "using system default")
             return
         }
         let status = engine.bind(device: device)
@@ -195,10 +220,17 @@ final class AVEngineControl: EngineControl {
         }
     }
 
-    private func logMissOnce(_ uid: String) {
+    /// `outcome` says what the engine does instead, which differs for a new engine and one that is already bound.
+    private func logMissOnce(_ uid: String, outcome: String) {
         guard !missLogged else { return }
         missLogged = true
-        onLog?("recorder: input \(uid) not found; using system default")
+        onLog?("recorder: input \(uid) not found; \(outcome)")
+    }
+
+    private func logDidNotStickOnce(_ uid: String) {
+        guard !didNotStickLogged else { return }
+        didNotStickLogged = true
+        onLog?("recorder: input \(uid) did not stick; keeping the current engine")
     }
 
     private func watchConfigurationChanges() {

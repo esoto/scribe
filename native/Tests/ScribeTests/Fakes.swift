@@ -598,6 +598,10 @@ final class FakeCaptureEngine: CaptureEngine {
     private(set) var stopCalls = 0
     var bindStatus: OSStatus = noErr
     var startError: Error?
+    /// Posts a configuration change from inside every successful bind, as an engine whose own bind reconfigures it would.
+    var postsConfigurationChangeOnBind = false
+    /// Moves the bound device on every start, as an engine that overrides the device it was given would.
+    var rebindOnStart: AudioDeviceID?
 
     private var onSamples: (([Float]) -> Void)?
     private var onConvertError: ((String) -> Void)?
@@ -606,6 +610,7 @@ final class FakeCaptureEngine: CaptureEngine {
     func bind(device: AudioDeviceID) -> OSStatus {
         bindRequests.append(device)
         if bindStatus == noErr { boundDevice = device }
+        if bindStatus == noErr && postsConfigurationChangeOnBind { onConfigurationChange?() }
         return bindStatus
     }
 
@@ -625,6 +630,7 @@ final class FakeCaptureEngine: CaptureEngine {
         startCalls += 1
         if let startError { throw startError }
         isRunning = true
+        if let rebindOnStart { boundDevice = rebindOnStart }
     }
 
     func pause() {
