@@ -21,6 +21,9 @@ protocol UnloadableCleaner: CleanupBackend {
 /// `CleanupModelCatalog.promptSnapshot`).
 protocol CleanupModelBackend: UnloadableCleaner, AnyObject {
     func setDictionary(_ snapshot: DictionarySnapshot)
+    /// Applies `instruction` to `text` with the edit prompt, which never shares a warm prefix with cleanup.
+    /// `maxTokens` comes from the caller, which knows the verb (`EditPrompt.maxTokens(verb:inputTokens:)`).
+    func edit(instruction: String, text: String, maxTokens: Int) async throws -> String
     /// False for a backend with nothing resident in our process (Apple
     /// Intelligence): idle-unload skips it. A requirement so the default is
     /// dispatched dynamically through `any CleanupModelBackend`.
@@ -34,8 +37,6 @@ extension CleanupModelBackend {
 /// Warm KV cache for the fixed prompt prefix. Always `.copy()` it, never mutate: generation mutates a cache.
 private struct WarmPrefix {
     var cache: [KVCache]
-    /// Staleness check: equal strings guarantee the prefix tokens still apply.
-    var systemPrompt: String
     var prefixLen: Int
     var prefixTokens: [Int]
     /// Extra leading tokens to strip in the FAST tier; nil means SAFE only.
@@ -48,16 +49,17 @@ private struct WarmPrefix {
 /// renders the full chat and feeds only the suffix; the FAST tier renders only the incremental turn
 /// after a startup parity gate. Both verify tokens per call and fall back to uncached generation.
 ///
-/// `@unchecked Sendable`: warmPrefix/warmupAttemptedFor are only touched inside container.perform,
-/// which serializes calls with a real async mutex; dictionarySnapshot has its own NSLock.
+/// The edit prompt keeps a second prefix of its own (`WarmSlots`): it warms on first use, takes the SAFE tier only,
+/// and `preload()` still warms cleanup alone, so a dictation after launch pays nothing new.
+///
+/// `@unchecked Sendable`: warmSlots is only touched inside container.perform, which serializes calls with a
+/// real async mutex; dictionarySnapshot has its own NSLock.
 final class GemmaBackend: CleanupModelBackend, @unchecked Sendable {
     private let lazyModel: LazyModel<ModelContainer>
     private let onLog: (@Sendable (String) -> Void)?
 
-    /// nil until warm-up succeeds.
-    private var warmPrefix: WarmPrefix?
-    /// Prevents retrying a failed warm-up per call; a changed prompt retries.
-    private var warmupAttemptedFor: String?
+    /// A slot is empty until its warm-up succeeds; a failed warm-up is not retried per call, a changed prompt retries.
+    private var warmSlots = WarmSlots<WarmPrefix>()
 
     /// Own lock so setDictionary works from any thread without forcing a model load.
     private let dictionaryLock = NSLock()
@@ -149,6 +151,27 @@ final class GemmaBackend: CleanupModelBackend, @unchecked Sendable {
         return messages
     }
 
+    /// The edit chat. `EditPrompt.fewShots` inputs are already wrapped, so they go in as they are.
+    static func buildEditChat(
+        instruction: String, text: String, systemPrompt: String = EditPrompt.systemPrompt
+    ) -> [Chat.Message] {
+        var messages: [Chat.Message] = [.system(systemPrompt)]
+        for (wrappedInput, output) in EditPrompt.fewShots {
+            messages.append(.user(wrappedInput))
+            messages.append(.assistant(output))
+        }
+        messages.append(.user(EditPrompt.wrap(instruction: instruction, text: text)))
+        return messages
+    }
+
+    /// The two queries whose common leading tokens are the edit prefix. Their instructions open with different words
+    /// on purpose: the shared run then ends right after `<instruction>`, so the prefix fits every verb. Two
+    /// "Rewrite it …" instructions would pin it to those words and miss for translate, fix grammar and list.
+    static let editWarmupSamples: [(instruction: String, text: String)] = [
+        (EditVerb.fixGrammar.instruction, warmupSampleEN),
+        (EditVerb.toEnglish.instruction, warmupSampleES),
+    ]
+
     func clean(_ text: String) async throws -> String {
         do {
             let container = try await lazyModel.get()
@@ -164,10 +187,10 @@ final class GemmaBackend: CleanupModelBackend, @unchecked Sendable {
                 // Captured once so a mid-call setDictionary can't split the prompt.
                 let systemPrompt = self.currentSystemPrompt()
                 await self.warmUpIfNeeded(
-                    context: context, parameters: parameters, systemPrompt: systemPrompt)
+                    context: context, parameters: parameters, slot: .cleanup, systemPrompt: systemPrompt)
                 let chat = GemmaBackend.buildChat(for: text, systemPrompt: systemPrompt)
                 return try await self.generateCleaned(
-                    text: text, chat: chat, parameters: parameters, context: context)
+                    text: text, chat: chat, slot: .cleanup, parameters: parameters, context: context)
             }
             return cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
         } catch let error as CleanupError {
@@ -177,35 +200,74 @@ final class GemmaBackend: CleanupModelBackend, @unchecked Sendable {
         }
     }
 
-    /// Builds the warm prefix for `systemPrompt`; no-op if current or already attempted.
+    /// Mirrors `clean` with the edit prompt and the caller's token budget. Always the SAFE tier: the FAST tier's
+    /// parity gate is built on the cleanup wrap. Nothing of `text` or `instruction` is logged or put in an error.
+    func edit(instruction: String, text: String, maxTokens: Int) async throws -> String {
+        do {
+            let container = try await lazyModel.get()
+            let parameters = GenerateParameters(maxTokens: maxTokens, temperature: 0.0)
+            let edited = try await container.perform { context in
+                await self.warmUpIfNeeded(
+                    context: context, parameters: parameters, slot: .edit, systemPrompt: EditPrompt.systemPrompt)
+                let chat = GemmaBackend.buildEditChat(instruction: instruction, text: text)
+                return try await self.generateCleaned(
+                    text: text, chat: chat, slot: .edit, parameters: parameters, context: context)
+            }
+            return edited.trimmingCharacters(in: .whitespacesAndNewlines)
+        } catch let error as CleanupError {
+            throw error
+        } catch {
+            throw GemmaBackend.editFailure(error)
+        }
+    }
+
+    /// The error type only, as the Apple Intelligence edit reports it: a tokenizer or template error can quote its
+    /// input, and the input holds the user's selection.
+    static func editFailure(_ error: Error) -> CleanupError {
+        CleanupError(message: "edit failed: \(type(of: error))")
+    }
+
+    /// The EN and ES warm-up chats of a slot, whose common leading tokens are its fixed prefix.
+    private static func warmupChats(
+        slot: WarmSlot, systemPrompt: String
+    ) -> (en: [Chat.Message], es: [Chat.Message]) {
+        switch slot {
+        case .cleanup:
+            return (
+                buildChat(for: warmupSampleEN, systemPrompt: systemPrompt),
+                buildChat(for: warmupSampleES, systemPrompt: systemPrompt)
+            )
+        case .edit:
+            let (en, es) = (editWarmupSamples[0], editWarmupSamples[1])
+            return (
+                buildEditChat(instruction: en.instruction, text: en.text, systemPrompt: systemPrompt),
+                buildEditChat(instruction: es.instruction, text: es.text, systemPrompt: systemPrompt)
+            )
+        }
+    }
+
+    /// Builds the warm prefix of `slot` for `systemPrompt`; no-op if current or already attempted.
     /// Failure is non-fatal and falls back to uncached generation. Call inside container.perform.
     private func warmUpIfNeeded(
-        context: ModelContext, parameters: GenerateParameters, systemPrompt: String
+        context: ModelContext, parameters: GenerateParameters, slot: WarmSlot, systemPrompt: String
     ) async {
-        if let warm = warmPrefix, warm.systemPrompt == systemPrompt { return }
-        if warmPrefix == nil, warmupAttemptedFor == systemPrompt { return }
-        warmPrefix = nil
-        warmupAttemptedFor = systemPrompt
+        guard warmSlots.beginWarmUp(slot, systemPrompt: systemPrompt) else { return }
+        let label = slot.label
 
         do {
             // The common leading tokens of two different queries are the fixed prefix; avoids
             // addGenerationPrompt: false, which the tokenizer bridge doesn't expose.
             // This text-only processor yields 1-D token arrays (no batch dim).
-            let renderedEN = try await context.processor.prepare(
-                input: UserInput(
-                    chat: GemmaBackend.buildChat(
-                        for: GemmaBackend.warmupSampleEN, systemPrompt: systemPrompt)))
-            let renderedES = try await context.processor.prepare(
-                input: UserInput(
-                    chat: GemmaBackend.buildChat(
-                        for: GemmaBackend.warmupSampleES, systemPrompt: systemPrompt)))
+            let chats = GemmaBackend.warmupChats(slot: slot, systemPrompt: systemPrompt)
+            let renderedEN = try await context.processor.prepare(input: UserInput(chat: chats.en))
+            let renderedES = try await context.processor.prepare(input: UserInput(chat: chats.es))
 
             let tokensEN = renderedEN.text.tokens.asArray(Int.self)
             let tokensES = renderedES.text.tokens.asArray(Int.self)
             let prefixLen = GemmaBackend.commonPrefixLength(tokensEN, tokensES)
 
             guard prefixLen > 0, prefixLen < tokensEN.count, prefixLen < tokensES.count else {
-                onLog?("cleanup: prefix-reuse disabled, degenerate common prefix (\(prefixLen) tokens)")
+                onLog?("\(label): prefix-reuse disabled, degenerate common prefix (\(prefixLen) tokens)")
                 return
             }
 
@@ -217,23 +279,29 @@ final class GemmaBackend: CleanupModelBackend, @unchecked Sendable {
 
             let prefixTokens = Array(tokensEN[0..<prefixLen])
 
-            let fastPathWrapOverlap = await GemmaBackend.parityGateOverlap(
-                prefixTokens: prefixTokens,
-                samples: [
-                    (GemmaBackend.warmupSampleEN, tokensEN),
-                    (GemmaBackend.warmupSampleES, tokensES),
-                ],
-                context: context,
-                onLog: onLog)
+            // The parity gate is built on the cleanup wrap; an edit has no FAST tier and stays SAFE.
+            var fastPathWrapOverlap: Int?
+            if slot == .cleanup {
+                fastPathWrapOverlap = await GemmaBackend.parityGateOverlap(
+                    prefixTokens: prefixTokens,
+                    samples: [
+                        (GemmaBackend.warmupSampleEN, tokensEN),
+                        (GemmaBackend.warmupSampleES, tokensES),
+                    ],
+                    context: context,
+                    onLog: onLog)
+            }
 
-            warmPrefix = WarmPrefix(
-                cache: cache, systemPrompt: systemPrompt, prefixLen: prefixLen,
-                prefixTokens: prefixTokens, fastPathWrapOverlap: fastPathWrapOverlap)
+            warmSlots.store(
+                WarmPrefix(
+                    cache: cache, prefixLen: prefixLen, prefixTokens: prefixTokens,
+                    fastPathWrapOverlap: fastPathWrapOverlap),
+                in: slot, systemPrompt: systemPrompt)
             onLog?(
-                "cleanup: warm prefix ready, prefixLen=\(prefixLen) fastPath=\(fastPathWrapOverlap != nil) wrapOverlap=\(fastPathWrapOverlap.map(String.init) ?? "n/a")"
+                "\(label): warm prefix ready, prefixLen=\(prefixLen) fastPath=\(fastPathWrapOverlap != nil) wrapOverlap=\(fastPathWrapOverlap.map(String.init) ?? "n/a")"
             )
         } catch {
-            onLog?("cleanup: prefix warm-up failed, falling back to uncached generation: \(error)")
+            onLog?("\(label): prefix warm-up failed, falling back to uncached generation: \(error)")
         }
     }
 
@@ -295,12 +363,14 @@ final class GemmaBackend: CleanupModelBackend, @unchecked Sendable {
         return 0
     }
 
-    /// Generates cleaned text, reusing the warm prefix cache when available.
-    /// FAST renders only the incremental turn; SAFE renders the full chat. Any token mismatch falls back to fresh generation.
+    /// Generates text for either prompt family, reusing the slot's warm prefix cache when available.
+    /// FAST renders only the incremental turn (cleanup only); SAFE renders the full chat. Any token mismatch falls back
+    /// to fresh generation.
     private func generateCleaned(
-        text: String, chat: [Chat.Message], parameters: GenerateParameters, context: ModelContext
+        text: String, chat: [Chat.Message], slot: WarmSlot, parameters: GenerateParameters, context: ModelContext
     ) async throws -> String {
-        guard let warm = warmPrefix else {
+        let label = slot.label
+        guard let warm = warmSlots.prefix(in: slot) else {
             return try await GemmaBackend.runFreshGeneration(
                 chat: chat, parameters: parameters, context: context)
         }
@@ -308,7 +378,7 @@ final class GemmaBackend: CleanupModelBackend, @unchecked Sendable {
         let inputText: LMInput.Text
         let cache: [KVCache]
 
-        if let wrapOverlap = warm.fastPathWrapOverlap {
+        if slot == .cleanup, let wrapOverlap = warm.fastPathWrapOverlap {
             let incremental = try await context.processor.prepare(
                 input: UserInput(chat: [.user(CleanupPrompt.wrap(text))]))
             var tokens = incremental.text.tokens.asArray(Int.self)
@@ -322,7 +392,7 @@ final class GemmaBackend: CleanupModelBackend, @unchecked Sendable {
                 guard tokens.count >= wrapOverlap,
                     toStrip == Array(warm.prefixTokens.suffix(wrapOverlap))
                 else {
-                    onLog?("cleanup: fast-path boundary mismatch, using full render")
+                    onLog?("\(label): fast-path boundary mismatch, using full render")
                     return try await GemmaBackend.runFreshGeneration(
                         chat: chat, parameters: parameters, context: context)
                 }
@@ -341,7 +411,7 @@ final class GemmaBackend: CleanupModelBackend, @unchecked Sendable {
             guard fullTokens.count > warm.prefixLen,
                 Array(fullTokens[0..<warm.prefixLen]) == warm.prefixTokens
             else {
-                onLog?("cleanup: prefix mismatch for this call, falling back to uncached generation")
+                onLog?("\(label): prefix mismatch for this call, falling back to uncached generation")
                 return try await GemmaBackend.runFreshGeneration(
                     chat: chat, parameters: parameters, context: context)
             }
@@ -388,13 +458,12 @@ final class GemmaBackend: CleanupModelBackend, @unchecked Sendable {
         return n
     }
 
-    /// Must drop the warm KV cache, the container, and MLX's buffer cache, or ~2.5 GB stays resident.
-    /// Cache is cleared inside container.perform so it can't race clean().
+    /// Must drop the warm KV caches, the container, and MLX's buffer cache, or ~2.5 GB stays resident.
+    /// Caches are cleared inside container.perform so it can't race clean() or edit().
     func unload() async {
         if await lazyModel.isLoaded, let container = try? await lazyModel.get() {
             await container.perform { _ in
-                self.warmPrefix = nil
-                self.warmupAttemptedFor = nil
+                self.warmSlots.removeAll()
             }
         }
         await lazyModel.unload()
@@ -407,14 +476,21 @@ final class GemmaBackend: CleanupModelBackend, @unchecked Sendable {
         await container.perform { context in
             // Current prompt, so preload also rebuilds a prefix made stale by a dictionary change.
             await self.warmUpIfNeeded(
-                context: context, parameters: parameters,
+                context: context, parameters: parameters, slot: .cleanup,
                 systemPrompt: self.currentSystemPrompt())
         }
     }
 
-    var isWarm: Bool { warmPrefix != nil }
+    /// The cleanup prefix; the edit one is `isEditWarm`, built on the first edit.
+    var isWarm: Bool { warmSlots.prefix(in: .cleanup) != nil }
 
-    var warmSystemPromptForTesting: String? { warmPrefix?.systemPrompt }
+    var isEditWarm: Bool { warmSlots.prefix(in: .edit) != nil }
+
+    /// The cleanup slot's prompt, so a dictionary change stays observable.
+    var warmSystemPromptForTesting: String? { warmSlots.systemPrompt(in: .cleanup) }
+
+    /// The system prompts that have a warm prefix, sorted.
+    var warmPrefixSlotsForTesting: [String] { warmSlots.systemPrompts }
 
     var isLoaded: Bool { get async { await lazyModel.isLoaded } }
 }

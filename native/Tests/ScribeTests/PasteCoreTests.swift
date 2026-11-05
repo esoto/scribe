@@ -3,6 +3,7 @@ import XCTest
 final class PasteCoreTests: XCTestCase {
     class FakePasteboard: PasteboardLike {
         private(set) var items: [PasteboardItemData]
+        private(set) var snapshotCalls = 0
         private var count = 1
 
         init(items: [PasteboardItemData] = [["public.utf8-plain-text": Data("old stuff".utf8)]]) {
@@ -10,7 +11,8 @@ final class PasteCoreTests: XCTestCase {
         }
 
         func snapshot() -> [PasteboardItemData]? {
-            items.isEmpty ? nil : items
+            snapshotCalls += 1
+            return items.isEmpty ? nil : items
         }
 
         func restore(_ items: [PasteboardItemData]) {
@@ -29,6 +31,10 @@ final class PasteCoreTests: XCTestCase {
 
         func changeCount() -> Int {
             count
+        }
+
+        func string() -> String? {
+            items.first?["public.utf8-plain-text"].flatMap { String(data: $0, encoding: .utf8) }
         }
 
         /// Simulates the user copying something else.
@@ -236,5 +242,246 @@ final class PasteCoreTests: XCTestCase {
         try paster.paste("hola")
 
         XCTAssertEqual(sched.delays, [0.5])
+    }
+
+    // MARK: - replaceSelection
+
+    /// What the reader's ⌘C left on the clipboard; the user's own clipboard is the external snapshot.
+    private let selectionOnClipboard = [["public.utf8-plain-text": Data("the selection".utf8)]]
+    private let usersClipboard = [["public.utf8-plain-text": Data("mine".utf8)]]
+
+    func test_replaceSelection_pastes_the_edit_and_restores_the_clipboard_from_before_the_copy() throws {
+        let pb = FakePasteboard(items: selectionOnClipboard)
+        let sched = FakeScheduler()
+        var posts = 0
+        let paster = Paster(pasteboard: pb, postCmdV: { posts += 1 }, schedule: sched.schedule, restoreDelay: 2.0)
+
+        try paster.replaceSelection("edited", target: 42, restoring: usersClipboard, copiedChangeCount: pb.changeCount())
+
+        XCTAssertEqual(pb.snapshotCalls, 0, "the external snapshot is the saved clipboard; snapshotting now would save the selection")
+        XCTAssertEqual(pb.items.first?[text], Data("edited".utf8))
+        XCTAssertNotNil(pb.items.first?["org.nspasteboard.TransientType"])
+        XCTAssertEqual(posts, 1)
+        XCTAssertEqual(sched.delays, [2.0])
+
+        sched.fire()
+        XCTAssertEqual(pb.items, usersClipboard)
+    }
+
+    func test_replaceSelection_leaves_a_clipboard_the_user_changed_meanwhile_alone() throws {
+        let pb = FakePasteboard(items: selectionOnClipboard)
+        let sched = FakeScheduler()
+        let paster = Paster(pasteboard: pb, postCmdV: {}, schedule: sched.schedule, restoreDelay: 2.0)
+
+        try paster.replaceSelection("edited", target: 42, restoring: usersClipboard, copiedChangeCount: pb.changeCount())
+        let userCopy = [[text: Data("copied during the edit".utf8)]]
+        pb.userCopies(userCopy)
+        sched.fire()
+
+        XCTAssertEqual(pb.items, userCopy)
+    }
+
+    func test_replaceSelection_without_a_snapshot_means_the_clipboard_was_empty_and_leaves_it_empty() throws {
+        let pb = FakePasteboard(items: selectionOnClipboard)
+        let sched = FakeScheduler()
+        let paster = Paster(pasteboard: pb, postCmdV: {}, schedule: sched.schedule, restoreDelay: 2.0)
+
+        try paster.replaceSelection("edited", restoring: nil, copiedChangeCount: pb.changeCount())
+
+        XCTAssertEqual(pb.snapshotCalls, 0, "snapshotting now would save the copied selection and put it back")
+        XCTAssertEqual(pb.items.first?[text], Data("edited".utf8))
+        XCTAssertEqual(sched.pending, 1)
+        sched.fire()
+        XCTAssertTrue(pb.items.isEmpty, "the clipboard was empty before the copy and ends empty")
+    }
+
+    func test_replaceSelection_without_a_snapshot_over_an_empty_pasteboard_still_restores_to_empty() throws {
+        let pb = FakePasteboard(items: [])
+        let sched = FakeScheduler()
+        let paster = Paster(pasteboard: pb, postCmdV: {}, schedule: sched.schedule, restoreDelay: 2.0)
+
+        try paster.replaceSelection("edited", restoring: nil, copiedChangeCount: pb.changeCount())
+
+        XCTAssertEqual(pb.snapshotCalls, 0)
+        XCTAssertEqual(sched.pending, 1)
+        sched.fire()
+        XCTAssertTrue(pb.items.isEmpty)
+    }
+
+    func test_replaceSelection_without_a_snapshot_leaves_a_clipboard_the_user_changed_meanwhile_alone() throws {
+        let pb = FakePasteboard(items: selectionOnClipboard)
+        let sched = FakeScheduler()
+        let paster = Paster(pasteboard: pb, postCmdV: {}, schedule: sched.schedule, restoreDelay: 2.0)
+
+        try paster.replaceSelection("edited", restoring: nil, copiedChangeCount: pb.changeCount())
+        let userCopy = [[text: Data("copied during the edit".utf8)]]
+        pb.userCopies(userCopy)
+        sched.fire()
+
+        XCTAssertEqual(pb.items, userCopy)
+    }
+
+    func test_replaceSelection_keeps_a_copy_the_user_made_during_the_model_call() throws {
+        let pb = FakePasteboard(items: selectionOnClipboard)
+        let sched = FakeScheduler()
+        let paster = Paster(pasteboard: pb, postCmdV: {}, schedule: sched.schedule, restoreDelay: 2.0)
+        let copiedCount = pb.changeCount()
+        let userCopy = [[text: Data("copied while the model ran".utf8)]]
+        pb.userCopies(userCopy)
+
+        try paster.replaceSelection("edited", target: 42, restoring: usersClipboard, copiedChangeCount: copiedCount)
+        sched.fire()
+
+        XCTAssertEqual(pb.items, userCopy, "the pre-copy snapshot is older than the user's own copy")
+        XCTAssertEqual(pb.snapshotCalls, 1)
+    }
+
+    func test_replaceSelection_without_a_snapshot_keeps_a_copy_the_user_made_during_the_model_call() throws {
+        let pb = FakePasteboard(items: selectionOnClipboard)
+        let sched = FakeScheduler()
+        let paster = Paster(pasteboard: pb, postCmdV: {}, schedule: sched.schedule, restoreDelay: 2.0)
+        let copiedCount = pb.changeCount()
+        let userCopy = [[text: Data("copied while the model ran".utf8)]]
+        pb.userCopies(userCopy)
+
+        try paster.replaceSelection("edited", restoring: nil, copiedChangeCount: copiedCount)
+        sched.fire()
+
+        XCTAssertEqual(pb.items, userCopy, "an empty clipboard before the copy is no longer the clipboard to restore")
+    }
+
+    func test_a_stale_copy_count_falls_back_to_the_clipboard_a_pending_paste_saved() throws {
+        let pb = FakePasteboard(items: usersClipboard)
+        let sched = FakeScheduler()
+        let paster = Paster(pasteboard: pb, postCmdV: {}, schedule: sched.schedule, restoreDelay: 2.0)
+        try paster.paste("dictated")
+        let staleCount = pb.changeCount() - 1
+
+        try paster.replaceSelection(
+            "edited", target: 42, restoring: [[text: Data("older".utf8)]], copiedChangeCount: staleCount)
+        sched.fireAll()
+
+        XCTAssertEqual(pb.items, usersClipboard)
+    }
+
+    func test_an_external_snapshot_wins_over_the_clipboard_a_pending_paste_saved() throws {
+        let pb = FakePasteboard(items: usersClipboard)
+        let sched = FakeScheduler()
+        let paster = Paster(pasteboard: pb, postCmdV: {}, schedule: sched.schedule, restoreDelay: 2.0)
+
+        try paster.paste("dictated")  // pending holds usersClipboard and the pasteboard still carries the dictation
+        let external = [[text: Data("external".utf8)]]
+        try paster.replaceSelection("edited", target: 42, restoring: external, copiedChangeCount: pb.changeCount())
+        sched.fireAll()
+
+        XCTAssertEqual(pb.items, external)
+    }
+
+    func test_a_dictation_right_after_an_edit_restores_the_users_clipboard() throws {
+        let pb = FakePasteboard(items: selectionOnClipboard)
+        let sched = FakeScheduler()
+        let paster = Paster(pasteboard: pb, postCmdV: {}, schedule: sched.schedule, restoreDelay: 2.0)
+
+        try paster.replaceSelection("edited", target: 42, restoring: usersClipboard, copiedChangeCount: pb.changeCount())
+        try paster.paste("dictated")  // within restoreDelay: the clipboard still holds the edit
+        sched.fireAll()
+
+        XCTAssertEqual(pb.items, usersClipboard)
+    }
+
+    func test_replaceSelection_post_failure_raises_and_keeps_the_edit_on_the_clipboard() {
+        let pb = FakePasteboard(items: selectionOnClipboard)
+        let sched = FakeScheduler()
+        let paster = Paster(
+            pasteboard: pb, postCmdV: { throw NSError(domain: "test", code: 1) },
+            schedule: sched.schedule, restoreDelay: 2.0)
+
+        XCTAssertThrowsError(try paster.replaceSelection("edited", target: 42, restoring: usersClipboard, copiedChangeCount: pb.changeCount())) { error in
+            XCTAssertTrue(error is PasteError)
+        }
+        XCTAssertEqual(pb.items.first?[text], Data("edited".utf8))
+        XCTAssertEqual(sched.pending, 0)
+    }
+
+    // MARK: - restorePendingNow
+
+    func test_restorePendingNow_puts_the_users_clipboard_back_at_once_and_the_scheduled_restore_then_does_nothing() throws {
+        let pb = FakePasteboard(items: usersClipboard)
+        let sched = FakeScheduler()
+        let paster = Paster(pasteboard: pb, postCmdV: {}, schedule: sched.schedule, restoreDelay: 2.0)
+        try paster.paste("dictated")
+
+        paster.restorePendingNow()
+
+        XCTAssertEqual(pb.items, usersClipboard)
+        let countAfterRestore = pb.changeCount()
+        sched.fire()
+        XCTAssertEqual(pb.items, usersClipboard)
+        XCTAssertEqual(pb.changeCount(), countAfterRestore, "the scheduled restore found nothing left to do")
+    }
+
+    func test_a_copy_made_after_restorePendingNow_survives_the_scheduled_restore() throws {
+        let pb = FakePasteboard(items: usersClipboard)
+        let sched = FakeScheduler()
+        let paster = Paster(pasteboard: pb, postCmdV: {}, schedule: sched.schedule, restoreDelay: 2.0)
+        try paster.paste("dictated")
+
+        paster.restorePendingNow()
+        pb.userCopies(selectionOnClipboard)  // the reader's ⌘C
+        sched.fire()
+
+        XCTAssertEqual(pb.items, selectionOnClipboard)
+    }
+
+    func test_restorePendingNow_does_nothing_after_the_user_copied() throws {
+        let pb = FakePasteboard(items: usersClipboard)
+        let sched = FakeScheduler()
+        let paster = Paster(pasteboard: pb, postCmdV: {}, schedule: sched.schedule, restoreDelay: 2.0)
+        try paster.paste("dictated")
+        let copied = [[text: Data("copied after the dictation".utf8)]]
+        pb.userCopies(copied)
+        let count = pb.changeCount()
+
+        paster.restorePendingNow()
+
+        XCTAssertEqual(pb.items, copied, "the clipboard is no longer ours to put back")
+        XCTAssertEqual(pb.changeCount(), count)
+    }
+
+    func test_restorePendingNow_without_a_paste_touches_nothing() {
+        let pb = FakePasteboard(items: usersClipboard)
+        let paster = Paster(pasteboard: pb, postCmdV: {}, schedule: { _, _ in }, restoreDelay: 2.0)
+        let count = pb.changeCount()
+
+        paster.restorePendingNow()
+
+        XCTAssertEqual(pb.items, usersClipboard)
+        XCTAssertEqual(pb.changeCount(), count)
+        XCTAssertEqual(pb.snapshotCalls, 0)
+    }
+
+    func test_restorePendingNow_twice_restores_once() throws {
+        let pb = FakePasteboard(items: usersClipboard)
+        let paster = Paster(pasteboard: pb, postCmdV: {}, schedule: { _, _ in }, restoreDelay: 2.0)
+        try paster.paste("dictated")
+
+        paster.restorePendingNow()
+        let count = pb.changeCount()
+        paster.restorePendingNow()
+
+        XCTAssertEqual(pb.changeCount(), count)
+    }
+
+    func test_a_dictation_after_restorePendingNow_still_restores_the_users_clipboard() throws {
+        let pb = FakePasteboard(items: usersClipboard)
+        let sched = FakeScheduler()
+        let paster = Paster(pasteboard: pb, postCmdV: {}, schedule: sched.schedule, restoreDelay: 2.0)
+
+        try paster.paste("first")
+        paster.restorePendingNow()
+        try paster.paste("second")
+        sched.fireAll()
+
+        XCTAssertEqual(pb.items, usersClipboard)
     }
 }

@@ -64,12 +64,16 @@ final class MacPasteboard: PasteboardLike {
     func changeCount() -> Int {
         pasteboard.changeCount
     }
+
+    func string() -> String? {
+        pasteboard.string(forType: .string)
+    }
 }
 
 /// Keys scribe can press on the user's behalf. Return submits in chat apps and runs a line in a terminal — a voice
 /// command asks for it by name, a dictation never does (its text is pasted; a newline in it comes only from a spoken break or a snippet).
 enum SyntheticKey: Equatable {
-    case commandV, returnKey, commandZ
+    case commandV, returnKey, commandZ, commandC
 
     /// The letter a shortcut key types. Apps match shortcuts by character, so the keycode comes from the active
     /// layout. Return sits at keycode 36 on every layout and has none.
@@ -77,6 +81,7 @@ enum SyntheticKey: Equatable {
         switch self {
         case .commandV: return "v"
         case .commandZ: return "z"
+        case .commandC: return "c"
         case .returnKey: return nil
         }
     }
@@ -87,6 +92,7 @@ enum SyntheticKey: Equatable {
         case .commandV: return 9
         case .returnKey: return 36
         case .commandZ: return 6
+        case .commandC: return 8
         }
     }
 
@@ -97,7 +103,7 @@ enum SyntheticKey: Equatable {
 
     var flags: CGEventFlags {
         switch self {
-        case .commandV, .commandZ: return .maskCommand
+        case .commandV, .commandZ, .commandC: return .maskCommand
         case .returnKey: return []
         }
     }
@@ -108,6 +114,7 @@ enum SyntheticKey: Equatable {
         case .commandV: return "\u{2318}V"
         case .returnKey: return "Return"
         case .commandZ: return "Undo"
+        case .commandC: return "\u{2318}C"
         }
     }
 }
