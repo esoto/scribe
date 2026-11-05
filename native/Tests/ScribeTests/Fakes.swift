@@ -1,3 +1,4 @@
+import CoreAudio
 import Foundation
 
 let VOICED = [Float](repeating: 0.1, count: 16000)
@@ -580,4 +581,74 @@ final class Locked<T>: @unchecked Sendable {
     }
 
     func mutate(_ change: (inout T) -> Void) { lock.withLock { change(&stored) } }
+}
+
+/// An audio engine that remembers which device its input unit is bound to, so a test can move it the way macOS does.
+final class FakeCaptureEngine: CaptureEngine {
+    /// What a fresh engine binds to before anyone selects a device: the system default.
+    static let systemDefault: AudioDeviceID = 1
+
+    private(set) var isRunning = false
+    private(set) var boundDevice: AudioDeviceID? = FakeCaptureEngine.systemDefault
+    private(set) var bindRequests: [AudioDeviceID] = []
+    private(set) var tapInstalls = 0
+    private(set) var prepareCalls = 0
+    private(set) var startCalls = 0
+    private(set) var pauseCalls = 0
+    private(set) var stopCalls = 0
+    var bindStatus: OSStatus = noErr
+    var startError: Error?
+
+    private var onSamples: (([Float]) -> Void)?
+    private var onConvertError: ((String) -> Void)?
+    private var onConfigurationChange: (() -> Void)?
+
+    func bind(device: AudioDeviceID) -> OSStatus {
+        bindRequests.append(device)
+        if bindStatus == noErr { boundDevice = device }
+        return bindStatus
+    }
+
+    func installTap(onSamples: @escaping ([Float]) -> Void, onConvertError: @escaping (String) -> Void) {
+        tapInstalls += 1
+        self.onSamples = onSamples
+        self.onConvertError = onConvertError
+    }
+
+    func observeConfigurationChange(_ handler: @escaping () -> Void) {
+        onConfigurationChange = handler
+    }
+
+    func prepare() { prepareCalls += 1 }
+
+    func start() throws {
+        startCalls += 1
+        if let startError { throw startError }
+        isRunning = true
+    }
+
+    func pause() {
+        pauseCalls += 1
+        isRunning = false
+    }
+
+    func stop() {
+        stopCalls += 1
+        isRunning = false
+    }
+
+    /// A route change, as macOS delivers it: the engine stops itself, falls back to `device` and posts a notification.
+    func simulateConfigurationChange(movingTo device: AudioDeviceID = FakeCaptureEngine.systemDefault) {
+        isRunning = false
+        boundDevice = device
+        onConfigurationChange?()
+    }
+
+    /// Moves the bound device without a notification, the way a reconnect or a rebind by another app can.
+    func drift(to device: AudioDeviceID?) {
+        boundDevice = device
+    }
+
+    func emit(_ samples: [Float]) { onSamples?(samples) }
+    func failConversion(_ description: String) { onConvertError?(description) }
 }

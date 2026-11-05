@@ -1,5 +1,4 @@
-import AudioToolbox
-import AVFoundation
+import CoreAudio
 import Foundation
 
 struct RecorderError: Error {
@@ -76,29 +75,46 @@ final class Recorder: RecorderLike {
     }
 }
 
-/// AVAudioEngine adapter. Converts the tap to 16 kHz mono via `AVAudioConverter`, since the input node can't be forced to 16 kHz.
-/// Needs a real mic and TCC permission, so it is untested and verified manually.
+/// AVAudioEngine adapter. Before every start it re-checks that the engine still captures from the chosen microphone,
+/// because macOS can move it to the system default behind scribe's back (a headset connecting, a Bluetooth profile switch).
+/// The checks run against a `CaptureEngine`, so they are tested with a fake; `LiveCaptureEngine` is verified manually.
 final class AVEngineControl: EngineControl {
     var onSamples: (([Float]) -> Void)?
 
-    private var engine = AVAudioEngine()
+    private let onLog: ((String) -> Void)?
+    private let resolveDevice: (String) -> AudioDeviceID?
+    private let makeEngine: () -> CaptureEngine
+    private var engine: CaptureEngine
     private var tapInstalled = false
     private var preferredInputUID: String?
-    private let onLog: ((String) -> Void)?
+    private var missLogged = false
 
-    init(onLog: ((String) -> Void)? = nil) {
+    /// Guards the flags that the notification and audio threads write and the starting thread reads.
+    private let stateLock = NSLock()
+    private var configurationChanged = false
+    private var convertErrorLogged = false
+
+    init(
+        onLog: ((String) -> Void)? = nil,
+        resolveDevice: @escaping (String) -> AudioDeviceID? = { AudioDevices.deviceID(forUID: $0) },
+        makeEngine: @escaping () -> CaptureEngine = { LiveCaptureEngine() }
+    ) {
         self.onLog = onLog
+        self.resolveDevice = resolveDevice
+        self.makeEngine = makeEngine
+        engine = makeEngine()
+        watchConfigurationChanges()
     }
 
     var isRunning: Bool { engine.isRunning }
 
     func prepare() {
-        installTapIfNeeded()
+        readyForCapture()
         engine.prepare()
     }
 
     func start() throws {
-        installTapIfNeeded()
+        readyForCapture()
         do {
             try engine.start()
         } catch {
@@ -112,78 +128,96 @@ final class AVEngineControl: EngineControl {
     }
 
     func setPreferredInput(uid: String?) {
-        guard uid != preferredInputUID else { return }
         preferredInputUID = uid
-        // Must rebuild: AVAudioEngine can't swap the input device under a live tap.
+        // Re-picking the same device rebuilds too: the engine may have drifted off it, and this is the manual way back.
+        rebuildEngine()
+    }
+
+    /// Binds a fresh engine, or checks that a bound one still captures from the chosen device and rebuilds it if not.
+    private func readyForCapture() {
+        // A fresh engine is bound by its first tap install; comparing it first would only rebuild it again.
+        guard tapInstalled else {
+            installTap(announcingRebind: false)
+            return
+        }
+        let action = InputRebind.decide(
+            wantedUID: preferredInputUID,
+            resolved: preferredInputUID.flatMap(resolveDevice),
+            bound: engine.boundDevice,
+            configurationChanged: stateLock.withLock { configurationChanged },
+            running: engine.isRunning)
+        switch action {
+        case .keep, .deferWhileRunning:
+            break
+        case .useSystemDefault(let uid):
+            logMissOnce(uid)
+        case .rebuild:
+            rebuildEngine()
+            installTap(announcingRebind: true)
+        }
+    }
+
+    /// AVAudioEngine can't swap the input device under a live tap, so any rebind is a new engine.
+    private func rebuildEngine() {
         engine.stop()
-        engine = AVAudioEngine()
+        engine = makeEngine()
         tapInstalled = false
+        missLogged = false
+        stateLock.withLock {
+            configurationChanged = false
+            convertErrorLogged = false
+        }
+        watchConfigurationChanges()
+    }
+
+    private func installTap(announcingRebind: Bool) {
+        tapInstalled = true
+        // Must run before the tap reads the input format, which is the device's native format.
+        bindPreferredInput(announcingRebind: announcingRebind)
+        engine.installTap(
+            onSamples: { [weak self] chunk in self?.onSamples?(chunk) },
+            onConvertError: { [weak self] description in self?.reportConvertError(description) })
     }
 
     /// Falls back to the system default if the preferred device is unplugged.
-    private func applyPreferredInput() {
-        guard let uid = preferredInputUID,
-            let devID = AudioDevices.deviceID(forUID: uid),
-            let audioUnit = engine.inputNode.audioUnit
-        else { return }
-        var dev = devID
-        let status = AudioUnitSetProperty(
-            audioUnit,
-            kAudioOutputUnitProperty_CurrentDevice,
-            kAudioUnitScope_Global,
-            0,
-            &dev,
-            UInt32(MemoryLayout<AudioDeviceID>.size))
+    private func bindPreferredInput(announcingRebind: Bool) {
+        guard let uid = preferredInputUID else { return }
+        guard let device = resolveDevice(uid) else {
+            logMissOnce(uid)
+            return
+        }
+        let status = engine.bind(device: device)
         if status != noErr {
             // Fall back to the system default rather than a dead engine.
             onLog?("recorder: could not select input device \(uid): OSStatus \(status)")
+        } else if announcingRebind {
+            onLog?("recorder: input rebound to \(uid)")
         }
     }
 
-    private func installTapIfNeeded() {
-        guard !tapInstalled else { return }
-        tapInstalled = true
-
-        // Must run before reading the input format, which is the device's native format.
-        applyPreferredInput()
-
-        let inputNode = engine.inputNode
-        let inputFormat = inputNode.outputFormat(forBus: 0)
-        guard
-            let targetFormat = AVAudioFormat(
-                commonFormat: .pcmFormatFloat32, sampleRate: 16000, channels: 1, interleaved: false
-            ),
-            let converter = AVAudioConverter(from: inputFormat, to: targetFormat)
-        else {
-            return
-        }
-
-        inputNode.installTap(onBus: 0, bufferSize: 1024, format: inputFormat) { [weak self] pcmBuffer, _ in
-            self?.convertAndForward(pcmBuffer, converter: converter, targetFormat: targetFormat)
-        }
+    private func logMissOnce(_ uid: String) {
+        guard !missLogged else { return }
+        missLogged = true
+        onLog?("recorder: input \(uid) not found; using system default")
     }
 
-    private func convertAndForward(
-        _ pcmBuffer: AVAudioPCMBuffer, converter: AVAudioConverter, targetFormat: AVAudioFormat
-    ) {
-        let ratio = targetFormat.sampleRate / pcmBuffer.format.sampleRate
-        let capacity = AVAudioFrameCount(Double(pcmBuffer.frameLength) * ratio) + 16
-        guard let outBuffer = AVAudioPCMBuffer(pcmFormat: targetFormat, frameCapacity: capacity) else { return }
+    private func watchConfigurationChanges() {
+        engine.observeConfigurationChange { [weak self] in self?.configurationDidChange() }
+    }
 
-        var consumed = false
-        var conversionError: NSError?
-        converter.convert(to: outBuffer, error: &conversionError) { _, outStatus in
-            if consumed {
-                outStatus.pointee = .noDataNow
-                return nil
-            }
-            consumed = true
-            outStatus.pointee = .haveData
-            return pcmBuffer
+    /// Only flags the engine: it has stopped itself, and the next start rebuilds it, never a live recording.
+    private func configurationDidChange() {
+        stateLock.withLock { configurationChanged = true }
+        onLog?("recorder: audio configuration changed")
+    }
+
+    /// Every failing chunk is dropped, so only the first per engine is worth a line.
+    private func reportConvertError(_ description: String) {
+        let isFirst = stateLock.withLock { () -> Bool in
+            let first = !convertErrorLogged
+            convertErrorLogged = true
+            return first
         }
-
-        guard conversionError == nil, let channelData = outBuffer.floatChannelData else { return }
-        let frameLength = Int(outBuffer.frameLength)
-        onSamples?(Array(UnsafeBufferPointer(start: channelData[0], count: frameLength)))
+        if isFirst { onLog?("recorder: audio conversion failed: \(description)") }
     }
 }
