@@ -135,6 +135,8 @@ struct ModelsPane: View {
                 }
                 .padding(4)
             }
+            Text("Edits run on this model. Gemma 4 E4B passes the most edit checks.")
+                .font(.caption).foregroundStyle(.secondary)
             HStack {
                 Text("On disk: \(formatBytes(rows.map(\.bytesOnDisk).reduce(0, +)))")
                     .font(.caption).foregroundStyle(.secondary)

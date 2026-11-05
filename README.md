@@ -11,6 +11,8 @@ is pasted into whatever app has focus. No cloud, no accounts. Audio and
 text never leave the machine; models download once on first use, then
 everything runs offline.
 
+An edit copies the selected text from the app in front, sends it to the local model, pastes the result and restores your clipboard. The text is kept nowhere — not in History, Stats or the log. The copy is made by the app itself, so a clipboard manager you run may record your own selection.
+
 A native Swift menu-bar app (`native/`) — it replaced the original Python
 implementation (removed 2026-07-09; see git history for the reference
 implementation the Swift port was validated against).
@@ -63,6 +65,7 @@ Upgrading from a v3 install downloads Ultra on first launch (progress shows in t
 ## Usage
 
 - Hold **Right ⌥** (≥ 0.3 s), speak, release. Text lands in the focused app. With **Hotkey mode** set to "Hold, or double-tap to latch" (Settings › General), a double-tap records hands-free until you tap again (auto-stop at 4 min).
+- **Edit what you selected** (⇧ + the hotkey, on by default): select text in any app, hold ⇧ with the hotkey, say one of: "make it shorter", "fix the grammar", "make it formal", "make it casual", "make it a list", "translate to Spanish", "translate to English" (Spanish: "más corto", "corrige la gramática", "hazlo formal", "hazlo informal", "en viñetas", "pásalo a español", "pasa esto a inglés"). scribe copies the selection, edits it on the active cleanup model and pastes the result over it; ⌘Z in the app undoes it. A result that fails a check is not pasted and the pill says why — Gemma 4 passes the most checks, so the pill says so when another model is active. Only the selection is edited; with nothing selected the pill says "Nothing selected".
 - Menu bar: ◦ idle · ● recording · ⋯ processing · ⚠ error or a missing
   permission, plus a live status line while recording/transcribing.
 - **Recording pill** (Settings › General, on by default): while you record
@@ -253,6 +256,7 @@ Most of these have a control in **Settings…** (⌘,), the menu, or the Diction
 | `vocabularyBiasingEnabled` | false | acoustic vocabulary biasing for Parakeet (experimental) (Dictionary window) |
 | `enhanceAudioEnabled` | false | LocalVQE noise suppression before transcription — experimental (Settings › Audio) |
 | `hotkeyMode` | `hold` | `hold` \| `hold_or_latch` — double-tap to latch a recording (Settings) |
+| `editEnabled` | true | ⇧ + hotkey edits the selected text (Settings) |
 | `urlSchemeEnabled` | false | allow `scribe://` URLs from other apps (Settings) |
 | `voiceCommandsEnabled` | true | voice commands ("enter", "new line", …), including breaks inside a sentence — see Usage (Settings) |
 | `hudEnabled` | true | the recording pill above the Dock (Settings) |
@@ -287,6 +291,8 @@ outside scribe's process. scribe manages them on demand:
   scribe copies the text instead and notifies "press ⌘V". It does the same
   when you switch apps while it's transcribing.
 - **Recording did not stop** → a latched recording (a double-tap, or `scribe://toggle` in either Hotkey mode) stops at a single tap of the hotkey; after 4 minutes scribe stops it by itself and says so.
+- **"Nothing selected" / "Not an edit"** → select the text first, then hold ⇧ with the hotkey; say one of the seven instructions as the whole utterance. A few editors copy the whole line when nothing is selected — select the text first.
+- **"Edit rejected — …"** → the result failed a check (empty, answered instead of editing, length, language, something added) and was not pasted; try again, or pick Gemma 4 E4B in Settings › Models, which passes the most edit checks.
 - **"Dictation skipped — it waited … behind the previous one"** → it was queued behind a long dictation for more than 30 s, and scribe drops it rather than paste it that late. After a long latched dictation, wait for "Pasted" before starting the next one.
 - **The menu bar shows ⚠ while idle** → a permission was revoked. Open
   Setup / Doctor; the highlighted row is the one to fix.

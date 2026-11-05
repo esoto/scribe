@@ -77,7 +77,7 @@ private struct GeneralPane: View {
                     Text(key.displayName).tag(key)
                 }
             }
-            caption("Right ⌥ is rarely used alone and leaves Right ⌘ free.")
+            caption("Right ⌥ is rarely used alone and leaves Right ⌘ free. ⇧ with it edits the selection.")
             Picker(
                 "Hotkey mode",
                 selection: Binding(get: { settings.hotkeyMode }, set: { settings.setHotkeyMode($0) })
@@ -87,6 +87,9 @@ private struct GeneralPane: View {
                 }
             }
             caption("Latched: double-tap to start, tap to stop, auto-stop after 4 minutes. The mic stays on until you tap — the orange indicator shows it, and so does the pill when it is on.")
+
+            Toggle("Edit selected text", isOn: Binding(get: { settings.editEnabled }, set: { settings.setEditEnabled($0) }))
+            caption("Hold ⇧ with the hotkey over selected text and say shorter, fix grammar, formal, casual, make a list, translate to Spanish or to English (Spanish works too). scribe copies the selection, edits it on the local model, and pastes the result over it. Off, the chord does nothing.")
 
             Picker(
                 "Ignore taps shorter than",
