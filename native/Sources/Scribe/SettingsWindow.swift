@@ -43,7 +43,7 @@ struct SettingsWindow: View {
             TabView {
                 GeneralPane(settings: model.settingsModel, model: model)
                     .tabItem { Text("General") }
-                AudioPane(model: model)
+                AudioPane(model: model, dictation: model.dictation)
                     .tabItem { Text("Audio") }
                 ModelsPane(model: model.cleanupModels)
                     .tabItem { Text("Models") }
@@ -145,6 +145,8 @@ private struct GeneralPane: View {
 
 private struct AudioPane: View {
     @ObservedObject var model: AppModel
+    /// Read for `capturingFrom`, which `model` does not republish.
+    @ObservedObject var dictation: DictationCoordinator
 
     var body: some View {
         Form {
@@ -164,6 +166,7 @@ private struct AudioPane: View {
                 }
             }
             caption("The built-in mic avoids the Bluetooth headset delay.")
+            caption(dictation.capturingFrom.caption)
 
             Toggle(
                 "Enhance Audio — experimental",

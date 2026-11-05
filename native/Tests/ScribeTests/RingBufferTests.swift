@@ -15,6 +15,8 @@ final class RingBufferTests: XCTestCase {
 
         var isRunning: Bool { running }
 
+        var boundInput: BoundInput? { nil }
+
         func prepare() {}
 
         func setPreferredInput(uid: String?) {}

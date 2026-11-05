@@ -238,12 +238,20 @@ struct OnboardingWindow: View {
 
     private var microphoneDoctorRow: some View {
         let mic = OnboardingState.microphoneRow(selectedUID: model.microphoneUID, devices: model.microphones)
+        let status = OnboardingState.microphoneRowStatus(disconnected: mic.disconnected, capturing: dictation.capturingFrom)
+        let indicator: RowIndicator
+        switch status {
+        case .connected: indicator = .granted
+        // The glyph the Last problem row uses: the mic is there, but scribe is not on the one that was chosen.
+        case .wrongInput: indicator = .neutral(symbol: "exclamationmark.triangle")
+        case .disconnected: indicator = .missing
+        }
         return row(
             title: "Input device",
-            detail: mic.detail,
+            detail: OnboardingState.microphoneRowDetailWithCapture(mic.detail, capturing: dictation.capturingFrom),
             systemImage: "mic",
-            indicator: mic.disconnected ? .missing : .granted,
-            value: mic.disconnected ? "disconnected" : "connected",
+            indicator: indicator,
+            value: status.voiceOverValue,
             isNextStep: false)
     }
 
