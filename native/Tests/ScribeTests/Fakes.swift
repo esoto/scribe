@@ -25,6 +25,9 @@ final class FakeRecorder: RecorderLike, RecorderPreparing {
     private(set) var preferredInputs: [String?] = []
     /// What the engine would report as bound right now; a test sets it to model where the engine ended up.
     var boundInput: BoundInput?
+    /// Runs when a prewarm succeeds, which is when the real recorder binds a freshly built engine. A test changes
+    /// `boundInput` here to pin what must be read before the prewarm and what after.
+    var onPrewarm: (() -> Void)?
 
     init(pcm: [Float] = VOICED, armError: Error? = nil) {
         self.pcm = pcm
@@ -44,6 +47,7 @@ final class FakeRecorder: RecorderLike, RecorderPreparing {
     func prewarm() throws {
         prewarmCalls += 1
         if let prewarmError { throw prewarmError }
+        onPrewarm?()
     }
 
     func setPreferredInput(uid: String?) {

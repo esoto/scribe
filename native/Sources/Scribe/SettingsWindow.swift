@@ -166,7 +166,7 @@ private struct AudioPane: View {
                 }
             }
             caption("The built-in mic avoids the Bluetooth headset delay.")
-            caption(CaptureSource.caption(dictation.capturingFrom))
+            caption(dictation.capturingFrom.caption)
 
             Toggle(
                 "Enhance Audio — experimental",

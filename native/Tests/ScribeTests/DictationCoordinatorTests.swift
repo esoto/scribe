@@ -19,7 +19,7 @@ final class DictationCoordinatorTests: XCTestCase {
     private var inputMonitoring: Box<Bool>!
     private var soundsEnabled = true
     private var microphoneGranted = true
-    private var defaultInputUID: String?
+    private var defaultInput: BoundInput?
     private var hud: HUDModel!
     private var hudEnabled = true
     private var sinks: PipelineSinks!
@@ -43,7 +43,7 @@ final class DictationCoordinatorTests: XCTestCase {
         inputMonitoring = Box<Bool>()
         soundsEnabled = true
         microphoneGranted = true
-        defaultInputUID = nil
+        defaultInput = nil
         hud = HUDModel()
         hudEnabled = true
         pipelineClock = FakeClock()
@@ -109,7 +109,7 @@ final class DictationCoordinatorTests: XCTestCase {
             soundsEnabled: { [unowned self] in soundsEnabled },
             microphoneGranted: { [unowned self] in microphoneGranted },
             microphoneUID: microphoneUID,
-            defaultInputUID: { [unowned self] in defaultInputUID },
+            defaultInput: { [unowned self] in defaultInput },
             reportInputMonitoring: { [unowned self] in inputMonitoring.append($0) },
             errorStickySeconds: errorStickySeconds,
             hintSeconds: hintSeconds,
@@ -1448,7 +1448,8 @@ final class DictationCoordinatorTests: XCTestCase {
     func testNothingIsCapturedFromBeforeTheFirstRecording() {
         recorder.boundInput = usbInput
         let c = make(microphoneUID: "usb")
-        XCTAssertNil(c.capturingFrom)
+        XCTAssertEqual(c.capturingFrom, .notRecordedYet)
+        XCTAssertEqual(c.capturingFrom.caption, "Not recorded yet")
     }
 
     func testAHoldNamesTheInputTheEngineIsBoundTo() {
@@ -1457,7 +1458,8 @@ final class DictationCoordinatorTests: XCTestCase {
 
         c.handleKeyDown()
 
-        XCTAssertEqual(c.capturingFrom, CaptureSource(name: "USB Mic", matchesSelection: true))
+        XCTAssertEqual(c.capturingFrom, .source(CaptureSource(name: "USB Mic", matchesSelection: true)))
+        XCTAssertEqual(c.capturingFrom.caption, "Capturing from: USB Mic")
         c.handleKeyUp()
     }
 
@@ -1467,22 +1469,36 @@ final class DictationCoordinatorTests: XCTestCase {
 
         c.handleKeyDown()
 
-        XCTAssertEqual(c.capturingFrom, CaptureSource(name: "Headset", matchesSelection: false))
+        XCTAssertEqual(c.capturingFrom, .source(CaptureSource(name: "Headset", matchesSelection: false)))
+        XCTAssertEqual(c.capturingFrom.caption, "Capturing from: Headset — not the microphone you chose")
         c.handleKeyUp()
     }
 
     func testWithNoChoiceTheSystemDefaultIsWhatTheEngineShouldBeOn() {
-        defaultInputUID = "usb"
+        defaultInput = usbInput
         let c = make()
 
         recorder.boundInput = usbInput
         c.handleKeyDown()
-        XCTAssertEqual(c.capturingFrom?.matchesSelection, true)
+        XCTAssertEqual(c.capturingFrom, .source(CaptureSource(name: "USB Mic", matchesSelection: true)))
         c.handleKeyUp()
 
         recorder.boundInput = headsetInput
         c.handleKeyDown()
-        XCTAssertEqual(c.capturingFrom?.matchesSelection, false)
+        XCTAssertEqual(c.capturingFrom, .source(CaptureSource(name: "Headset", matchesSelection: false)))
+        c.handleKeyUp()
+    }
+
+    func testWithSystemDefaultChosenTheDefaultAggregateReadsAsTheDefaultMicrophone() {
+        defaultInput = BoundInput(uid: "builtin", name: "MacBook Pro Microphone")
+        let c = make()
+        recorder.boundInput = BoundInput(uid: "CADefaultDeviceAggregate-4242-0", name: "CADefaultDeviceAggregate-4242-0")
+
+        c.handleKeyDown()
+
+        XCTAssertEqual(
+            c.capturingFrom, .source(CaptureSource(name: "MacBook Pro Microphone", matchesSelection: true)))
+        XCTAssertEqual(c.capturingFrom.caption, "Capturing from: MacBook Pro Microphone")
         c.handleKeyUp()
     }
 
@@ -1495,7 +1511,7 @@ final class DictationCoordinatorTests: XCTestCase {
         recorder.boundInput = usbInput
         c.handleKeyDown()
 
-        XCTAssertEqual(c.capturingFrom, CaptureSource(name: "USB Mic", matchesSelection: true))
+        XCTAssertEqual(c.capturingFrom, .source(CaptureSource(name: "USB Mic", matchesSelection: true)))
         c.handleKeyUp()
     }
 
@@ -1505,7 +1521,7 @@ final class DictationCoordinatorTests: XCTestCase {
 
         c.toggleLatched()
 
-        XCTAssertEqual(c.capturingFrom, CaptureSource(name: "USB Mic", matchesSelection: true))
+        XCTAssertEqual(c.capturingFrom, .source(CaptureSource(name: "USB Mic", matchesSelection: true)))
         c.toggleLatched()
     }
 
@@ -1519,10 +1535,10 @@ final class DictationCoordinatorTests: XCTestCase {
         recorder.boundInput = headsetInput
         c.handleKeyDown()
 
-        XCTAssertEqual(c.capturingFrom, CaptureSource(name: "USB Mic", matchesSelection: true))
+        XCTAssertEqual(c.capturingFrom, .source(CaptureSource(name: "USB Mic", matchesSelection: true)))
     }
 
-    func testAnEngineWhoseInputCannotBeReadClearsTheLastReading() {
+    func testAnEngineWhoseInputCannotBeReadSaysSoRatherThanNotRecordedYet() {
         let c = make(microphoneUID: "usb")
         recorder.boundInput = usbInput
         c.handleKeyDown()
@@ -1531,7 +1547,18 @@ final class DictationCoordinatorTests: XCTestCase {
         recorder.boundInput = nil
         c.handleKeyDown()
 
-        XCTAssertNil(c.capturingFrom)
+        XCTAssertEqual(c.capturingFrom, .unknown)
+        XCTAssertEqual(c.capturingFrom.caption, "Capturing from: unknown — the input could not be read")
+        c.handleKeyUp()
+    }
+
+    func testAFirstRecordingWhoseInputCannotBeReadIsUnknownToo() {
+        let c = make(microphoneUID: "usb")
+        recorder.boundInput = nil
+
+        c.handleKeyDown()
+
+        XCTAssertEqual(c.capturingFrom, .unknown)
         c.handleKeyUp()
     }
 
@@ -1541,7 +1568,19 @@ final class DictationCoordinatorTests: XCTestCase {
 
         c.selectMicrophone(uid: "usb")
 
-        XCTAssertEqual(c.capturingFrom, CaptureSource(name: "USB Mic", matchesSelection: true))
+        XCTAssertEqual(c.capturingFrom, .source(CaptureSource(name: "USB Mic", matchesSelection: true)))
+    }
+
+    func testTheEngineIsReadAfterThePrewarmThatBoundIt() {
+        let c = make()
+        recorder.boundInput = headsetInput  // the engine being discarded, or a fresh one that is bound to nothing
+        recorder.onPrewarm = { [unowned self] in recorder.boundInput = usbInput }
+
+        c.selectMicrophone(uid: "usb")
+
+        XCTAssertEqual(
+            c.capturingFrom, .source(CaptureSource(name: "USB Mic", matchesSelection: true)),
+            "read before the prewarm, it would name the Headset and flag a choice that did stick")
     }
 
     func testChoosingAMicrophoneThatDoesNotStickIsFlaggedAtOnce() {
@@ -1550,7 +1589,16 @@ final class DictationCoordinatorTests: XCTestCase {
 
         c.selectMicrophone(uid: "usb")
 
-        XCTAssertEqual(c.capturingFrom, CaptureSource(name: "Headset", matchesSelection: false))
+        XCTAssertEqual(c.capturingFrom, .source(CaptureSource(name: "Headset", matchesSelection: false)))
+    }
+
+    func testChoosingAMicrophoneThatCannotBeReadAfterThePrewarmIsUnknown() {
+        let c = make()
+        recorder.boundInput = nil
+
+        c.selectMicrophone(uid: "usb")
+
+        XCTAssertEqual(c.capturingFrom, .unknown)
     }
 
     func testChoosingAMicrophoneWithoutTheGrantLeavesNothingToReport() {
@@ -1562,18 +1610,19 @@ final class DictationCoordinatorTests: XCTestCase {
 
         c.selectMicrophone(uid: "headset")
 
-        XCTAssertNil(c.capturingFrom, "the new engine was never prepared, so it is bound to nothing yet")
+        XCTAssertEqual(c.capturingFrom, .notRecordedYet, "nothing has been recorded with the new choice yet")
+        XCTAssertEqual(c.capturingFrom.caption, "Not recorded yet")
     }
 
     func testTheNextRecordingIsJudgedAgainstTheMicrophoneChosenSince() {
-        defaultInputUID = "builtin"
+        defaultInput = BoundInput(uid: "builtin", name: "Built-in")
         let c = make(microphoneUID: "usb")
         c.selectMicrophone(uid: nil)
 
         recorder.boundInput = BoundInput(uid: "builtin", name: "Built-in")
         c.handleKeyDown()
 
-        XCTAssertEqual(c.capturingFrom, CaptureSource(name: "Built-in", matchesSelection: true))
+        XCTAssertEqual(c.capturingFrom, .source(CaptureSource(name: "Built-in", matchesSelection: true)))
         c.handleKeyUp()
     }
 
