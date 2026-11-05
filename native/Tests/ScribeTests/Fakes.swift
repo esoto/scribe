@@ -1,3 +1,4 @@
+import CoreAudio
 import Foundation
 
 let VOICED = [Float](repeating: 0.1, count: 16000)
@@ -22,6 +23,11 @@ final class FakeRecorder: RecorderLike, RecorderPreparing {
     var prewarmError: Error?
     private(set) var prewarmCalls = 0
     private(set) var preferredInputs: [String?] = []
+    /// What the engine would report as bound right now; a test sets it to model where the engine ended up.
+    var boundInput: BoundInput?
+    /// Runs when a prewarm succeeds, which is when the real recorder binds a freshly built engine. A test changes
+    /// `boundInput` here to pin what must be read before the prewarm and what after.
+    var onPrewarm: (() -> Void)?
 
     init(pcm: [Float] = VOICED, armError: Error? = nil) {
         self.pcm = pcm
@@ -41,6 +47,7 @@ final class FakeRecorder: RecorderLike, RecorderPreparing {
     func prewarm() throws {
         prewarmCalls += 1
         if let prewarmError { throw prewarmError }
+        onPrewarm?()
     }
 
     func setPreferredInput(uid: String?) {
@@ -657,4 +664,80 @@ final class Locked<T>: @unchecked Sendable {
     }
 
     func mutate(_ change: (inout T) -> Void) { lock.withLock { change(&stored) } }
+}
+
+/// An audio engine that remembers which device its input unit is bound to, so a test can move it the way macOS does.
+final class FakeCaptureEngine: CaptureEngine {
+    /// What a fresh engine binds to before anyone selects a device: the system default.
+    static let systemDefault: AudioDeviceID = 1
+
+    private(set) var isRunning = false
+    private(set) var boundDevice: AudioDeviceID? = FakeCaptureEngine.systemDefault
+    private(set) var bindRequests: [AudioDeviceID] = []
+    private(set) var tapInstalls = 0
+    private(set) var prepareCalls = 0
+    private(set) var startCalls = 0
+    private(set) var pauseCalls = 0
+    private(set) var stopCalls = 0
+    var bindStatus: OSStatus = noErr
+    var startError: Error?
+    /// Posts a configuration change from inside every successful bind, as an engine whose own bind reconfigures it would.
+    var postsConfigurationChangeOnBind = false
+    /// Moves the bound device on every start, as an engine that overrides the device it was given would.
+    var rebindOnStart: AudioDeviceID?
+
+    private var onSamples: (([Float]) -> Void)?
+    private var onConvertError: ((String) -> Void)?
+    private var onConfigurationChange: (() -> Void)?
+
+    func bind(device: AudioDeviceID) -> OSStatus {
+        bindRequests.append(device)
+        if bindStatus == noErr { boundDevice = device }
+        if bindStatus == noErr && postsConfigurationChangeOnBind { onConfigurationChange?() }
+        return bindStatus
+    }
+
+    func installTap(onSamples: @escaping ([Float]) -> Void, onConvertError: @escaping (String) -> Void) {
+        tapInstalls += 1
+        self.onSamples = onSamples
+        self.onConvertError = onConvertError
+    }
+
+    func observeConfigurationChange(_ handler: @escaping () -> Void) {
+        onConfigurationChange = handler
+    }
+
+    func prepare() { prepareCalls += 1 }
+
+    func start() throws {
+        startCalls += 1
+        if let startError { throw startError }
+        isRunning = true
+        if let rebindOnStart { boundDevice = rebindOnStart }
+    }
+
+    func pause() {
+        pauseCalls += 1
+        isRunning = false
+    }
+
+    func stop() {
+        stopCalls += 1
+        isRunning = false
+    }
+
+    /// A route change, as macOS delivers it: the engine stops itself, falls back to `device` and posts a notification.
+    func simulateConfigurationChange(movingTo device: AudioDeviceID = FakeCaptureEngine.systemDefault) {
+        isRunning = false
+        boundDevice = device
+        onConfigurationChange?()
+    }
+
+    /// Moves the bound device without a notification, the way a reconnect or a rebind by another app can.
+    func drift(to device: AudioDeviceID?) {
+        boundDevice = device
+    }
+
+    func emit(_ samples: [Float]) { onSamples?(samples) }
+    func failConversion(_ description: String) { onConvertError?(description) }
 }

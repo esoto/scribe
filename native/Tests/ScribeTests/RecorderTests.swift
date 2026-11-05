@@ -11,6 +11,7 @@ final class RecorderTests: XCTestCase {
         private(set) var startCalls = 0
         private(set) var stopCalls = 0
         private(set) var preferredInputs: [String?] = []
+        var boundInput: BoundInput?
 
         func setPreferredInput(uid: String?) {
             preferredInputs.append(uid)
@@ -86,6 +87,12 @@ final class RecorderTests: XCTestCase {
         recorder.setPreferredInput(uid: "BuiltInMicrophoneDevice")
         recorder.setPreferredInput(uid: nil)
         XCTAssertEqual(engine.preferredInputs, ["BuiltInMicrophoneDevice", nil])
+    }
+
+    func testBoundInputIsWhateverTheEngineControlReports() {
+        XCTAssertNil(recorder.boundInput)
+        engine.boundInput = BoundInput(uid: "usb", name: "USB Mic")
+        XCTAssertEqual(recorder.boundInput, BoundInput(uid: "usb", name: "USB Mic"))
     }
 
     func testDisarmStopsCaptureAndReturnsSamples() throws {

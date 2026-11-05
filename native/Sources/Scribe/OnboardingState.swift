@@ -181,6 +181,29 @@ extension OnboardingState {
         return (microphoneRowDetail(selectedName: device.name, disconnected: false), false)
     }
 
+    /// Doctor: the Microphone row's text followed by the input the engine was last on, so a wrong one shows here too.
+    static func microphoneRowDetailWithCapture(_ detail: String, capturing status: CaptureStatus) -> String {
+        "\(detail)\n\(status.caption)"
+    }
+
+    /// Doctor: how the Microphone row is marked. A choice that is unplugged is the louder problem, so it wins.
+    enum MicrophoneRowStatus: Equatable {
+        case connected, wrongInput, disconnected
+
+        var voiceOverValue: String {
+            switch self {
+            case .connected: return "connected"
+            case .wrongInput: return "not the chosen microphone"
+            case .disconnected: return "disconnected"
+            }
+        }
+    }
+
+    static func microphoneRowStatus(disconnected: Bool, capturing status: CaptureStatus) -> MicrophoneRowStatus {
+        if disconnected { return .disconnected }
+        return status.isMismatch ? .wrongInput : .connected
+    }
+
     /// Doctor: the last problem scribe reported, with how long ago; nil means a quiet session.
     static func lastProblemDetail(_ notice: String?, at: Date?, now: Date) -> String {
         guard let notice, let at else { return "No problems this session." }

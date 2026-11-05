@@ -312,6 +312,55 @@ final class OnboardingStateTests: XCTestCase {
             OnboardingState.microphoneRowDetail(selectedName: "USB Mic", disconnected: true), "USB Mic — disconnected.")
     }
 
+    func testMicrophoneRowDetailWithCaptureAddsWhereTheEngineIsCapturingFrom() {
+        let status = CaptureStatus.source(CaptureSource(name: "Built-in", matchesSelection: true))
+        XCTAssertEqual(
+            OnboardingState.microphoneRowDetailWithCapture("System default input.", capturing: status),
+            "System default input.\nCapturing from: Built-in")
+    }
+
+    func testMicrophoneRowDetailWithCaptureSaysWhenTheEngineIsOnAnotherMicrophoneThanTheChosenOne() {
+        let status = CaptureStatus.source(CaptureSource(name: "Headset", matchesSelection: false))
+        XCTAssertEqual(
+            OnboardingState.microphoneRowDetailWithCapture("USB Mic", capturing: status),
+            "USB Mic\nCapturing from: Headset — not the microphone you chose")
+    }
+
+    func testMicrophoneRowDetailWithCaptureBeforeAnyRecordingSaysSo() {
+        XCTAssertEqual(
+            OnboardingState.microphoneRowDetailWithCapture("USB Mic", capturing: .notRecordedYet),
+            "USB Mic\nNot recorded yet")
+    }
+
+    func testMicrophoneRowDetailWithCaptureSaysWhenTheInputCouldNotBeRead() {
+        XCTAssertEqual(
+            OnboardingState.microphoneRowDetailWithCapture("USB Mic", capturing: .unknown),
+            "USB Mic\nCapturing from: unknown — the input could not be read")
+    }
+
+    func testMicrophoneRowStatusFlagsAnEngineOnAnotherMicrophoneThanTheChosenOne() {
+        let wrong = CaptureStatus.source(CaptureSource(name: "Headset", matchesSelection: false))
+        XCTAssertEqual(OnboardingState.microphoneRowStatus(disconnected: false, capturing: wrong), .wrongInput)
+    }
+
+    func testMicrophoneRowStatusIsConnectedWhenNothingIsWrongOrKnown() {
+        let right = CaptureStatus.source(CaptureSource(name: "USB Mic", matchesSelection: true))
+        for capturing in [right, CaptureStatus.unknown, .notRecordedYet] {
+            XCTAssertEqual(OnboardingState.microphoneRowStatus(disconnected: false, capturing: capturing), .connected)
+        }
+    }
+
+    func testMicrophoneRowStatusKeepsADisconnectedChoiceDisconnectedBesideAMismatch() {
+        let wrong = CaptureStatus.source(CaptureSource(name: "Headset", matchesSelection: false))
+        XCTAssertEqual(OnboardingState.microphoneRowStatus(disconnected: true, capturing: wrong), .disconnected)
+    }
+
+    func testMicrophoneRowStatusValuesForVoiceOver() {
+        XCTAssertEqual(OnboardingState.MicrophoneRowStatus.connected.voiceOverValue, "connected")
+        XCTAssertEqual(OnboardingState.MicrophoneRowStatus.wrongInput.voiceOverValue, "not the chosen microphone")
+        XCTAssertEqual(OnboardingState.MicrophoneRowStatus.disconnected.voiceOverValue, "disconnected")
+    }
+
     func testLastProblemDetailQuietSession() {
         XCTAssertEqual(OnboardingState.lastProblemDetail(nil, at: nil, now: Date()), "No problems this session.")
     }

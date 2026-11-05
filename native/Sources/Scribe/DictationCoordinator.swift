@@ -47,6 +47,8 @@ extension HotkeyMonitor: HotkeyMonitoring {}
 protocol RecorderPreparing: AnyObject {
     func prewarm() throws
     func setPreferredInput(uid: String?)
+    /// The input the engine is bound to right now; nil when it can't be read.
+    var boundInput: BoundInput? { get }
 }
 
 extension Recorder: RecorderPreparing {}
@@ -72,6 +74,11 @@ final class DictationCoordinator: ObservableObject {
     /// The latest problem notice and when it was raised, for the Doctor's "Last problem" row. Kept even when
     /// delivery fails; good news never replaces it.
     @Published private(set) var lastNotice: (text: String, at: Date)?
+    /// The microphone the engine was on at the last recording start or microphone change. `.notRecordedYet` until the
+    /// first one, and again after a choice made without the microphone grant, since nothing is bound to it yet;
+    /// `.unknown` when the engine's input could not be read. Read at those two moments only, so it can lag an
+    /// engine that macOS moves mid-recording.
+    @Published private(set) var capturingFrom: CaptureStatus = .notRecordedYet
 
     /// Key-down work that isn't about recording (idle touch, availability refresh, model warm-up).
     /// Runs first, so it is already under way when the watchdog is armed and the pipeline starts.
@@ -99,6 +106,9 @@ final class DictationCoordinator: ObservableObject {
     private let playSound: (String) -> Void
     private let soundsEnabled: () -> Bool
     private let microphoneGranted: () -> Bool
+    /// The saved choice as last handed to the recorder; nil is the system default.
+    private var preferredMicrophoneUID: String?
+    private let defaultInput: () -> BoundInput?
     private let reportInputMonitoring: (Bool) -> Void
     private let errorStickySeconds: Double
     private let hintSeconds: Double
@@ -137,6 +147,8 @@ final class DictationCoordinator: ObservableObject {
         playSound: @escaping (String) -> Void,
         soundsEnabled: @escaping () -> Bool,
         microphoneGranted: @escaping () -> Bool,
+        microphoneUID: String? = nil,
+        defaultInput: @escaping () -> BoundInput? = { AudioDevices.defaultInput() },
         reportInputMonitoring: @escaping (Bool) -> Void,
         errorStickySeconds: Double = 5,
         hintSeconds: Double = 4,
@@ -164,6 +176,8 @@ final class DictationCoordinator: ObservableObject {
         self.playSound = playSound
         self.soundsEnabled = soundsEnabled
         self.microphoneGranted = microphoneGranted
+        self.preferredMicrophoneUID = microphoneUID
+        self.defaultInput = defaultInput
         self.reportInputMonitoring = reportInputMonitoring
         self.errorStickySeconds = errorStickySeconds
         self.hintSeconds = hintSeconds
@@ -315,9 +329,17 @@ final class DictationCoordinator: ObservableObject {
             taps.reset()
         }
         if editing { endEdit() }
+        preferredMicrophoneUID = uid
         recorder.setPreferredInput(uid: uid)
         log("microphone set to \(uid ?? "system default")")
         prewarmRecorderIfGranted()
+        // The prewarm is what binds the new engine. Without the grant it never ran, and the old reading is of an
+        // engine that has been discarded.
+        capturingFrom = microphoneGranted() ? currentCaptureStatus() : .notRecordedYet
+    }
+
+    private func currentCaptureStatus() -> CaptureStatus {
+        CaptureStatus(bound: recorder.boundInput, preferredUID: preferredMicrophoneUID, defaultInput: defaultInput())
     }
 
     func setCleanupEnabled(_ on: Bool) {
@@ -620,6 +642,8 @@ final class DictationCoordinator: ObservableObject {
             self?.taps.reset()
         }
         pipeline.keyDown()
+        // The engine is bound by now, and a failed start has nothing to report.
+        if pipeline.isArmed { capturingFrom = currentCaptureStatus() }
         guard latched else { return }
         guard pipeline.isArmed else {
             // The recorder would not start: nothing is latched, and the next tap must not be eaten as its stop.
