@@ -74,7 +74,7 @@ final class SelectionReaderTests: XCTestCase {
     /// Power-of-two fractions: the accumulated wait is exact, so the poll count is too.
     private func reader(
         _ pasteboard: Clipboard, _ keys: Keys, sleeps: Box<Double> = Box(), wait: Double = 0.5, poll: Double = 0.125,
-        settle: @escaping () -> Void = {}, onSleep: @escaping (Int) -> Void = { _ in }
+        settle: @escaping () async -> Void = {}, onSleep: @escaping (Int) -> Void = { _ in }
     ) -> PasteboardSelectionReader {
         PasteboardSelectionReader(
             pasteboard: pasteboard, keys: keys, waitSeconds: wait, pollSeconds: poll, settle: settle,
@@ -257,6 +257,59 @@ final class SelectionReaderTests: XCTestCase {
 
         XCTAssertNil(selection, "the restore happened before the baseline count was read")
         XCTAssertEqual(pasteboard.items, mine)
+    }
+
+    /// Holds `settle` open until the test lets it go, the way a wait for a pending restore is.
+    private actor Gate {
+        private var isOpen = false
+        private var waiting: [CheckedContinuation<Void, Never>] = []
+
+        func wait() async {
+            if isOpen { return }
+            await withCheckedContinuation { waiting.append($0) }
+        }
+
+        func open() {
+            isOpen = true
+            let released = waiting
+            waiting = []
+            for continuation in released { continuation.resume() }
+        }
+    }
+
+    func test_the_reader_waits_for_a_settle_that_suspends_before_it_snapshots_and_presses() async throws {
+        let events = Locked<[String]>([])
+        let pasteboard = Clipboard(items: justDictated)
+        pasteboard.onSnapshot = { events.mutate { $0.append("snapshot") } }
+        let keys = Keys(onPress: {
+            events.mutate { $0.append("press") }
+            pasteboard.appCopies("the selected words")
+        })
+        let gate = Gate()
+        let sleeps = Box<Double>()
+        let reading = Task {
+            try await self.reader(
+                pasteboard, keys, sleeps: sleeps,
+                settle: {
+                    events.mutate { $0.append("settle begins") }
+                    await gate.wait()
+                    pasteboard.restore(self.mine)
+                    events.mutate { $0.append("settle ends") }
+                }
+            ).read(target: 42)
+        }
+        for _ in 0..<2000 where events.value.isEmpty { try await Task.sleep(nanoseconds: 1_000_000) }
+        try await Task.sleep(nanoseconds: 20_000_000)
+
+        XCTAssertEqual(events.value, ["settle begins"], "nothing is read or pressed while the settle is still waiting")
+        XCTAssertTrue(keys.pressed.isEmpty)
+
+        await gate.open()
+        let selection = try await reading.value
+
+        XCTAssertEqual(events.value, ["settle begins", "settle ends", "snapshot", "press"])
+        XCTAssertEqual(selection?.snapshot, mine, "the snapshot is the clipboard the settle left")
+        XCTAssertEqual(selection?.text, "the selected words")
     }
 
     func test_the_default_sleep_really_waits() async throws {

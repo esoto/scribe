@@ -11,6 +11,17 @@ struct DictationStat: Equatable {
     var cleanupMs: Int?
 }
 
+/// What one edit contributes. Numbers and a fixed vocabulary only — never the selection, the instruction or the result.
+struct EditStat: Equatable {
+    var verb: EditVerb
+    var sttMs: Int
+    /// The model call's wall time, a timeout's deadline included.
+    var editMs: Int?
+    /// The result passed every gate. A paste that then fell back to copy-only still counts: the gates are what this tunes.
+    var accepted: Bool
+    var rejection: EditRejection?
+}
+
 /// One calendar day of counters. Latencies are kept as bare integers so p50/p95 can be read back; no timestamps,
 /// no text, no per-app split.
 struct DayStats: Codable, Equatable {

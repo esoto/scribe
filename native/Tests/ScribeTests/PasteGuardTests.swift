@@ -31,6 +31,12 @@ final class PasteGuardTests: XCTestCase {
             if let err { throw err }
             replaced.append((text, target, snapshot, copiedChangeCount))
         }
+
+        private(set) var restored: [(snapshot: [PasteboardItemData]?, copiedChangeCount: Int)] = []
+
+        func restoreClipboardAfterCopy(_ snapshot: [PasteboardItemData]?, copiedChangeCount: Int) {
+            restored.append((snapshot, copiedChangeCount))
+        }
     }
 
     private func guarded(
@@ -216,6 +222,21 @@ final class PasteGuardTests: XCTestCase {
         ) { error in
             XCTAssertTrue(error is PasteError)
         }
+        XCTAssertTrue(inner.copied.isEmpty)
+    }
+
+    func test_putting_the_clipboard_back_is_not_a_paste_so_no_guard_applies() {
+        let inner = FakeDeliverer()
+        let paster = guarded(inner, accessibility: false, current: 99)
+
+        paster.restoreClipboardAfterCopy(snapshot, copiedChangeCount: copiedCount)
+        paster.restoreClipboardAfterCopy(nil, copiedChangeCount: copiedCount + 1)
+
+        XCTAssertEqual(inner.restored.count, 2)
+        XCTAssertEqual(inner.restored.first?.snapshot, snapshot)
+        XCTAssertEqual(inner.restored.first?.copiedChangeCount, copiedCount)
+        XCTAssertNil(inner.restored.last?.snapshot)
+        XCTAssertEqual(inner.restored.last?.copiedChangeCount, copiedCount + 1)
         XCTAssertTrue(inner.copied.isEmpty)
     }
 

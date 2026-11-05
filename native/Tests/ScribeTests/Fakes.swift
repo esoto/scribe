@@ -177,6 +177,83 @@ final class FakePaster: Pasting {
     }
 }
 
+/// A cleanup backend for the edit pipeline: records what `edit` was given and answers with `out`, an error, or never.
+final class FakeEditBackend: CleanupModelBackend, @unchecked Sendable {
+    let out: String
+    let err: Error?
+    let hang: Bool
+    /// Runs inside `edit`, so a test can move the fake clock by "model time".
+    let onEdit: (() -> Void)?
+    private let lock = NSLock()
+    private var _edits: [(instruction: String, text: String, maxTokens: Int)] = []
+
+    init(out: String = "", err: Error? = nil, hang: Bool = false, onEdit: (() -> Void)? = nil) {
+        self.out = out
+        self.err = err
+        self.hang = hang
+        self.onEdit = onEdit
+    }
+
+    var edits: [(instruction: String, text: String, maxTokens: Int)] { lock.withLock { _edits } }
+
+    func edit(instruction: String, text: String, maxTokens: Int) async throws -> String {
+        lock.withLock { _edits.append((instruction, text, maxTokens)) }
+        onEdit?()
+        if hang { await hangForever() }
+        if let err { throw err }
+        return out
+    }
+
+    func clean(_ text: String) async throws -> String { text }
+    func setDictionary(_ snapshot: DictionarySnapshot) {}
+    func preload() async {}
+    func unload() async {}
+    var isLoaded: Bool { get async { true } }
+}
+
+/// What the app in front gave when asked for its selection: a `Selection`, nothing, or a refusal.
+final class FakeSelectionReader: SelectionReader {
+    let result: Selection?
+    let err: Error?
+    private(set) var targets: [pid_t?] = []
+
+    init(_ result: Selection?, err: Error? = nil) {
+        self.result = result
+        self.err = err
+    }
+
+    var reads: Int { targets.count }
+
+    func read(target: pid_t?) async throws -> Selection? {
+        targets.append(target)
+        if let err { throw err }
+        return result
+    }
+}
+
+/// The paste side of an edit: records the replacement, or the clipboard it put back without one.
+final class FakeSelectionReplacer: SelectionReplacing {
+    let err: Error?
+    private(set) var replaced:
+        [(text: String, target: pid_t?, snapshot: [PasteboardItemData]?, copiedChangeCount: Int)] = []
+    private(set) var restored: [(snapshot: [PasteboardItemData]?, copiedChangeCount: Int)] = []
+
+    init(err: Error? = nil) {
+        self.err = err
+    }
+
+    func replaceSelection(
+        _ text: String, target: pid_t?, restoring snapshot: [PasteboardItemData]?, copiedChangeCount: Int
+    ) throws {
+        if let err { throw err }
+        replaced.append((text, target, snapshot, copiedChangeCount))
+    }
+
+    func restoreClipboardAfterCopy(_ snapshot: [PasteboardItemData]?, copiedChangeCount: Int) {
+        restored.append((snapshot, copiedChangeCount))
+    }
+}
+
 final class FakeKeyPresser: KeyPressing {
     let err: Error?
     private(set) var pressed: [SyntheticKey] = []
