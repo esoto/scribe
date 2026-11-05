@@ -1,6 +1,12 @@
 import AppKit
 import SwiftUI
 
+/// Reads main-actor state from the pipeline worker, like `frontmostPID`: directly on main, a synchronous hop otherwise.
+private func onMain<T>(_ read: @MainActor () -> T) -> T {
+    if Thread.isMainThread { return MainActor.assumeIsolated(read) }
+    return DispatchQueue.main.sync { MainActor.assumeIsolated(read) }
+}
+
 /// Composition root: builds every collaborator, wires the sub-models to each other, and owns the state that
 /// belongs to none of them (microphone, launch at login). The views observe the sub-models directly;
 /// nothing is forwarded through here, so one model's write never rebuilds another's views.
@@ -100,7 +106,11 @@ final class AppModel: ObservableObject {
             engines: engines,
             startingEngine: engines[settings.engine] != nil ? settings.engine : "parakeet",
             settings: settings,
-            onEngineCommitted: { lateDictation.pipeline.setEngine($0, name: $1) },
+            // Both pipelines transcribe with the active engine.
+            onEngineCommitted: {
+                lateDictation.pipeline.setEngine($0, name: $1)
+                lateDictation.editPipeline?.setEngine($0, name: $1)
+            },
             log: log)
         self.engineController = engineController
         let cleanupModels = CleanupModelController(
@@ -147,6 +157,15 @@ final class AppModel: ObservableObject {
             inner: paster,
             accessibilityGranted: { TCC.accessibilityGranted() },
             currentFrontmost: frontmostPID)
+        // The edit reads the selection with a transient ⌘C through the same Accessibility and focus guards as a paste.
+        // `settle` first waits out a dictation's pending clipboard restore, so the snapshot is the user's clipboard.
+        let selectionReader = PasteboardSelectionReader(
+            pasteboard: pasteboard,
+            keys: GuardedKeyPresser(
+                post: { try postKey($0) },
+                accessibilityGranted: { TCC.accessibilityGranted() },
+                currentFrontmost: frontmostPID),
+            settle: { await paster.settlePendingRestore() })
         let dictation = DictationCoordinator(
             recorder: recorder,
             pipelineConfig: config,
@@ -164,6 +183,7 @@ final class AppModel: ObservableObject {
                     history: history,
                     config: config,
                     clock: { Date().timeIntervalSince1970 },
+                    runner: sinks.runner,
                     // keyDown runs on main (tap callback), so a direct read is safe.
                     frontmost: { NSWorkspace.shared.frontmostApplication?.processIdentifier },
                     frontmostBundleID: { NSWorkspace.shared.frontmostApplication?.bundleIdentifier },
@@ -190,6 +210,29 @@ final class AppModel: ObservableObject {
                 pipeline.setCleaner(cleanupModels.cleaner, name: cleanupModels.activeCleanupModel)
                 return pipeline
             },
+            makeEditPipeline: { sinks in
+                EditPipeline(
+                    recorder: recorder,
+                    stt: engine,
+                    // The cleanup model is the edit model. The job runs on the shared worker and the controller is
+                    // main-actor state, so both reads hop to main.
+                    backend: { onMain { cleanupModels.cleaner } },
+                    modelIsGemma4: {
+                        onMain {
+                            [CleanupModelID.gemma4.rawValue, CleanupModelID.gemma4e2b.rawValue]
+                                .contains(cleanupModels.activeCleanupModel)
+                        }
+                    },
+                    selection: selectionReader,
+                    paster: guardedPaster,
+                    config: config,
+                    clock: { Date().timeIntervalSince1970 },
+                    // keyDown runs on main (tap callback), so a direct read is safe.
+                    frontmost: { NSWorkspace.shared.frontmostApplication?.processIdentifier },
+                    replacementPairs: { [dictionary] in dictionary.allPairs },
+                    sinks: sinks,
+                    onLog: log)
+            },
             makeHotkeyMonitor: { key, onDown, onUp in
                 HotkeyMonitor(key: key, onDown: onDown, onUp: onUp)
             },
@@ -202,6 +245,9 @@ final class AppModel: ObservableObject {
             repaste: { try guardedPaster.pasteIntoFocusedApp($0, ownPID: ProcessInfo.processInfo.processIdentifier) },
             hud: hudModel,
             hudEnabled: { settings.hudEnabled },
+            editEnabled: { settings.editEnabled },
+            // The store hops to its own queue, so no main-actor hop here.
+            onEditStat: { stats.record($0) },
             hotkeyMode: settings.hotkeyMode,
             log: log)
         lateDictation = dictation
@@ -237,6 +283,7 @@ final class AppModel: ObservableObject {
 
         // All stored properties are initialized, so self can be captured by callbacks arriving off the main actor.
         dictation.onKeyDown = { [weak self] in self?.prepareForKeyDown() }
+        dictation.onEditKeyDown = { [weak self] in self?.warmCleanupModelForEdit() }
         let downloads = self.downloads
         sttProgressRelay.set { label, fraction in
             Task { @MainActor in downloads.report(stt: label, fraction: fraction) }
@@ -364,6 +411,14 @@ final class AppModel: ObservableObject {
             }
             await cleanupModels.warmUpIfNeeded(cleaner, enabled: cleanupEnabled)
         }
+    }
+
+    /// An edit runs on the cleanup model whatever the cleanup toggle says, and `prepareForKeyDown` warms it only when
+    /// dictation cleanup is on: with it off, the model would load inside the edit's deadline and time it out.
+    private func warmCleanupModelForEdit() {
+        let cleanupModels = self.cleanupModels
+        let cleaner = cleanupModels.cleaner
+        Task { await cleanupModels.warmUpIfNeeded(cleaner, enabled: true) }
     }
 
     // MARK: - Menu actions

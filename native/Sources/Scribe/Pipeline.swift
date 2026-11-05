@@ -527,8 +527,9 @@ final class DictationPipeline {
 
     // MARK: - Default runner
 
-    /// One serial worker per pipeline: FIFO AsyncStream drained by a single Task, so dictations never overlap.
-    private static func makeSerialRunner() -> (@escaping () async -> Void) -> Void {
+    /// One serial worker: FIFO AsyncStream drained by a single Task, so jobs never overlap. The coordinator makes one
+    /// and hands it to both pipelines, so an edit's selection read can never interleave with a dictation's paste.
+    static func makeSerialRunner() -> (@escaping () async -> Void) -> Void {
         let worker = SerialWorker()
         return { work in worker.enqueue(work) }
     }
