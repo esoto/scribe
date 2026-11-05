@@ -7,6 +7,8 @@ struct EditSinks {
     let onNotice: (String) -> Void
     /// The pill's one-line verdict: the verb after a paste, or why nothing was pasted. Never selection text.
     let onVerdict: (String) -> Void
+    /// Why an edit failed ("Edit failed — transcription"), shown as ⚠ where a verdict, rejections included, is ◦.
+    let onProblem: (String) -> Void
     let onStat: (EditStat) -> Void
     /// The coordinator's single serial worker, shared with the dictation pipeline: an edit's ⌘C must never run between
     /// a dictation's ⌘V and the restore that follows it.
@@ -17,8 +19,8 @@ struct EditSinks {
 /// release, the spoken instruction is matched to one of seven verbs, the active cleanup model rewrites the selection,
 /// the deterministic gates check the result, and only an accepted result is pasted over the selection.
 ///
-/// Nothing textual leaves this class except through `onVerdict`'s fixed phrases and the paste itself: the selection,
-/// the instruction and the result never reach a log line, a stat or an error message.
+/// Nothing textual leaves this class except through the fixed phrases of `onVerdict` and `onProblem` and the paste
+/// itself: the selection, the instruction and the result never reach a log line, a stat or an error message.
 final class EditPipeline {
     static let notAnEditHint = "Not an edit — say shorter, formal, to Spanish…"
     static let noModelHint = "No cleanup model — pick one in Settings › Models"
@@ -91,8 +93,10 @@ final class EditPipeline {
         do {
             try recorder.arm()
         } catch {
-            onLog?("recorder arm failed: \(error)")
-            sinks.onNotice(UserFacingError.recordingNotice(error: "\(error)"))
+            onLog?("recorder arm failed: \(type(of: error))")
+            let notice = UserFacingError.recordingNotice(error: "\(error)")
+            sinks.onNotice(notice)
+            sinks.onProblem(notice)
             return
         }
         isArmed = true
@@ -171,10 +175,12 @@ final class EditPipeline {
         func emit(_ state: PipelineState) {
             stateLock.withLock { if !holding, latestJob == job { sinks.onState(state) } }
         }
-        // The verdict goes out before the final idle: the coordinator keeps a verdict on the pill only if it is
-        // already there when the idle arrives.
-        func finish(_ verdict: String?, stat: EditStat? = nil) {
-            if let verdict { sinks.onVerdict(verdict) }
+        // The line goes out before the final idle: the coordinator keeps it on the pill only if it is already there
+        // when the idle arrives. A failure is a problem (⚠); everything else, a rejection included, is a verdict (◦).
+        func finish(_ line: String?, asProblem: Bool = false, stat: EditStat? = nil) {
+            if let line {
+                if asProblem { sinks.onProblem(line) } else { sinks.onVerdict(line) }
+            }
             if let stat { sinks.onStat(stat) }
             emit(.idle)
         }
@@ -184,8 +190,9 @@ final class EditPipeline {
         let age = clock() - enqueuedAt
         if age > config.queueMaxAge {
             // A ⌘C into whatever has focus this long after the release is worse than dropping the edit.
-            sinks.onNotice("Edit skipped — it waited \(Int(age)) s behind the previous one")
-            emit(.idle)
+            let skipped = "Edit skipped — it waited \(Int(age)) s behind the previous one"
+            sinks.onNotice(skipped)
+            finish(skipped, asProblem: true)
             return
         }
         emit(.processing)
@@ -209,7 +216,7 @@ final class EditPipeline {
             return
         } catch {
             onLog?("edit: selection read failed: \(type(of: error))")
-            finish("Edit failed — check log")
+            finish("Edit failed — check log", asProblem: true)
             return
         }
         guard let selection = read else {
@@ -230,7 +237,7 @@ final class EditPipeline {
             // The type only: an engine's message is not ours to vouch for.
             onLog?("edit: transcription failed (\(engineName)): \(type(of: error))")
             putTheClipboardBack()
-            finish("Edit failed — transcription")
+            finish("Edit failed — transcription", asProblem: true)
             return
         }
         let sttMs = Int((clock() - t0) * 1000)
@@ -243,7 +250,7 @@ final class EditPipeline {
         }
         guard let backend = backend() else {
             putTheClipboardBack()
-            finish(Self.noModelHint)
+            finish(Self.noModelHint, asProblem: true)
             return
         }
 
@@ -267,7 +274,7 @@ final class EditPipeline {
         } catch {
             onLog?("edit: model call failed: \(type(of: error))")
             putTheClipboardBack()
-            finish("Edit failed — check log")
+            finish("Edit failed — check log", asProblem: true)
             return
         }
         let editMs = Int((clock() - t1) * 1000)
@@ -281,22 +288,26 @@ final class EditPipeline {
                 EditGates.pillReason(why, modelIsGemma4: modelIsGemma4()),
                 stat: EditStat(verb: verb, sttMs: sttMs, editMs: editMs, accepted: false, rejection: why))
         case .accepted(let text):
-            var pasted = true
+            // The pill never claims an edit that was not pasted: a refused paste leaves its notice alone, a failed
+            // one adds the ⚠.
+            var line: String? = verb.displayName
+            var failed = false
             do {
                 try paster.replaceSelection(
                     text, target: target, restoring: selection.snapshot, copiedChangeCount: selection.copiedChangeCount)
             } catch let guarded as PasteGuardError {
                 // The guard left the edit on the clipboard and the selection is still selected: ⌘V finishes the job.
                 sinks.onNotice(guarded.notice)
-                pasted = false
+                line = nil
             } catch {
-                sinks.onNotice("Edit failed — press ⌘V to paste manually")
-                pasted = false
+                let notice = "Edit failed — press ⌘V to paste manually"
+                sinks.onNotice(notice)
+                line = notice
+                failed = true
             }
             onLog?("edit: engine=\(engineName) verb=\(verb.logName) \(counts) out_chars=\(text.count)")
-            // The pill never claims an edit that was not pasted.
             finish(
-                pasted ? verb.displayName : nil,
+                line, asProblem: failed,
                 stat: EditStat(verb: verb, sttMs: sttMs, editMs: editMs, accepted: true, rejection: nil))
         }
     }

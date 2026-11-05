@@ -26,6 +26,12 @@ enum NoticeKind {
     case problem, info
 }
 
+/// Which pipeline a state came from. The two share one microphone and are never both armed, so while one holds it the
+/// other's job states (a queued job finishing) are not the hold's news.
+enum PipelineSource {
+    case dictation, edit
+}
+
 /// The slice of `HotkeyMonitor` the coordinator drives; the real one installs a `CGEventTap`.
 protocol HotkeyMonitoring: AnyObject {
     var onModifierEvent: ((String) -> Void)? { get set }
@@ -183,7 +189,7 @@ final class DictationCoordinator: ObservableObject {
             PipelineSinks(
                 onState: { [weak self] newState in
                     Task { @MainActor in
-                        self?.applyState(newState)
+                        self?.applyState(newState, from: .dictation)
                     }
                 },
                 onNotice: { [weak self] message in
@@ -211,7 +217,7 @@ final class DictationCoordinator: ObservableObject {
             EditSinks(
                 onState: { [weak self] newState in
                     Task { @MainActor in
-                        self?.applyState(newState)
+                        self?.applyState(newState, from: .edit)
                     }
                 },
                 onNotice: { [weak self] message in
@@ -223,6 +229,11 @@ final class DictationCoordinator: ObservableObject {
                 onVerdict: { [weak self] message in
                     Task { @MainActor in
                         self?.showHint(message)
+                    }
+                },
+                onProblem: { [weak self] message in
+                    Task { @MainActor in
+                        self?.showProblem(message)
                     }
                 },
                 onStat: onEditStat,
@@ -391,7 +402,10 @@ final class DictationCoordinator: ObservableObject {
 
     // MARK: - Pipeline callbacks (always entered on @MainActor — see the sinks in init)
 
-    func applyState(_ newState: PipelineState) {
+    func applyState(_ newState: PipelineState, from source: PipelineSource = .dictation) {
+        // Before anything is touched: a job finishing in the other pipeline under a live hold must not flip the glyph,
+        // cancel the delayed Listening pill, or hide the pill.
+        if newState == .processing || newState == .idle, microphoneIsHeldByTheOther(than: source) { return }
         state = newState
         errorRevert?.cancel()
         hudShow?.cancel()
@@ -411,14 +425,11 @@ final class DictationCoordinator: ObservableObject {
                 // An edit's pill is already up (`beginEdit`), and "Listening" would take its label back.
                 if !editing { showListeningAfterTheTapThreshold(hud) }
             case .processing:
-                // While an edit is held the Editing pill is the live one: a dictation job finishing now is the
-                // previous hold's, not this one's.
-                if !editing { hud.show(.processing) }
+                hud.show(.processing)
             case .error:
                 hud.show(.problem("Error — check log"))
                 scheduleHudHide(hud)
             case .idle:
-                if editing { break }
                 // process() emits the verdict (hint or paste cue) before this idle: leave it up briefly.
                 switch hud.phase {
                 case .result, .problem: scheduleHudHide(hud)
@@ -431,6 +442,15 @@ final class DictationCoordinator: ObservableObject {
             playSound("Pop")
         } else if newState == .error {
             playSound("Basso")
+        }
+    }
+
+    /// The other pipeline's `.processing` and `.idle` are ignored while this one is armed, so a held dictation never
+    /// sees an edit job's states and a held edit never sees a dictation job's.
+    private func microphoneIsHeldByTheOther(than source: PipelineSource) -> Bool {
+        switch source {
+        case .dictation: return editing
+        case .edit: return pipeline.isArmed
         }
     }
 
@@ -470,6 +490,16 @@ final class DictationCoordinator: ObservableObject {
             return
         }
         showVerdictOnPill(message)
+        keepAsHint(message)
+    }
+
+    /// An edit's failure: the same one-liner as a verdict, as ⚠ on the pill (spec: any failure shows the problem).
+    func showProblem(_ message: String) {
+        showProblemOnPill(message)
+        keepAsHint(message)
+    }
+
+    private func keepAsHint(_ message: String) {
         hint = message
         hintClear?.cancel()
         let seconds = hintSeconds
@@ -492,6 +522,25 @@ final class DictationCoordinator: ObservableObject {
         switch hud.phase {
         case .processing, .result, .problem: hud.show(.result(text))
         case .hidden, .listening, .editing: break
+        }
+    }
+
+    /// Like a verdict, a problem replaces the job's ⋯ and never a live pill. Unlike one it may also appear on a hidden
+    /// pill — a recorder that would not start has no job pill to replace — but only with no hold live: the hide it
+    /// schedules (a verdict relies on the job's idle for that) would take a Listening or Editing pill down.
+    private func showProblemOnPill(_ text: String) {
+        guard let hud, hudEnabled() else { return }
+        switch hud.phase {
+        case .processing, .result, .problem:
+            hud.show(.problem(text))
+        case .hidden:
+            guard !pipeline.isArmed, !editing else { return }
+            hudShow?.cancel()
+            hudHide?.cancel()
+            hud.show(.problem(text))
+            scheduleHudHide(hud)
+        case .listening, .editing:
+            break
         }
     }
 

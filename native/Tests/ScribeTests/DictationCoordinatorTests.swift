@@ -105,7 +105,7 @@ final class DictationCoordinatorTests: XCTestCase {
                         config: config, clock: { clock.t },
                         sinks: EditSinks(
                             onState: sinks.onState, onNotice: sinks.onNotice, onVerdict: sinks.onVerdict,
-                            onStat: sinks.onStat, runner: { _ in editJobs.append("job") }))
+                            onProblem: sinks.onProblem, onStat: sinks.onStat, runner: { _ in editJobs.append("job") }))
                 } : nil,
             makeHotkeyMonitor: { [unowned self] key, down, up in
                 self.monitorKeys.append(key)
@@ -1172,6 +1172,66 @@ final class DictationCoordinatorTests: XCTestCase {
         withExtendedLifetime(c) {}
     }
 
+    func testAnEditFailureShowsAsAProblemOnThePillThenHides() async {
+        let c = make(hudResultSeconds: 0.3, withEdits: true)
+        c.handleKeyDown(chord: true)
+        pipelineClock.t += 1
+        c.handleKeyUp()
+
+        editSinks.onState(.processing)
+        editSinks.onProblem("Edit failed — transcription")
+        editSinks.onState(.idle)
+
+        let shown = await eventually { [unowned self] in hud.phase == .problem("Edit failed — transcription") }
+        XCTAssertTrue(shown, "a failure is a ⚠, where a rejection is a ◦ result")
+        XCTAssertEqual(c.hint, "Edit failed — transcription", "the menu's status row says it too")
+        let hidden = await eventually { [unowned self] in hud.phase == .hidden }
+        XCTAssertTrue(hidden)
+    }
+
+    func testAProblemFromAnEarlierEditJobNeverCoversALiveHold() async {
+        let c = make(withEdits: true)
+        c.handleKeyDown()
+        let listening = await eventually { [unowned self] in hud.phase == .listening }
+        XCTAssertTrue(listening)
+
+        editSinks.onProblem("Edit failed — check log")
+        try? await Task.sleep(nanoseconds: 100_000_000)
+
+        XCTAssertEqual(hud.phase, .listening, "the level bars of the live hold stay up")
+        XCTAssertEqual(c.hint, "Edit failed — check log")
+        c.handleKeyUp()
+    }
+
+    func testAProblemBeforeAHoldsPillAppearsDoesNotScheduleAHideThatTakesItDown() async {
+        let c = make(hudResultSeconds: 0.1, holdThreshold: 0.05, withEdits: true)
+        c.handleKeyDown()
+
+        editSinks.onProblem("Edit failed — check log")   // the pill is still hidden: Listening waits out the tap threshold
+        let listening = await eventually { [unowned self] in hud.phase == .listening }
+        XCTAssertTrue(listening)
+        try? await Task.sleep(nanoseconds: 300_000_000)
+
+        XCTAssertEqual(hud.phase, .listening, "a hide scheduled for the problem must not outlive it into the hold")
+        c.handleKeyUp()
+    }
+
+    func testARecorderThatWillNotStartShowsTheProblemOnThePill() async {
+        recorder.armError = TestError(message: "no input device")
+        let c = make(hudResultSeconds: 0.3, withEdits: true)
+
+        c.handleKeyDown(chord: true)
+
+        let notice = UserFacingError.recordingNotice(error: "")
+        let shown = await eventually { [unowned self] in hud.phase == .problem(notice) }
+        XCTAssertTrue(shown, "no job pill to replace: the problem appears on its own")
+        let hidden = await eventually { [unowned self] in hud.phase == .hidden }
+        XCTAssertTrue(hidden)
+        let delivered = await eventually { [unowned self] in notifier.delivered.count == 1 }
+        XCTAssertTrue(delivered, "the banner is kept")
+        XCTAssertEqual(notifier.delivered.first?.body, notice)
+    }
+
     func testAnEditsNoticeIsDeliveredAndRecorded() async {
         let c = make(withEdits: true)
 
@@ -1278,10 +1338,74 @@ final class DictationCoordinatorTests: XCTestCase {
         XCTAssertEqual(hud.phase, .editing, "that idle is not this hold's")
         pipelineClock.t += 1
         c.handleKeyUp()
-        c.applyState(.processing)   // the edit's own job
+        c.applyState(.processing, from: .edit)   // the edit's own job
         XCTAssertEqual(hud.phase, .processing)
-        c.applyState(.idle)
+        c.applyState(.idle, from: .edit)
         XCTAssertEqual(hud.phase, .hidden)
+    }
+
+    // MARK: - One pipeline holds the microphone: the other's jobs finish unseen
+
+    func testAnEditJobStartingDuringADictationHoldKeepsTheMenuStateAndTheListeningPill() async {
+        let c = make(holdThreshold: 0.3, withEdits: true)
+        c.handleKeyDown()
+        // Inside the tap threshold: an edit released just before this hold starts its job.
+        editSinks.onState(.processing)
+
+        let listening = await eventually { [unowned self] in hud.phase == .listening }
+        XCTAssertTrue(listening, "the delayed Listening pill must not be cancelled by the other pipeline's state")
+        XCTAssertEqual(c.state, .recording, "the microphone is recording, so the menu bar says so")
+        c.handleKeyUp()
+    }
+
+    func testAnEditJobEndingDuringADictationHoldLeavesTheListeningPillUpAndThenTheDictationsStatesApply() async {
+        let c = make(holdThreshold: 0.05, withEdits: true)
+        c.handleKeyDown()
+        let listening = await eventually { [unowned self] in hud.phase == .listening }
+        XCTAssertTrue(listening)
+
+        editSinks.onState(.processing)
+        editSinks.onState(.idle)
+        try? await Task.sleep(nanoseconds: 100_000_000)
+
+        XCTAssertEqual(hud.phase, .listening, "an edit's idle must not hide the pill mid-hold")
+        XCTAssertEqual(c.state, .recording)
+
+        pipelineClock.t += 1
+        c.handleKeyUp()
+        sinks.onState(.processing)
+        let transcribing = await eventually { [unowned self] in hud.phase == .processing }
+        XCTAssertTrue(transcribing, "once the hold is over the dictation's own states apply")
+        XCTAssertEqual(c.state, .processing)
+        sinks.onState(.idle)
+        let hidden = await eventually { [unowned self] in hud.phase == .hidden }
+        XCTAssertTrue(hidden)
+        XCTAssertEqual(c.state, .idle)
+    }
+
+    func testADictationJobsStatesDuringAnEditHoldLeaveTheMenuStateAndThePillAndThenTheEditsApply() async {
+        let c = make(withEdits: true)
+        c.handleKeyDown(chord: true)
+        let recording = await eventually { c.state == .recording }
+        XCTAssertTrue(recording)
+
+        sinks.onState(.processing)
+        sinks.onState(.idle)
+        try? await Task.sleep(nanoseconds: 100_000_000)
+
+        XCTAssertEqual(c.state, .recording, "a dictation job ending is not the edit hold's news")
+        XCTAssertEqual(hud.phase, .editing)
+
+        pipelineClock.t += 1
+        c.handleKeyUp()
+        editSinks.onState(.processing)
+        let processing = await eventually { [unowned self] in hud.phase == .processing }
+        XCTAssertTrue(processing, "once the hold is over the edit's own states apply")
+        XCTAssertEqual(c.state, .processing)
+        editSinks.onState(.idle)
+        let hidden = await eventually { [unowned self] in hud.phase == .hidden }
+        XCTAssertTrue(hidden)
+        XCTAssertEqual(c.state, .idle)
     }
 
     func testTheLevelReachesThePillWhileEditing() {
@@ -1335,44 +1459,66 @@ final class DictationCoordinatorTests: XCTestCase {
         XCTAssertTrue(editJobs.value.isEmpty, "a 1 s hold is a tap at a 2 s threshold")
     }
 
+    /// Holds the dictation job open, so an edit queued behind it would overtake it if the worker were not shared.
+    private struct SlowStt: SttEngine {
+        let name = "parakeet"
+        let events: Locked<[String]>
+
+        func transcribe(_ pcm: [Float]) async throws -> String {
+            events.mutate { $0.append("dictation begins") }
+            try? await Task.sleep(nanoseconds: 60_000_000)
+            events.mutate { $0.append("dictation ends") }
+            return "so um hello there world"
+        }
+    }
+
+    /// The edit job's first step after the release: reading the selection, which presses ⌘C in the real app.
+    private struct CopyProbe: SelectionReader {
+        let events: Locked<[String]>
+
+        func read(target: pid_t?) async throws -> Selection? {
+            events.mutate { $0.append("edit begins") }
+            return nil
+        }
+    }
+
     func testBothPipelinesRunTheirJobsOnOneSerialWorker() async {
-        var dictationRunner: ((@escaping () async -> Void) -> Void)?
         let recorder = self.recorder!
         let clock = pipelineClock!
+        let events = Locked<[String]>([])
         let c = DictationCoordinator(
             recorder: recorder, pipelineConfig: PipelineConfig(), hotkey: .rightOption,
             makePipeline: { sinks in
-                dictationRunner = sinks.runner
-                return DictationPipeline(
-                    recorder: recorder, stt: FakeStt(), cleaner: FakeCleaner(), paster: FakePaster(),
-                    history: History(maxLen: 10), config: PipelineConfig(), clock: { clock.t },
+                // As the app builds it: the coordinator's worker, not a private one.
+                DictationPipeline(
+                    recorder: recorder, stt: SlowStt(events: events), cleaner: FakeCleaner(), paster: FakePaster(),
+                    history: History(maxLen: 10), config: PipelineConfig(), clock: { clock.t }, runner: sinks.runner,
                     onState: sinks.onState, onNotice: sinks.onNotice, saveFailedAudio: sinks.saveFailedAudio)
             },
-            makeEditPipeline: { [unowned self] sinks in
-                self.editSinks = sinks
-                return EditPipeline(
+            makeEditPipeline: { sinks in
+                EditPipeline(
                     recorder: recorder, stt: FakeStt(), backend: { nil }, modelIsGemma4: { false },
-                    selection: FakeSelectionReader(nil), paster: FakeSelectionReplacer(), config: PipelineConfig(),
+                    selection: CopyProbe(events: events), paster: FakeSelectionReplacer(), config: PipelineConfig(),
                     clock: { clock.t }, sinks: sinks)
             },
             makeHotkeyMonitor: { _, _, _ in FakeHotkeyMonitor() }, notifier: FakeNotifier(), playSound: { _ in },
             soundsEnabled: { false }, microphoneGranted: { true }, reportInputMonitoring: { _ in },
-            repaste: { _ in }, log: { _ in })
-        _ = c
-        let events = Locked<[String]>([])
+            repaste: { _ in }, editEnabled: { true }, now: { clock.t }, log: { _ in })
 
-        dictationRunner?({
-            events.mutate { $0.append("dictation begins") }
-            try? await Task.sleep(nanoseconds: 60_000_000)
-            events.mutate { $0.append("dictation ends") }
-        })
-        editSinks.runner({ events.mutate { $0.append("edit begins") } })
+        // A real hold and release through each pipeline: the edit is released while the dictation is still working.
+        c.handleKeyDown()
+        clock.t += 1
+        c.handleKeyUp()
+        c.handleKeyDown(chord: true)
+        clock.t += 1
+        c.handleKeyUp()
 
         let ran = await eventually { events.value.count == 3 }
         XCTAssertTrue(ran)
         XCTAssertEqual(
             events.value, ["dictation begins", "dictation ends", "edit begins"],
             "an edit's ⌘C must never run while a dictation is still pasting")
+        withExtendedLifetime(c) {}
     }
 
     // MARK: - Latch mode

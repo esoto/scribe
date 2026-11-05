@@ -338,12 +338,12 @@ final class StatsStoreTests: XCTestCase {
         XCTAssertNil(statsEditsLine(s), "no edits, no line")
         s.edits = 1
         s.editsAccepted = 1
-        XCTAssertEqual(statsEditsLine(s), "1 edit · 1 applied")
+        XCTAssertEqual(statsEditsLine(s), "1 edit · 1 accepted")
         s.edits = 12
         s.editsAccepted = 9
-        XCTAssertEqual(statsEditsLine(s), "12 edits · 9 applied")
+        XCTAssertEqual(statsEditsLine(s), "12 edits · 9 accepted")
         s.editsAccepted = 0
-        XCTAssertEqual(statsEditsLine(s), "12 edits · 0 applied")
+        XCTAssertEqual(statsEditsLine(s), "12 edits · 0 accepted")
     }
 
     func testLatencyAndFallbackLines() {

@@ -11,7 +11,7 @@ is pasted into whatever app has focus. No cloud, no accounts. Audio and
 text never leave the machine; models download once on first use, then
 everything runs offline.
 
-An edit copies the selected text from the app in front, sends it to the local model, pastes the result and restores your clipboard. The text is kept nowhere — not in History, Stats or the log. The copy is made by the app itself, so a clipboard manager you run may record your own selection.
+An edit copies the selected text from the app in front, sends it to the local model, pastes the result over it and puts your clipboard back; if focus moved meanwhile, the result is copied for you to paste instead. The text is kept nowhere — not in History, Stats or the log. The copy is made by the app itself, so a clipboard manager you run may record your own selection.
 
 A native Swift menu-bar app (`native/`) — it replaced the original Python
 implementation (removed 2026-07-09; see git history for the reference
@@ -77,7 +77,7 @@ Upgrading from a v3 install downloads Ultra on first launch (progress shows in t
   tap threshold, so a brief tap never flashes it. A latched recording (a double-tap or `scribe://toggle`) shows it at once and keeps it up until the recording stops.
 - **Engine** picker: Parakeet (fast, default) ↔ Whisper (better for
   Spanish-heavy dictation; loads on first switch).
-- **Settings…** (⌘,) has three tabs. **General** holds the hotkey and Hotkey mode, hold delay, sounds, scribe:// URLs, voice commands, the recording pill, Launch at Login, idle unload, and history size. **Audio** picks the microphone and holds the experimental **Enhance Audio** toggle (LocalVQE noise suppression before transcription — off by default because it lowered accuracy on synthetic noise in tests). **Models** downloads, switches, and deletes the cleanup model.
+- **Settings…** (⌘,) has five tabs: General, Audio, Models, Stats and Apps (the last two are described below). **General** holds the hotkey and Hotkey mode, edit selected text, hold delay, sounds, scribe:// URLs, voice commands, the recording pill, Launch at Login, idle unload, and history size. **Audio** picks the microphone and holds the experimental **Enhance Audio** toggle (LocalVQE noise suppression before transcription — off by default because it lowered accuracy on synthetic noise in tests). **Models** downloads, switches, and deletes the cleanup model.
 - **Cleanup (remove fillers)** toggle: off = verbatim transcription pasted raw.
 - **Voice commands** (Settings › General, on by default): say one of these
   as the whole utterance and scribe acts instead of pasting — "enter" /
@@ -292,7 +292,8 @@ outside scribe's process. scribe manages them on demand:
   when you switch apps while it's transcribing.
 - **Recording did not stop** → a latched recording (a double-tap, or `scribe://toggle` in either Hotkey mode) stops at a single tap of the hotkey; after 4 minutes scribe stops it by itself and says so.
 - **"Nothing selected" / "Not an edit"** → select the text first, then hold ⇧ with the hotkey; say one of the seven instructions as the whole utterance. A few editors copy the whole line when nothing is selected — select the text first.
-- **"Edit rejected — …"** → the result failed a check (empty, answered instead of editing, length, language, something added) and was not pasted; try again, or pick Gemma 4 E4B in Settings › Models, which passes the most edit checks.
+- **"Edit rejected — …"** → the result failed a check (empty, answered instead of editing, length, language, something added, took too long) and was not pasted; try again, or pick Gemma 4 E4B in Settings › Models, which passes the most edit checks.
+- **"Edit skipped — it waited … behind the previous one"** → it was queued behind a long dictation or edit for more than 30 s, and scribe drops it rather than copy from whatever has focus that late. Wait for "Pasted" or the edit's verdict before starting the next one.
 - **"Dictation skipped — it waited … behind the previous one"** → it was queued behind a long dictation for more than 30 s, and scribe drops it rather than paste it that late. After a long latched dictation, wait for "Pasted" before starting the next one.
 - **The menu bar shows ⚠ while idle** → a permission was revoked. Open
   Setup / Doctor; the highlighted row is the one to fix.

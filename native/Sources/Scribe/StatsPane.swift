@@ -46,11 +46,12 @@ func statsCountsLine(_ s: StatsSummary) -> String {
     return "\(dictations) · \(s.words) words · \(typing)"
 }
 
-/// "12 edits · 9 applied"; nil when nothing was edited. Counts only, like the rest of the pane.
+/// "12 edits · 9 accepted"; nil when nothing was edited. Counts only, like the rest of the pane. Accepted means the
+/// result passed the checks, not that it was pasted: a copy-only fallback counts too.
 func statsEditsLine(_ s: StatsSummary) -> String? {
     guard s.edits > 0 else { return nil }
     let edits = s.edits == 1 ? "1 edit" : "\(s.edits) edits"
-    return "\(edits) · \(s.editsAccepted) applied"
+    return "\(edits) · \(s.editsAccepted) accepted"
 }
 
 /// Medians first, then the slow tail; nil when nothing was transcribed.

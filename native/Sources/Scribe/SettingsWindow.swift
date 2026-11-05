@@ -89,7 +89,7 @@ private struct GeneralPane: View {
             caption("Latched: double-tap to start, tap to stop, auto-stop after 4 minutes. The mic stays on until you tap — the orange indicator shows it, and so does the pill when it is on.")
 
             Toggle("Edit selected text", isOn: Binding(get: { settings.editEnabled }, set: { settings.setEditEnabled($0) }))
-            caption("Hold ⇧ with the hotkey over selected text and say shorter, fix grammar, formal, casual, make a list, translate to Spanish or to English (Spanish works too). scribe copies the selection, edits it on the local model, and pastes the result over it. Off, the chord does nothing.")
+            caption("Hold ⇧ with the hotkey over selected text and say shorter, fix grammar, formal, casual, make a list, translate to Spanish or to English (Spanish works too). scribe copies the selection, edits it on the local model, pastes the result over it and puts your clipboard back; if focus moved meanwhile, the result is copied for you to paste instead. Off, ⇧ with the hotkey dictates like the hotkey alone.")
 
             Picker(
                 "Ignore taps shorter than",

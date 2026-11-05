@@ -44,9 +44,11 @@ final class EditPipelineTests: XCTestCase {
         let states: Box<PipelineState>
         let notices: Box<String>
         let verdicts: Box<String>
+        /// Failures, shown as ⚠ on the pill; a rejection is a verdict, not one of these.
+        let problems: Box<String>
         let stats: Box<EditStat>
         let logs: Box<String>
-        /// States and verdicts in the order the sinks fired, as "state: …" and "verdict: …".
+        /// States, verdicts and problems in the order the sinks fired, as "state: …", "verdict: …" and "problem: …".
         let events: Box<String>
         let backend: FakeEditBackend
         let reader: FakeSelectionReader
@@ -73,6 +75,7 @@ final class EditPipelineTests: XCTestCase {
         let states = Box<PipelineState>()
         let notices = Box<String>()
         let verdicts = Box<String>()
+        let problems = Box<String>()
         let stats = Box<EditStat>()
         let logs = Box<String>()
         let events = Box<String>()
@@ -100,12 +103,16 @@ final class EditPipelineTests: XCTestCase {
                     verdicts.append($0)
                     events.append("verdict: \($0)")
                 },
+                onProblem: {
+                    problems.append($0)
+                    events.append("problem: \($0)")
+                },
                 onStat: { stats.append($0) },
                 runner: runner ?? { work in runBlocking(work) }),
             onLog: { logs.append($0) })
         return Harness(
-            pipeline: pipeline, clock: clock, states: states, notices: notices, verdicts: verdicts, stats: stats,
-            logs: logs, events: events, backend: backend, reader: reader, replacer: replacer, stt: stt,
+            pipeline: pipeline, clock: clock, states: states, notices: notices, verdicts: verdicts, problems: problems,
+            stats: stats, logs: logs, events: events, backend: backend, reader: reader, replacer: replacer, stt: stt,
             recorder: recorder)
     }
 
@@ -181,6 +188,17 @@ final class EditPipelineTests: XCTestCase {
             "the pill keeps a verdict only if it arrives before the idle")
     }
 
+    func testAProblemIsReportedBeforeTheFinalIdleToo() {
+        let h = make(stt: FakeStt(err: SttError(message: Self.secret)))
+
+        edit(h)
+
+        XCTAssertEqual(
+            h.events.value,
+            ["state: recording", "state: processing", "problem: Edit failed — transcription", "state: idle"],
+            "the pill keeps a problem only if it arrives before the idle")
+    }
+
     func testMaxTokensFollowsTheVerb() {
         let cases: [(utterance: String, verb: EditVerb)] = [
             ("make it shorter", .shorter), ("fix the grammar", .fixGrammar), ("make it formal", .formal),
@@ -226,6 +244,7 @@ final class EditPipelineTests: XCTestCase {
         XCTAssertEqual(h.stt.calls, 0)
         XCTAssertEqual(h.backend.edits.count, 0)
         XCTAssertEqual(h.verdicts.value, ["Nothing selected"])
+        XCTAssertEqual(h.problems.value, [], "nothing selected is an answer, not a failure")
         XCTAssertTrue(h.replacer.replaced.isEmpty)
         XCTAssertTrue(h.replacer.restored.isEmpty, "the reader already put the clipboard back, or never touched it")
         XCTAssertEqual(h.states.value, [.recording, .processing, .idle])
@@ -238,6 +257,7 @@ final class EditPipelineTests: XCTestCase {
         edit(h)
 
         XCTAssertEqual(h.verdicts.value, ["Not an edit — say shorter, formal, to Spanish…"])
+        XCTAssertEqual(h.problems.value, [])
         XCTAssertEqual(h.backend.edits.count, 0)
         XCTAssertTrue(h.replacer.replaced.isEmpty)
         XCTAssertEqual(h.replacer.restored.count, 1)
@@ -254,6 +274,7 @@ final class EditPipelineTests: XCTestCase {
         edit(h)
 
         XCTAssertEqual(h.verdicts.value, [DictationPipeline.noSpeechHint])
+        XCTAssertEqual(h.problems.value, [])
         XCTAssertEqual(h.reader.reads, 0, "no ⌘C for a hold that captured nothing")
         XCTAssertEqual(h.stt.calls, 0)
         XCTAssertEqual(h.states.value, [.recording, .processing, .idle])
@@ -264,7 +285,8 @@ final class EditPipelineTests: XCTestCase {
 
         edit(h)
 
-        XCTAssertEqual(h.verdicts.value, ["No cleanup model — pick one in Settings › Models"])
+        XCTAssertEqual(h.problems.value, ["No cleanup model — pick one in Settings › Models"])
+        XCTAssertEqual(h.verdicts.value, [])
         XCTAssertTrue(h.replacer.replaced.isEmpty)
         XCTAssertEqual(h.replacer.restored.count, 1)
         XCTAssertTrue(h.stats.value.isEmpty)
@@ -283,6 +305,7 @@ final class EditPipelineTests: XCTestCase {
         XCTAssertTrue(h.replacer.replaced.isEmpty, "a rejected result is never pasted", file: file, line: line)
         XCTAssertEqual(
             h.verdicts.value, [EditGates.pillReason(expected, modelIsGemma4: modelIsGemma4)], file: file, line: line)
+        XCTAssertEqual(h.problems.value, [], "a rejection is a verdict (◦), not a failure (⚠)", file: file, line: line)
         XCTAssertEqual(h.stats.value.count, 1, file: file, line: line)
         XCTAssertEqual(h.stats.value.first?.accepted, false, file: file, line: line)
         XCTAssertEqual(h.stats.value.first?.rejection, expected, file: file, line: line)
@@ -332,6 +355,7 @@ final class EditPipelineTests: XCTestCase {
         edit(h)
 
         XCTAssertEqual(h.verdicts.value, [EditGates.pillReason(.timeout, modelIsGemma4: false)])
+        XCTAssertEqual(h.problems.value, [], "a timeout is a gate rejection, not a failure")
         XCTAssertTrue(h.replacer.replaced.isEmpty)
         XCTAssertEqual(h.stats.value.first?.rejection, .timeout)
         XCTAssertEqual(h.stats.value.first?.accepted, false)
@@ -354,6 +378,7 @@ final class EditPipelineTests: XCTestCase {
 
         XCTAssertEqual(h.notices.value, ["Focus changed — text copied, press ⌘V"])
         XCTAssertEqual(h.verdicts.value, [], "the pill must not claim an edit that was not pasted")
+        XCTAssertEqual(h.problems.value, [], "the copy-only fallback is the notice's job")
         XCTAssertEqual(h.states.value, [.recording, .processing, .idle])
         XCTAssertEqual(h.stats.value.first?.accepted, true, "the result passed the gates")
         XCTAssertTrue(h.replacer.restored.isEmpty, "the edited text stays on the clipboard for the manual ⌘V")
@@ -365,6 +390,7 @@ final class EditPipelineTests: XCTestCase {
         edit(h)
 
         XCTAssertEqual(h.notices.value, ["Edit failed — press ⌘V to paste manually"])
+        XCTAssertEqual(h.problems.value, ["Edit failed — press ⌘V to paste manually"])
         XCTAssertEqual(h.verdicts.value, [])
         XCTAssertEqual(h.states.value, [.recording, .processing, .idle])
         assertNoTextInTheLog(h)
@@ -378,6 +404,7 @@ final class EditPipelineTests: XCTestCase {
 
         XCTAssertEqual(h.notices.value, ["Accessibility is off — ⌘C not sent"])
         XCTAssertEqual(h.verdicts.value, [])
+        XCTAssertEqual(h.problems.value, [])
         XCTAssertEqual(h.stt.calls, 0)
         XCTAssertTrue(h.replacer.restored.isEmpty, "the copy never happened")
         XCTAssertEqual(h.states.value, [.recording, .processing, .idle])
@@ -388,7 +415,8 @@ final class EditPipelineTests: XCTestCase {
 
         edit(h)
 
-        XCTAssertEqual(h.verdicts.value, ["Edit failed — check log"])
+        XCTAssertEqual(h.problems.value, ["Edit failed — check log"])
+        XCTAssertEqual(h.verdicts.value, [])
         XCTAssertTrue(h.logs.value.contains { $0.contains("TestError") }, "\(h.logs.value)")
         XCTAssertEqual(h.stt.calls, 0)
         assertNoTextInTheLog(h)
@@ -399,7 +427,8 @@ final class EditPipelineTests: XCTestCase {
 
         edit(h)
 
-        XCTAssertEqual(h.verdicts.value, ["Edit failed — transcription"])
+        XCTAssertEqual(h.problems.value, ["Edit failed — transcription"])
+        XCTAssertEqual(h.verdicts.value, [])
         XCTAssertEqual(h.replacer.restored.count, 1)
         XCTAssertTrue(h.replacer.replaced.isEmpty)
         XCTAssertEqual(h.backend.edits.count, 0)
@@ -412,7 +441,7 @@ final class EditPipelineTests: XCTestCase {
 
         edit(h)
 
-        XCTAssertEqual(h.verdicts.value, ["Edit failed — transcription"])
+        XCTAssertEqual(h.problems.value, ["Edit failed — transcription"])
         XCTAssertEqual(h.replacer.restored.count, 1)
         XCTAssertEqual(h.states.value, [.recording, .processing, .idle])
     }
@@ -422,7 +451,8 @@ final class EditPipelineTests: XCTestCase {
 
         edit(h)
 
-        XCTAssertEqual(h.verdicts.value, ["Edit failed — check log"])
+        XCTAssertEqual(h.problems.value, ["Edit failed — check log"])
+        XCTAssertEqual(h.verdicts.value, [])
         XCTAssertEqual(h.replacer.restored.count, 1)
         XCTAssertTrue(h.replacer.replaced.isEmpty)
         XCTAssertTrue(h.stats.value.isEmpty)
@@ -475,9 +505,19 @@ final class EditPipelineTests: XCTestCase {
 
         XCTAssertFalse(h.pipeline.isArmed)
         XCTAssertEqual(h.notices.value, [UserFacingError.recordingNotice(error: "\(failure)")])
+        XCTAssertEqual(h.problems.value, [UserFacingError.recordingNotice(error: "\(failure)")])
         XCTAssertEqual(h.states.value, [])
         h.pipeline.keyUp()
         XCTAssertEqual(h.reader.reads, 0)
+    }
+
+    func testARecorderFailureIsLoggedByTypeOnly() {
+        let h = make(recorder: FakeRecorder(armError: TestError(message: Self.secret)))
+
+        h.pipeline.keyDown()
+
+        XCTAssertEqual(h.logs.value, ["recorder arm failed: TestError"])
+        assertNoTextInTheLog(h)
     }
 
     func testForceStopEndsTheHoldWithTheWatchdogNoticeAndStillEdits() {
@@ -538,6 +578,7 @@ final class EditPipelineTests: XCTestCase {
         runner.drain()
 
         XCTAssertEqual(h.notices.value, ["Edit skipped — it waited 31 s behind the previous one"])
+        XCTAssertEqual(h.problems.value, ["Edit skipped — it waited 31 s behind the previous one"])
         XCTAssertEqual(h.reader.reads, 0, "a stale edit must not ⌘C into whatever has focus now")
         XCTAssertEqual(h.states.value, [.recording, .idle], "dropped before it ever shows ⋯")
     }
@@ -611,8 +652,8 @@ final class EditPipelineTests: XCTestCase {
             backend: { FakeEditBackend(out: Self.shortened) }, modelIsGemma4: { true }, selection: reader,
             paster: paster, config: PipelineConfig(), clock: clock.now, frontmost: { 42 },
             sinks: EditSinks(
-                onState: { states.append($0) }, onNotice: { _ in }, onVerdict: { _ in }, onStat: { _ in },
-                runner: { work in runBlocking(work) }),
+                onState: { states.append($0) }, onNotice: { _ in }, onVerdict: { _ in }, onProblem: { _ in },
+                onStat: { _ in }, runner: { work in runBlocking(work) }),
             onLog: nil)
 
         // The edit's hold began before the dictation pasted; its release comes 125 ms after that paste.

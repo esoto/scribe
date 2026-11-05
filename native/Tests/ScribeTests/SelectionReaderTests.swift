@@ -101,9 +101,9 @@ final class SelectionReaderTests: XCTestCase {
         let sleeps = Box<Double>()
         let keys = Keys()
 
-        let selection = try await reader(pasteboard, keys, sleeps: sleeps) { polls in
+        let selection = try await reader(pasteboard, keys, sleeps: sleeps, onSleep: { polls in
             if polls == 2 { pasteboard.appCopies("late but in time") }
-        }.read(target: 42)
+        }).read(target: 42)
 
         XCTAssertEqual(selection?.text, "late but in time")
         XCTAssertEqual(sleeps.value, [0.125, 0.125])
@@ -172,14 +172,28 @@ final class SelectionReaderTests: XCTestCase {
         XCTAssertEqual(pasteboard.items, mine)
     }
 
-    func test_an_empty_copy_over_an_empty_clipboard_has_nothing_to_put_back() async throws {
+    func test_an_empty_copy_over_an_empty_clipboard_leaves_it_empty() async throws {
         let pasteboard = Clipboard(items: nil)
         let keys = Keys(onPress: { pasteboard.appCopies("") })
 
         let selection = try await reader(pasteboard, keys).read(target: 42)
 
         XCTAssertNil(selection)
-        XCTAssertTrue(pasteboard.restored.isEmpty)
+        XCTAssertEqual(pasteboard.restored, [[]], "the empty copy is cleared: the clipboard was empty before it")
+        XCTAssertEqual(pasteboard.items, [])
+    }
+
+    func test_a_copy_with_no_text_over_an_empty_clipboard_is_cleared() async throws {
+        let pasteboard = Clipboard(items: nil)
+        let keys = Keys(onPress: {
+            pasteboard.appCopies(items: [["public.png": Data([0x89, 0x50])]])
+        })
+
+        let selection = try await reader(pasteboard, keys).read(target: 42)
+
+        XCTAssertNil(selection)
+        XCTAssertEqual(pasteboard.items, [], "an image the app copied must not stay on a clipboard that held nothing")
+        XCTAssertEqual(pasteboard.restored, [[]])
     }
 
     func test_the_copy_key_is_pressed_exactly_once_in_the_given_app() async throws {
@@ -216,9 +230,9 @@ final class SelectionReaderTests: XCTestCase {
         let countBefore = pasteboard.changeCount()
         let keys = Keys()
 
-        let selection = try await reader(pasteboard, keys) { polls in
+        let selection = try await reader(pasteboard, keys, onSleep: { polls in
             if polls == 2 { pasteboard.appCopies("late but in time") }
-        }.read(target: 42)
+        }).read(target: 42)
 
         XCTAssertEqual(selection?.copiedChangeCount, countBefore + 1)
     }

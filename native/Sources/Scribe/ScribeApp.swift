@@ -183,6 +183,8 @@ final class AppModel: ObservableObject {
                     history: history,
                     config: config,
                     clock: { Date().timeIntervalSince1970 },
+                    // The coordinator's worker, shared with the edit pipeline: a private one would let an edit's ⌘C run
+                    // between this dictation's ⌘V and its clipboard restore.
                     runner: sinks.runner,
                     // keyDown runs on main (tap callback), so a direct read is safe.
                     frontmost: { NSWorkspace.shared.frontmostApplication?.processIdentifier },

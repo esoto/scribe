@@ -58,7 +58,8 @@ final class PasteboardSelectionReader: SelectionReader {
         let copiedChangeCount = pasteboard.changeCount()
         guard copiedChangeCount != before else { return nil }
         guard let text = pasteboard.string()?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else {
-            if let snapshot { pasteboard.restore(snapshot) }
+            // An empty snapshot clears: whatever the app copied (an image, say) must not outlive an edit that never was.
+            pasteboard.restore(snapshot ?? [])
             return nil
         }
         return Selection(text: text, snapshot: snapshot, copiedChangeCount: copiedChangeCount)
