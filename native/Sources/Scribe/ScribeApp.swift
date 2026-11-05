@@ -197,6 +197,7 @@ final class AppModel: ObservableObject {
             playSound: { Sounds.play($0) },
             soundsEnabled: { settings.sounds },
             microphoneGranted: { permissions.grants.microphone },
+            microphoneUID: settings.microphoneUID,
             reportInputMonitoring: { permissions.setInputMonitoring($0) },
             // No key-down app to compare against: only Accessibility and "not scribe itself" apply.
             repaste: { try guardedPaster.pasteIntoFocusedApp($0, ownPID: ProcessInfo.processInfo.processIdentifier) },

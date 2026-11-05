@@ -23,6 +23,8 @@ final class FakeRecorder: RecorderLike, RecorderPreparing {
     var prewarmError: Error?
     private(set) var prewarmCalls = 0
     private(set) var preferredInputs: [String?] = []
+    /// What the engine would report as bound right now; a test sets it to model where the engine ended up.
+    var boundInput: BoundInput?
 
     init(pcm: [Float] = VOICED, armError: Error? = nil) {
         self.pcm = pcm

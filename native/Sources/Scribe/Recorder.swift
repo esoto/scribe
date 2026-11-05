@@ -15,6 +15,8 @@ protocol EngineControl: AnyObject {
     /// Turns off the mic indicator; prepared resources are kept for a fast restart.
     func stop()
     func setPreferredInput(uid: String?)
+    /// The input the current engine is bound to; nil when it can't be read or CoreAudio doesn't know the device.
+    var boundInput: BoundInput? { get }
 }
 
 /// Mic capture: an armed ring buffer fed by a pre-installed input tap.
@@ -74,6 +76,8 @@ final class Recorder: RecorderLike {
     func setPreferredInput(uid: String?) {
         engineControl.setPreferredInput(uid: uid)
     }
+
+    var boundInput: BoundInput? { engineControl.boundInput }
 }
 
 /// AVAudioEngine adapter. Before every start it re-checks that the engine still captures from the chosen microphone,
@@ -88,6 +92,7 @@ final class AVEngineControl: EngineControl {
 
     private let onLog: ((String) -> Void)?
     private let resolveDevice: (String) -> AudioDeviceID?
+    private let describeDevice: (AudioDeviceID) -> BoundInput?
     private let makeEngine: () -> CaptureEngine
     private var engine: CaptureEngine
     private var tapInstalled = false
@@ -104,16 +109,20 @@ final class AVEngineControl: EngineControl {
     init(
         onLog: ((String) -> Void)? = nil,
         resolveDevice: @escaping (String) -> AudioDeviceID? = { AudioDevices.deviceID(forUID: $0) },
+        describeDevice: @escaping (AudioDeviceID) -> BoundInput? = { AudioDevices.boundInput(forDeviceID: $0) },
         makeEngine: @escaping () -> CaptureEngine = { LiveCaptureEngine() }
     ) {
         self.onLog = onLog
         self.resolveDevice = resolveDevice
+        self.describeDevice = describeDevice
         self.makeEngine = makeEngine
         engine = makeEngine()
         watchConfigurationChanges()
     }
 
     var isRunning: Bool { engine.isRunning }
+
+    var boundInput: BoundInput? { engine.boundDevice.flatMap(describeDevice) }
 
     func prepare() {
         readyForCapture()

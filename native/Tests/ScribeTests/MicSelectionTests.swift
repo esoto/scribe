@@ -1,3 +1,4 @@
+import CoreAudio
 import XCTest
 
 
@@ -30,5 +31,25 @@ final class MicSelectionTests: XCTestCase {
 
     func testUnknownUIDResolvesToNilSoCaptureFallsBackToDefault() {
         XCTAssertNil(AudioDevices.deviceID(forUID: "scribe-test-nonexistent-device-uid"))
+    }
+
+    func testBoundInputOfAnUnknownDeviceIsNil() {
+        XCTAssertNil(AudioDevices.boundInput(forDeviceID: AudioDeviceID(kAudioObjectUnknown)))
+    }
+
+    func testBoundInputNamesEveryInputDeviceTheSystemLists() {
+        for device in AudioDevices.inputDevices() {
+            let id = AudioDevices.deviceID(forUID: device.id)
+            XCTAssertNotNil(id)
+            XCTAssertEqual(
+                id.flatMap(AudioDevices.boundInput(forDeviceID:)), BoundInput(uid: device.id, name: device.name))
+        }
+    }
+
+    func testDefaultInputUIDIsNilOrNamesADevice() {
+        if let uid = AudioDevices.defaultInputUID() {
+            XCTAssertFalse(uid.isEmpty)
+            XCTAssertNotNil(AudioDevices.deviceID(forUID: uid))
+        }
     }
 }

@@ -7,6 +7,12 @@ struct AudioInputDevice: Equatable, Identifiable {
     let name: String
 }
 
+/// An input as the engine reports it: which device its input unit is bound to, by stable UID and display name.
+struct BoundInput: Equatable {
+    let uid: String
+    let name: String
+}
+
 /// Thin CoreAudio wrapper; the selection logic built on top is what gets unit-tested.
 enum AudioDevices {
     /// Excludes transient `CADefaultDeviceAggregate` devices, which churn while apps use the default device.
@@ -23,6 +29,30 @@ enum AudioDevices {
 
     static func deviceID(forUID uid: String) -> AudioDeviceID? {
         allDeviceIDs().first { stringProperty($0, kAudioDevicePropertyDeviceUID) == uid }
+    }
+
+    /// Nil for an ID CoreAudio doesn't know, e.g. a device unplugged since the engine bound it.
+    static func boundInput(forDeviceID device: AudioDeviceID) -> BoundInput? {
+        guard let uid = stringProperty(device, kAudioDevicePropertyDeviceUID),
+            let name = stringProperty(device, kAudioObjectPropertyName)
+        else { return nil }
+        return BoundInput(uid: uid, name: name)
+    }
+
+    /// The input a new engine follows when no microphone is chosen; nil when there is none or it can't be read.
+    static func defaultInputUID() -> String? {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultInputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain)
+        var device = AudioDeviceID(kAudioObjectUnknown)
+        var size = UInt32(MemoryLayout<AudioDeviceID>.size)
+        guard
+            AudioObjectGetPropertyData(
+                AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, &device) == noErr,
+            device != kAudioObjectUnknown
+        else { return nil }
+        return stringProperty(device, kAudioDevicePropertyDeviceUID)
     }
 
     static func onDevicesChanged(_ handler: @escaping () -> Void) {

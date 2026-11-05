@@ -19,6 +19,7 @@ final class DictationCoordinatorTests: XCTestCase {
     private var inputMonitoring: Box<Bool>!
     private var soundsEnabled = true
     private var microphoneGranted = true
+    private var defaultInputUID: String?
     private var hud: HUDModel!
     private var hudEnabled = true
     private var sinks: PipelineSinks!
@@ -42,6 +43,7 @@ final class DictationCoordinatorTests: XCTestCase {
         inputMonitoring = Box<Bool>()
         soundsEnabled = true
         microphoneGranted = true
+        defaultInputUID = nil
         hud = HUDModel()
         hudEnabled = true
         pipelineClock = FakeClock()
@@ -67,7 +69,8 @@ final class DictationCoordinatorTests: XCTestCase {
         hudResultSeconds: Double = HUDModel.resultSeconds,
         holdThreshold: Double? = 0.05,
         hotkeyMode: HotkeyMode = .hold,
-        latchMaxSeconds: Double = 240
+        latchMaxSeconds: Double = 240,
+        microphoneUID: String? = nil
     ) -> DictationCoordinator {
         let recorder = self.recorder!
         let clock = pipelineClock!
@@ -105,6 +108,8 @@ final class DictationCoordinatorTests: XCTestCase {
             playSound: { [unowned self] in sounds.append($0) },
             soundsEnabled: { [unowned self] in soundsEnabled },
             microphoneGranted: { [unowned self] in microphoneGranted },
+            microphoneUID: microphoneUID,
+            defaultInputUID: { [unowned self] in defaultInputUID },
             reportInputMonitoring: { [unowned self] in inputMonitoring.append($0) },
             errorStickySeconds: errorStickySeconds,
             hintSeconds: hintSeconds,
@@ -1433,6 +1438,143 @@ final class DictationCoordinatorTests: XCTestCase {
         XCTAssertEqual(
             logs.value.filter { $0.hasPrefix("microphone set to") },
             ["microphone set to usb-1", "microphone set to system default"])
+    }
+
+    // MARK: - Capturing from
+
+    private let usbInput = BoundInput(uid: "usb", name: "USB Mic")
+    private let headsetInput = BoundInput(uid: "headset", name: "Headset")
+
+    func testNothingIsCapturedFromBeforeTheFirstRecording() {
+        recorder.boundInput = usbInput
+        let c = make(microphoneUID: "usb")
+        XCTAssertNil(c.capturingFrom)
+    }
+
+    func testAHoldNamesTheInputTheEngineIsBoundTo() {
+        recorder.boundInput = usbInput
+        let c = make(microphoneUID: "usb")
+
+        c.handleKeyDown()
+
+        XCTAssertEqual(c.capturingFrom, CaptureSource(name: "USB Mic", matchesSelection: true))
+        c.handleKeyUp()
+    }
+
+    func testAHoldOnAnotherInputThanTheChosenOneIsFlagged() {
+        recorder.boundInput = headsetInput
+        let c = make(microphoneUID: "usb")
+
+        c.handleKeyDown()
+
+        XCTAssertEqual(c.capturingFrom, CaptureSource(name: "Headset", matchesSelection: false))
+        c.handleKeyUp()
+    }
+
+    func testWithNoChoiceTheSystemDefaultIsWhatTheEngineShouldBeOn() {
+        defaultInputUID = "usb"
+        let c = make()
+
+        recorder.boundInput = usbInput
+        c.handleKeyDown()
+        XCTAssertEqual(c.capturingFrom?.matchesSelection, true)
+        c.handleKeyUp()
+
+        recorder.boundInput = headsetInput
+        c.handleKeyDown()
+        XCTAssertEqual(c.capturingFrom?.matchesSelection, false)
+        c.handleKeyUp()
+    }
+
+    func testEveryRecordingStartReadsTheEngineAgain() {
+        let c = make(microphoneUID: "usb")
+        recorder.boundInput = headsetInput
+        c.handleKeyDown()
+        c.handleKeyUp()
+
+        recorder.boundInput = usbInput
+        c.handleKeyDown()
+
+        XCTAssertEqual(c.capturingFrom, CaptureSource(name: "USB Mic", matchesSelection: true))
+        c.handleKeyUp()
+    }
+
+    func testALatchedStartReadsTheEngineToo() {
+        recorder.boundInput = usbInput
+        let c = make(microphoneUID: "usb")
+
+        c.toggleLatched()
+
+        XCTAssertEqual(c.capturingFrom, CaptureSource(name: "USB Mic", matchesSelection: true))
+        c.toggleLatched()
+    }
+
+    func testARecordingThatCouldNotStartLeavesTheLastReadingAlone() {
+        let c = make(microphoneUID: "usb")
+        recorder.boundInput = usbInput
+        c.handleKeyDown()
+        c.handleKeyUp()
+
+        recorder.armError = TestError(message: "no engine")
+        recorder.boundInput = headsetInput
+        c.handleKeyDown()
+
+        XCTAssertEqual(c.capturingFrom, CaptureSource(name: "USB Mic", matchesSelection: true))
+    }
+
+    func testAnEngineWhoseInputCannotBeReadClearsTheLastReading() {
+        let c = make(microphoneUID: "usb")
+        recorder.boundInput = usbInput
+        c.handleKeyDown()
+        c.handleKeyUp()
+
+        recorder.boundInput = nil
+        c.handleKeyDown()
+
+        XCTAssertNil(c.capturingFrom)
+        c.handleKeyUp()
+    }
+
+    func testChoosingAMicrophoneReadsTheRebuiltEngine() {
+        let c = make()
+        recorder.boundInput = usbInput
+
+        c.selectMicrophone(uid: "usb")
+
+        XCTAssertEqual(c.capturingFrom, CaptureSource(name: "USB Mic", matchesSelection: true))
+    }
+
+    func testChoosingAMicrophoneThatDoesNotStickIsFlaggedAtOnce() {
+        let c = make()
+        recorder.boundInput = headsetInput
+
+        c.selectMicrophone(uid: "usb")
+
+        XCTAssertEqual(c.capturingFrom, CaptureSource(name: "Headset", matchesSelection: false))
+    }
+
+    func testChoosingAMicrophoneWithoutTheGrantLeavesNothingToReport() {
+        let c = make(microphoneUID: "usb")
+        recorder.boundInput = usbInput
+        c.handleKeyDown()
+        c.handleKeyUp()
+        microphoneGranted = false
+
+        c.selectMicrophone(uid: "headset")
+
+        XCTAssertNil(c.capturingFrom, "the new engine was never prepared, so it is bound to nothing yet")
+    }
+
+    func testTheNextRecordingIsJudgedAgainstTheMicrophoneChosenSince() {
+        defaultInputUID = "builtin"
+        let c = make(microphoneUID: "usb")
+        c.selectMicrophone(uid: nil)
+
+        recorder.boundInput = BoundInput(uid: "builtin", name: "Built-in")
+        c.handleKeyDown()
+
+        XCTAssertEqual(c.capturingFrom, CaptureSource(name: "Built-in", matchesSelection: true))
+        c.handleKeyUp()
     }
 
     func testSetCleanupEnabledReachesThePipeline() {

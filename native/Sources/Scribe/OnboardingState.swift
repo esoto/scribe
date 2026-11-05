@@ -181,6 +181,11 @@ extension OnboardingState {
         return (microphoneRowDetail(selectedName: device.name, disconnected: false), false)
     }
 
+    /// Doctor: the Microphone row's text followed by the input the engine was last on, so a wrong one shows here too.
+    static func microphoneRowDetail(_ detail: String, capturing source: CaptureSource?) -> String {
+        "\(detail)\n\(CaptureSource.caption(source))"
+    }
+
     /// Doctor: the last problem scribe reported, with how long ago; nil means a quiet session.
     static func lastProblemDetail(_ notice: String?, at: Date?, now: Date) -> String {
         guard let notice, let at else { return "No problems this session." }

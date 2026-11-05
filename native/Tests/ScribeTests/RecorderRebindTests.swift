@@ -16,6 +16,8 @@ final class RecorderRebindTests: XCTestCase {
     private var postsConfigurationChangeOnBindForNewEngines = false
     private var rebindOnStartForNewEngines: AudioDeviceID?
     private var resolveCalls = 0
+    /// What CoreAudio would call each device, for the recorder's report of the input it is on.
+    private var inputs: [AudioDeviceID: BoundInput] = [:]
     private let didNotStick = "recorder: input usb did not stick; keeping the current engine"
     private let couldNotSelect = "recorder: could not select input device usb: OSStatus -50"
     private var control: AVEngineControl!
@@ -32,12 +34,14 @@ final class RecorderRebindTests: XCTestCase {
         postsConfigurationChangeOnBindForNewEngines = false
         rebindOnStartForNewEngines = nil
         resolveCalls = 0
+        inputs = [usbMic: BoundInput(uid: "usb", name: "USB Mic"), headset: BoundInput(uid: "headset", name: "Headset")]
         control = AVEngineControl(
             onLog: { [unowned self] in logs.append($0) },
             resolveDevice: { [unowned self] in
                 resolveCalls += 1
                 return devices[$0]
             },
+            describeDevice: { [unowned self] in inputs[$0] },
             makeEngine: { [unowned self] in
                 let fake = FakeCaptureEngine()
                 fake.bindStatus = bindStatusForNewEngines
@@ -526,5 +530,38 @@ final class RecorderRebindTests: XCTestCase {
                 "recorder: input rebound to usb",
                 "recorder: audio conversion failed: second",
             ])
+    }
+
+    // MARK: the input the engine is on
+
+    func testBoundInputNamesTheDeviceTheEngineIsBoundTo() throws {
+        try chooseUSBMicAndPrewarm()
+        try recorder.arm()
+        XCTAssertEqual(recorder.boundInput, BoundInput(uid: "usb", name: "USB Mic"))
+    }
+
+    func testBoundInputReportsWhereTheEngineIsNotWhereItWasMeantToBe() throws {
+        try chooseUSBMicAndPrewarm()
+        engine.drift(to: headset)
+        XCTAssertEqual(recorder.boundInput, BoundInput(uid: "headset", name: "Headset"))
+    }
+
+    func testBoundInputFollowsTheEngineAfterARebuild() throws {
+        try chooseUSBMicAndPrewarm()
+        engine.drift(to: headset)
+        try recorder.arm()
+        XCTAssertEqual(recorder.boundInput, BoundInput(uid: "usb", name: "USB Mic"))
+    }
+
+    func testBoundInputIsNilWhenTheBindingCannotBeRead() throws {
+        try chooseUSBMicAndPrewarm()
+        engine.drift(to: nil)
+        XCTAssertNil(recorder.boundInput)
+    }
+
+    func testBoundInputIsNilForADeviceCoreAudioDoesNotKnow() throws {
+        try chooseUSBMicAndPrewarm()
+        engine.drift(to: 99)
+        XCTAssertNil(recorder.boundInput)
     }
 }

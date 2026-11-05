@@ -240,7 +240,7 @@ struct OnboardingWindow: View {
         let mic = OnboardingState.microphoneRow(selectedUID: model.microphoneUID, devices: model.microphones)
         return row(
             title: "Input device",
-            detail: mic.detail,
+            detail: OnboardingState.microphoneRowDetail(mic.detail, capturing: dictation.capturingFrom),
             systemImage: "mic",
             indicator: mic.disconnected ? .missing : .granted,
             value: mic.disconnected ? "disconnected" : "connected",

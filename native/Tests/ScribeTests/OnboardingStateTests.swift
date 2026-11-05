@@ -312,6 +312,25 @@ final class OnboardingStateTests: XCTestCase {
             OnboardingState.microphoneRowDetail(selectedName: "USB Mic", disconnected: true), "USB Mic — disconnected.")
     }
 
+    func testMicrophoneRowDetailAddsWhereTheEngineIsCapturingFrom() {
+        let source = CaptureSource(name: "Built-in", matchesSelection: true)
+        XCTAssertEqual(
+            OnboardingState.microphoneRowDetail("System default input.", capturing: source),
+            "System default input.\nCapturing from: Built-in")
+    }
+
+    func testMicrophoneRowDetailSaysWhenTheEngineIsOnAnotherMicrophoneThanTheChosenOne() {
+        let source = CaptureSource(name: "Headset", matchesSelection: false)
+        XCTAssertEqual(
+            OnboardingState.microphoneRowDetail("USB Mic", capturing: source),
+            "USB Mic\nCapturing from: Headset — not the microphone you chose")
+    }
+
+    func testMicrophoneRowDetailBeforeAnyRecordingSaysSo() {
+        XCTAssertEqual(
+            OnboardingState.microphoneRowDetail("USB Mic", capturing: nil), "USB Mic\nNot recorded yet")
+    }
+
     func testLastProblemDetailQuietSession() {
         XCTAssertEqual(OnboardingState.lastProblemDetail(nil, at: nil, now: Date()), "No problems this session.")
     }
