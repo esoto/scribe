@@ -680,6 +680,8 @@ final class DictationCoordinator: ObservableObject {
             holdWatchdog?.cancel()
             return
         }
+        // The engine is bound by now, an edit's start being a recording start like a hold's.
+        capturingFrom = currentCaptureStatus()
         editing = true
         guard let hud, hudEnabled() else { return }
         hudShow?.cancel()

@@ -2155,6 +2155,43 @@ final class DictationCoordinatorTests: XCTestCase {
         XCTAssertEqual(c.capturingFrom, .source(CaptureSource(name: "USB Mic", matchesSelection: true)))
     }
 
+    func testAnEditStartNamesTheInputTheEngineIsBoundToToo() {
+        recorder.boundInput = usbInput
+        let c = make(withEdits: true, microphoneUID: "usb")
+
+        c.handleKeyDown(chord: true)
+
+        XCTAssertTrue(c.editPipeline?.isArmed == true)
+        XCTAssertEqual(c.capturingFrom, .source(CaptureSource(name: "USB Mic", matchesSelection: true)))
+        pipelineClock.t += 1
+        c.handleKeyUp()
+    }
+
+    func testAnEditOnAnotherInputThanTheChosenOneIsFlagged() {
+        recorder.boundInput = headsetInput
+        let c = make(withEdits: true, microphoneUID: "usb")
+
+        c.handleKeyDown(chord: true)
+
+        XCTAssertEqual(c.capturingFrom, .source(CaptureSource(name: "Headset", matchesSelection: false)))
+        pipelineClock.t += 1
+        c.handleKeyUp()
+    }
+
+    func testAnEditThatCouldNotStartLeavesTheLastReadingAlone() {
+        let c = make(withEdits: true, microphoneUID: "usb")
+        recorder.boundInput = usbInput
+        c.handleKeyDown()
+        c.handleKeyUp()
+
+        recorder.armError = TestError(message: "no engine")
+        recorder.boundInput = headsetInput
+        c.handleKeyDown(chord: true)
+
+        XCTAssertFalse(c.editPipeline?.isArmed == true)
+        XCTAssertEqual(c.capturingFrom, .source(CaptureSource(name: "USB Mic", matchesSelection: true)))
+    }
+
     func testAnEngineWhoseInputCannotBeReadSaysSoRatherThanNotRecordedYet() {
         let c = make(microphoneUID: "usb")
         recorder.boundInput = usbInput
