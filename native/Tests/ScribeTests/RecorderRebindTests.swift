@@ -367,6 +367,27 @@ final class RecorderRebindTests: XCTestCase {
         for _ in 0..<3 { try dictate() }
 
         XCTAssertEqual(engines.count, 4, "one rebuild for the change, none for the dictations after it")
+        XCTAssertEqual(
+            logs,
+            [
+                couldNotSelect,
+                couldNotSelect,
+                didNotStick,
+                "recorder: audio configuration changed",
+                couldNotSelect,
+                didNotStick,
+            ])
+    }
+
+    func testAConfigurationChangeFromAGoodBindingIsRebuiltOnceWhenItsBindDoesNotStick() throws {
+        try chooseUSBMicAndPrewarm()
+        bindStatusForNewEngines = -50
+
+        engine.simulateConfigurationChange()
+        for _ in 0..<3 { try dictate() }
+
+        XCTAssertEqual(engines.count, 3, "the initial engine, the selection's, and exactly one rebuild")
+        XCTAssertEqual(logs, ["recorder: audio configuration changed", couldNotSelect, didNotStick])
     }
 
     func testSelectingTheInputAgainEarnsAnotherRebuildAfterABindDidNotStick() throws {
