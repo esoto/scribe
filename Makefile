@@ -65,6 +65,28 @@ test-models-e2b:
 test-models-afm:
 	$(call run-cleanup-model-tests,appleIntelligence,ignore)
 
+# Edit-by-voice evals for ONE cleanup model per run: CLEANUP_MODEL=gemma4 make test-models-edit
+# (default gemma3). Golden (28 cases) and guard (8) hold the model to the gates plus phrase checks;
+# the latency class only reports. Like the cleanup targets it FAILS when a class's tag is missing from the
+# log, so a dropped CLEANUP_MODEL (the tests silently fall back to gemma3) or a skipped suite cannot pass
+# as a green run. These classes honour CLEANUP_MODEL through cleanupBackendUnderTest(); GemmaEditWarmTests
+# hard-wires Gemma 3 and runs under `make test-models` (or its own -only-testing), never here.
+EDIT_MODEL_TESTS := \
+  -only-testing:ScribeModelTests/EditGoldenEvalTests \
+  -only-testing:ScribeModelTests/EditGuardTests \
+  -only-testing:ScribeModelTests/EditLatencyTests
+
+test-models-edit:
+	@mkdir -p $(MODEL_LOG_DIR)
+	@set -o pipefail; \
+	model=$${CLEANUP_MODEL:-gemma3}; \
+	TEST_RUNNER_CLEANUP_MODEL=$$model $(XCODEBUILD) -scheme ScribeModelTests $(EDIT_MODEL_TESTS) test 2>&1 | tee $(MODEL_LOG_DIR)/edit-$$model.log; \
+	rc=$$?; \
+	for tag in "edit[$$model]" "edit_guard[$$model]" "edit_latency[$$model]"; do \
+	  grep -qF "$$tag" $(MODEL_LOG_DIR)/edit-$$model.log || { echo "ERROR: no $$tag output in the log - CLEANUP_MODEL did not reach the tests (or the suite was skipped)"; exit 1; }; \
+	done; \
+	exit $$rc
+
 # Report-only measurements (M-2, M-3 in docs/superpowers/plans/2026-10-22-1.5-features.md).
 # They print numbers and assert almost nothing, so read the log. Like the cleanup targets, they
 # FAIL when the expected tag is missing from the log: an XCTSkip (fixture absent) or a dropped
