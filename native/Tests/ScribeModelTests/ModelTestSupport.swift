@@ -56,6 +56,52 @@ func runGoldenCases(_ cases: [GoldenCase], backend: any CleanupModelBackend, tag
     return passed
 }
 
+/// The edit twin of `runGoldenCases`: each case runs `edit(instruction:text:maxTokens:)` with the verb's own
+/// instruction and the token budget the pipeline would give it, then the ONE pass rule (`evaluateEditCase`: gates
+/// first, phrases second). A case that throws is a failed case, not an aborted run, so one MLX error does not cost
+/// the other 27 results of a GPU pass. Returns the number of passing cases.
+///
+/// The output is printed for every failure and for every case that carries a `comment`: those cases exist to measure
+/// a known gate hole, and the reading is in the text the model produced.
+///
+/// ONE assertion per case, on the same `ok` the PASS/FAIL line prints: a gate rejection carries empty phrase lists, so
+/// separate asserts per list would let a deleted rejection check leave the class green while the log says FAIL.
+func runEditCases(_ cases: [EditCase], backend: any CleanupModelBackend, tag: String) async throws -> Int {
+    let modelID = cleanupSpecUnderTest().id.rawValue
+    var passed = 0
+    for testCase in cases {
+        guard let verb = testCase.editVerb else {
+            XCTFail("[\(testCase.id)] unknown verb \(testCase.verb)")
+            continue
+        }
+        let maxTokens = EditPrompt.maxTokens(verb: verb, inputTokens: testCase.text.count / 4)
+        let known = testCase.knownFailures?.contains(modelID) ?? false
+        let t0 = Date()
+        let raw: String
+        do {
+            raw = try await backend.edit(instruction: verb.instruction, text: testCase.text, maxTokens: maxTokens)
+        } catch {
+            let ms = Int(Date().timeIntervalSince(t0) * 1000)
+            print("[\(tag)] \(known ? "KNOWN-FAIL" : "FAIL") [\(testCase.id)] \(ms) ms")
+            print("    threw: \(error)")
+            if !known { XCTFail("[\(testCase.id)] edit threw \(error)") }
+            continue
+        }
+        let ms = Int(Date().timeIntervalSince(t0) * 1000)
+        let result = evaluateEditCase(testCase, rawOutput: raw)
+        let ok = editCasePassed(result)
+        let shown = EditGates.normalize(raw, verb: verb)
+        passed += ok ? 1 : 0
+        print("[\(tag)] \(ok ? "PASS" : known ? "KNOWN-FAIL" : "FAIL") [\(testCase.id)] \(ms) ms")
+        if !ok || testCase.comment != nil { print("    out: \(shown)") }
+        if case .rejected(let reason) = result.verdict { print("    gate: rejected (\(reason.rawValue))") }
+        guard !known else { continue }
+        XCTAssertTrue(ok, editFailureMessage(testCase, result, shown: shown))
+    }
+    print("[\(tag)] \(passed)/\(cases.count) passed")
+    return passed
+}
+
 /// Loads a fixture WAV as the Float PCM the STT engines expect.
 func loadPcm(_ name: String) throws -> [Float] {
     let url = repoRoot().appendingPathComponent("tests_models/fixtures/\(name)")

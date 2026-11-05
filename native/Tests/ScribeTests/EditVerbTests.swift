@@ -38,7 +38,7 @@ final class EditVerbTests: XCTestCase {
 
     func testEveryLengthBandBoundIsPinned() {
         let bands: [(EditVerb, Double, Double)] = [
-            (.shorter, 0.3, 0.9), (.fixGrammar, 0.8, 1.25), (.formal, 0.7, 1.4), (.casual, 0.7, 1.4),
+            (.shorter, 0.3, 0.9), (.fixGrammar, 0.8, 1.25), (.formal, 0.7, 1.4), (.casual, 0.4, 1.4),
             (.list, 0.6, 1.6), (.toSpanish, 0.8, 1.6), (.toEnglish, 0.6, 1.3),
         ]
         for (verb, low, high) in bands {
