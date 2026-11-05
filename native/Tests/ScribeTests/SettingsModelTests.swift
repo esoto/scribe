@@ -1,3 +1,4 @@
+import Combine
 import XCTest
 
 @MainActor
@@ -240,5 +241,37 @@ final class SettingsModelTests: XCTestCase {
         XCTAssertFalse(settings.hudEnabled)
         XCTAssertEqual(settings.hotkeyMode, .holdOrLatch)
         XCTAssertTrue(model.urlSchemeEnabled)
+    }
+
+    // MARK: - 2.0 settings
+
+    func testEditEnabledMirrorsTheDefaultAndTheStoredValue() {
+        XCTAssertTrue(make().editEnabled)
+
+        settings.editEnabled = false
+        XCTAssertFalse(make().editEnabled)
+    }
+
+    func testSetEditEnabledPersistsOnceAndPublishes() {
+        let model = make()
+        var published: [Bool] = []
+        let watcher = model.$editEnabled.dropFirst().sink { published.append($0) }
+        defer { watcher.cancel() }
+
+        model.setEditEnabled(false)
+        model.setEditEnabled(false)
+        model.setEditEnabled(true)
+
+        XCTAssertEqual(published, [false, true])
+        XCTAssertTrue(settings.editEnabled)
+        XCTAssertTrue(model.editEnabled)
+    }
+
+    func testTurningEditsOffIsStoredForTheCoordinatorsClosureToRead() {
+        let model = make()
+
+        model.setEditEnabled(false)
+
+        XCTAssertFalse(settings.editEnabled, "the coordinator reads AppSettings through its closure; there is no callback")
     }
 }

@@ -439,7 +439,7 @@ final class DictationCoordinator: ObservableObject {
         guard let hud, hudEnabled() else { return }
         switch hud.phase {
         case .processing, .result, .problem: hud.show(.result(text))
-        case .hidden, .listening: break
+        case .hidden, .listening, .editing: break
         }
     }
 

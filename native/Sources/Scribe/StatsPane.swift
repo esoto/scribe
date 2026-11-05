@@ -46,6 +46,13 @@ func statsCountsLine(_ s: StatsSummary) -> String {
     return "\(dictations) · \(s.words) words · \(typing)"
 }
 
+/// "12 edits · 9 applied"; nil when nothing was edited. Counts only, like the rest of the pane.
+func statsEditsLine(_ s: StatsSummary) -> String? {
+    guard s.edits > 0 else { return nil }
+    let edits = s.edits == 1 ? "1 edit" : "\(s.edits) edits"
+    return "\(edits) · \(s.editsAccepted) applied"
+}
+
 /// Medians first, then the slow tail; nil when nothing was transcribed.
 func statsLatencyLine(_ s: StatsSummary) -> String? {
     guard let sttP50 = s.sttP50, let sttP95 = s.sttP95 else { return nil }
@@ -87,6 +94,9 @@ struct StatsPane: View {
     private func statsBlock(_ title: String, _ s: StatsSummary) -> some View {
         Section(title) {
             Text(statsCountsLine(s))
+            if let edits = statsEditsLine(s) {
+                Text(edits)
+            }
             if let latency = statsLatencyLine(s) {
                 Text(latency).font(.caption).foregroundStyle(.secondary)
             }

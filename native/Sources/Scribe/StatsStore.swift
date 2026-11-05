@@ -32,6 +32,51 @@ struct DayStats: Codable, Equatable {
     var rawFallbacks = 0
     var sttMs: [Int] = []
     var cleanupMs: [Int] = []
+    var edits = 0
+    var editsAccepted = 0
+    var editMs: [Int] = []
+    /// Counts keyed by `EditVerb.logName`, a fixed vocabulary; never anything the user said or selected.
+    var editsByVerb: [String: Int] = [:]
+}
+
+/// Written by hand so a file from before edits (no edit keys) still loads, and a day without edits writes exactly the
+/// keys it always did. An extension, so the memberwise `DayStats(day:)` stays.
+extension DayStats {
+    private enum CodingKeys: String, CodingKey {
+        case day, dictations, words, cleaned, rawFallbacks, sttMs, cleanupMs
+        case edits, editsAccepted, editMs, editsByVerb
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        day = try c.decode(String.self, forKey: .day)
+        dictations = try c.decode(Int.self, forKey: .dictations)
+        words = try c.decode(Int.self, forKey: .words)
+        cleaned = try c.decode(Int.self, forKey: .cleaned)
+        rawFallbacks = try c.decode(Int.self, forKey: .rawFallbacks)
+        sttMs = try c.decode([Int].self, forKey: .sttMs)
+        cleanupMs = try c.decode([Int].self, forKey: .cleanupMs)
+        edits = try c.decodeIfPresent(Int.self, forKey: .edits) ?? 0
+        editsAccepted = try c.decodeIfPresent(Int.self, forKey: .editsAccepted) ?? 0
+        editMs = try c.decodeIfPresent([Int].self, forKey: .editMs) ?? []
+        editsByVerb = try c.decodeIfPresent([String: Int].self, forKey: .editsByVerb) ?? [:]
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(day, forKey: .day)
+        try c.encode(dictations, forKey: .dictations)
+        try c.encode(words, forKey: .words)
+        try c.encode(cleaned, forKey: .cleaned)
+        try c.encode(rawFallbacks, forKey: .rawFallbacks)
+        try c.encode(sttMs, forKey: .sttMs)
+        try c.encode(cleanupMs, forKey: .cleanupMs)
+        guard edits > 0 else { return }
+        try c.encode(edits, forKey: .edits)
+        try c.encode(editsAccepted, forKey: .editsAccepted)
+        try c.encode(editMs, forKey: .editMs)
+        try c.encode(editsByVerb, forKey: .editsByVerb)
+    }
 }
 
 struct StatsSummary: Equatable {
@@ -44,6 +89,9 @@ struct StatsSummary: Equatable {
     var sttP95: Int?
     var cleanupP50: Int?
     var cleanupP95: Int?
+    var edits = 0
+    var editsAccepted = 0
+    var editP50: Int?
 
     /// The words at a 40 words-per-minute typing pace; a rough figure, and labelled as one.
     var typingMinutesReplaced: Int { Int((Double(words) / 40.0).rounded()) }
@@ -114,6 +162,33 @@ final class StatsStore: @unchecked Sendable {
     }
 
     func record(_ stat: DictationStat, at date: Date = Date(), calendar: Calendar = StatsStore.keyCalendar) {
+        update(at: date, calendar: calendar) { day in
+            day.dictations += 1
+            day.words += stat.words
+            if stat.cleaned { day.cleaned += 1 }
+            if stat.rawFallback { day.rawFallbacks += 1 }
+            if day.sttMs.count < Self.maxSamplesPerDay {
+                day.sttMs.append(stat.sttMs)
+            }
+            if let ms = stat.cleanupMs, day.cleanupMs.count < Self.maxSamplesPerDay {
+                day.cleanupMs.append(ms)
+            }
+        }
+    }
+
+    /// An edit counts on its own: it is not a dictation, and its transcription time is the instruction's, not speech.
+    func record(_ stat: EditStat, at date: Date = Date(), calendar: Calendar = StatsStore.keyCalendar) {
+        update(at: date, calendar: calendar) { day in
+            day.edits += 1
+            if stat.accepted { day.editsAccepted += 1 }
+            day.editsByVerb[stat.verb.logName, default: 0] += 1
+            if let ms = stat.editMs, day.editMs.count < Self.maxSamplesPerDay {
+                day.editMs.append(ms)
+            }
+        }
+    }
+
+    private func update(at date: Date, calendar: Calendar, _ change: @escaping (inout DayStats) -> Void) {
         let key = Self.dayKey(date, calendar: calendar)
         // By calendar age, not entry count: light use must not keep a year of days the pane never shows.
         // An empty fallback keeps every day: a nil step (never seen for real dates) must not wipe the history.
@@ -128,16 +203,7 @@ final class StatsStore: @unchecked Sendable {
                 self.days.append(DayStats(day: key))
                 index = self.days.count - 1
             }
-            self.days[index].dictations += 1
-            self.days[index].words += stat.words
-            if stat.cleaned { self.days[index].cleaned += 1 }
-            if stat.rawFallback { self.days[index].rawFallbacks += 1 }
-            if self.days[index].sttMs.count < Self.maxSamplesPerDay {
-                self.days[index].sttMs.append(stat.sttMs)
-            }
-            if let ms = stat.cleanupMs, self.days[index].cleanupMs.count < Self.maxSamplesPerDay {
-                self.days[index].cleanupMs.append(ms)
-            }
+            change(&self.days[index])
             self.persistLocked()
             self.changeHandler?()
         }
@@ -157,6 +223,7 @@ final class StatsStore: @unchecked Sendable {
         let selected = queue.sync { days.filter { keys.contains($0.day) } }
         let stt = selected.flatMap(\.sttMs)
         let cleanup = selected.flatMap(\.cleanupMs)
+        let edit = selected.flatMap(\.editMs)
         return StatsSummary(
             days: window,
             dictations: selected.reduce(0) { $0 + $1.dictations },
@@ -164,7 +231,10 @@ final class StatsStore: @unchecked Sendable {
             cleaned: selected.reduce(0) { $0 + $1.cleaned },
             rawFallbacks: selected.reduce(0) { $0 + $1.rawFallbacks },
             sttP50: Self.percentile(stt, 50), sttP95: Self.percentile(stt, 95),
-            cleanupP50: Self.percentile(cleanup, 50), cleanupP95: Self.percentile(cleanup, 95))
+            cleanupP50: Self.percentile(cleanup, 50), cleanupP95: Self.percentile(cleanup, 95),
+            edits: selected.reduce(0) { $0 + $1.edits },
+            editsAccepted: selected.reduce(0) { $0 + $1.editsAccepted },
+            editP50: Self.percentile(edit, 50))
     }
 
     /// Nearest-rank percentile; nil for no samples.

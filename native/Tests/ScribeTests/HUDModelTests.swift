@@ -14,6 +14,20 @@ final class HUDModelTests: XCTestCase {
         XCTAssertEqual(hudLabel(.hidden), "")
     }
 
+    func testEditingHasItsOwnGlyphAndLabel() {
+        XCTAssertEqual(hudGlyph(.editing), "\u{25CF}")
+        XCTAssertEqual(hudLabel(.editing), "Editing")
+        XCTAssertNotEqual(HUDPhase.editing, HUDPhase.listening)
+    }
+
+    func testOnlyTheLivePhasesShowTheLevelMeter() {
+        XCTAssertTrue(HUDPhase.listening.isLive)
+        XCTAssertTrue(HUDPhase.editing.isLive)
+        for phase in [HUDPhase.hidden, .processing, .result("Shorter"), .problem("x")] {
+            XCTAssertFalse(phase.isLive, "\(phase)")
+        }
+    }
+
     func testLevelIsADecibelScaleClampedToZeroOne() {
         XCTAssertEqual(hudLevel(rms: 0), 0)
         XCTAssertEqual(hudLevel(rms: 0.0005), 0)   // -66 dBFS, the energy gate, is under the floor
@@ -66,6 +80,24 @@ final class HUDModelTests: XCTestCase {
         XCTAssertEqual(model.level, 0.48, accuracy: 0.01)
         model.setLevel(rms: 0)
         XCTAssertEqual(model.level, 0.288, accuracy: 0.01)
+    }
+
+    @MainActor
+    func testLevelReachesThePillWhileEditingAndResetsWhenItLeaves() {
+        let model = HUDModel()
+
+        model.show(.editing)
+        model.setLevel(rms: 0.1)
+        XCTAssertEqual(model.level, 0.8, accuracy: 0.01)
+        model.show(.editing)
+        XCTAssertEqual(model.level, 0.8, accuracy: 0.01, "showing the same live phase again keeps the bars")
+        model.show(.listening)
+        XCTAssertEqual(model.level, 0.8, accuracy: 0.01, "editing and listening are one meter")
+
+        model.show(.processing)
+        XCTAssertEqual(model.level, 0)
+        model.setLevel(rms: 0.1)
+        XCTAssertEqual(model.level, 0, "no meter once the recording is over")
     }
 
     @MainActor

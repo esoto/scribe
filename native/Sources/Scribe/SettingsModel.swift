@@ -14,6 +14,7 @@ final class SettingsModel: ObservableObject {
     @Published private(set) var voiceCommandsEnabled: Bool
     @Published private(set) var urlSchemeEnabled: Bool
     @Published private(set) var hudEnabled: Bool
+    @Published private(set) var editEnabled: Bool
     @Published private(set) var hotkeyMode: HotkeyMode
 
     private let settings: AppSettings
@@ -55,6 +56,7 @@ final class SettingsModel: ObservableObject {
         voiceCommandsEnabled = settings.voiceCommandsEnabled
         urlSchemeEnabled = settings.urlSchemeEnabled
         hudEnabled = settings.hudEnabled
+        editEnabled = settings.editEnabled
         hotkeyMode = settings.hotkeyMode
     }
 
@@ -118,6 +120,13 @@ final class SettingsModel: ObservableObject {
         hudEnabled = on
         settings.hudEnabled = on
         onHudEnabledChanged(on)
+    }
+
+    /// No effect closure: the coordinator reads `AppSettings` at every chord.
+    func setEditEnabled(_ on: Bool) {
+        guard on != editEnabled else { return }
+        editEnabled = on
+        settings.editEnabled = on
     }
 
     func setHotkeyMode(_ mode: HotkeyMode) {
