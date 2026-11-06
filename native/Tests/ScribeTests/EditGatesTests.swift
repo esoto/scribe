@@ -329,6 +329,82 @@ final class EditGatesTests: XCTestCase {
         XCTAssertEqual(EditGates.accept(verb: .fixGrammar, selection: selection, result: result), .accepted(result), "the dot of a.m. ends the sentence, as it did before the marker was excused")
     }
 
+    // MARK: one hour spelled on the 24-hour and the 12-hour clock is one fact
+
+    func testA24HourTimeTranslatedTo12HourIsTheSameFact() {
+        let spanish = "La llamada con Marcos Álvarez es el jueves a las 15:00, así que por favor conéctense cinco minutos antes y traigan el contrato firmado con las 12 páginas que revisamos ayer."
+        let english = "The call with Marcos Álvarez is on Thursday at 3:00 PM, so please join five minutes early and bring the signed contract with the 12 pages we reviewed yesterday."
+        XCTAssertEqual(EditGates.accept(verb: .toEnglish, selection: spanish, result: english), .accepted(english))
+    }
+
+    func testTheHourSurvivesTheClockChangeInBothDirections() {
+        XCTAssertFalse(EditGates.introducesNewFacts(selection: "la llamada es a las 15:00", result: "the call is at 3:00 PM", verb: .toEnglish))
+        XCTAssertFalse(EditGates.introducesNewFacts(selection: "a las 15", result: "at 3 pm", verb: .toEnglish))
+        XCTAssertFalse(EditGates.introducesNewFacts(selection: "at 3 pm", result: "a las 15:00", verb: .toSpanish))
+        XCTAssertFalse(EditGates.introducesNewFacts(selection: "The call is at 3:00 PM.", result: "La llamada es a las 15", verb: .toSpanish))
+    }
+
+    func testEveryPMSpellingMatchesTheTwentyFourHourHour() {
+        for marker in ["PM", "pm", "Pm", "p.m.", "P.M.", "p.m"] {
+            for spacing in [" ", "", "\u{202F}", "\u{00A0}"] {
+                let three = "at 3\(spacing)\(marker)"
+                XCTAssertFalse(EditGates.introducesNewFacts(selection: "a las 15", result: three, verb: .toEnglish), three.debugDescription)
+                XCTAssertFalse(EditGates.introducesNewFacts(selection: "a las 15", result: "at 3:00\(spacing)\(marker)", verb: .toEnglish), three.debugDescription)
+                XCTAssertFalse(EditGates.introducesNewFacts(selection: three, result: "a las 15:00", verb: .toSpanish), three.debugDescription)
+            }
+        }
+    }
+
+    func testAWrongHourIsStillANewFactAcrossTheClocks() {
+        XCTAssertTrue(EditGates.introducesNewFacts(selection: "a las 15:00", result: "at 4:00 PM", verb: .toEnglish))
+        XCTAssertTrue(EditGates.introducesNewFacts(selection: "at 3 pm", result: "a las 16:00", verb: .toSpanish))
+        XCTAssertTrue(EditGates.introducesNewFacts(selection: "at 10 pm", result: "a las 21:00", verb: .toSpanish), "10 pm is 22, not 21")
+
+        let spanish = "La llamada con Marcos Álvarez es el jueves a las 15:00, así que por favor conéctense cinco minutos antes."
+        let wrongHour = "The call with Marcos Álvarez is on Thursday at 4:00 PM, so please join five minutes early."
+        XCTAssertEqual(EditGates.accept(verb: .toEnglish, selection: spanish, result: wrongHour), .rejected(.newFacts))
+    }
+
+    func testABareNumberIsNotATimeSoItGetsNoClockEquivalence() {
+        XCTAssertTrue(EditGates.introducesNewFacts(selection: "a las 15", result: "the call is at 3", verb: .toEnglish), "no marker: not a time")
+        XCTAssertTrue(EditGates.introducesNewFacts(selection: "at 3", result: "a las 15", verb: .toSpanish), "no marker in the selection: not a time")
+        XCTAssertTrue(EditGates.introducesNewFacts(selection: "a las 15", result: "at 3 sharp PM", verb: .toEnglish), "the marker must follow the number itself")
+        XCTAssertTrue(EditGates.introducesNewFacts(selection: "a las 15", result: "invite 3 amigos", verb: .toEnglish), "amigos is not AM")
+    }
+
+    func testALetterAfterANumberThatDoesNotSpellAMarkerGivesNoClockEquivalence() {
+        for tail in ["a las", "a.", "p.", "pe", "amigos", "pmx", "sharp", ""] {
+            let result = "at 3 \(tail)"
+            XCTAssertTrue(EditGates.introducesNewFacts(selection: "a las 15", result: result, verb: .toEnglish), result)
+        }
+        XCTAssertTrue(EditGates.introducesNewFacts(selection: "a las 15", result: "at 3\npm", verb: .toEnglish), "a marker on the next line is not this number's")
+    }
+
+    func testANumberTooLongToBeAnHourIsNeverExcused() {
+        let huge = String(repeating: "9", count: 30)
+        XCTAssertTrue(EditGates.introducesNewFacts(selection: "a las 15", result: "at \(huge) pm", verb: .toEnglish))
+        XCTAssertFalse(EditGates.introducesNewFacts(selection: "ticket \(huge) a las 15", result: "ticket \(huge) at 3 pm", verb: .toEnglish))
+    }
+
+    func testOnlyPMReachesTheAfternoonHours() {
+        XCTAssertTrue(EditGates.introducesNewFacts(selection: "a las 15:00", result: "at 3:00 AM", verb: .toEnglish), "3 AM is 03:00, not 15:00")
+        XCTAssertTrue(EditGates.introducesNewFacts(selection: "at 3 am", result: "a las 15:00", verb: .toSpanish))
+        XCTAssertFalse(EditGates.introducesNewFacts(selection: "a las 3", result: "at 3 AM", verb: .toEnglish), "the same hour needs no conversion")
+    }
+
+    func testTheClockEquivalenceCoversOnlyOneToElevenPMAndThirteenToTwentyThree() {
+        XCTAssertTrue(EditGates.introducesNewFacts(selection: "a las 24:00", result: "at 12 PM", verb: .toEnglish), "12 PM is noon, not 24")
+        XCTAssertFalse(EditGates.introducesNewFacts(selection: "a las 12:00", result: "at 12 PM", verb: .toEnglish))
+        XCTAssertTrue(EditGates.introducesNewFacts(selection: "at 12 pm", result: "a las 24:00", verb: .toSpanish))
+        XCTAssertFalse(EditGates.introducesNewFacts(selection: "at 11 pm", result: "a las 23:00", verb: .toSpanish))
+    }
+
+    func testTheClockEquivalenceExcusesOnlyTheHourItself() {
+        // "5" has no marker and is not in the selection, so the matching hour does not launder it.
+        XCTAssertTrue(EditGates.introducesNewFacts(selection: "a las 15:00 para 2 personas", result: "at 3:00 PM for 5 people", verb: .toEnglish))
+        XCTAssertFalse(EditGates.introducesNewFacts(selection: "a las 15:00 para 2 personas", result: "at 3:00 PM for 2 people", verb: .toEnglish))
+    }
+
     // MARK: short translations are rejected only on the wrong side of the stopword score
 
     func testAShortTranslationIsRejectedWhenItsScoreIsClearlyOnTheWrongSide() {

@@ -195,7 +195,7 @@
       "id": "tospanish-en-time",
       "verb": "toSpanish",
       "text": "The call with Marcos Alvarez is on Thursday at 3 pm, so please join five minutes early and bring the signed contract with the 12 pages we reviewed yesterday.",
-      "comment": "Time convention: a Spanish translation often writes '15:00'. Gate 5 reads the hour 15 as a new number and rejects it; '3 pm' and '3:00 PM' pass (minutes and AM/PM are formats). Measures how often each happens.",
+      "comment": "Time convention: a Spanish translation often writes '15:00'. Gate 5 reads 15 and 3 pm as one hour, so '15:00', '3 pm' and '3:00 PM' all pass (minutes and AM/PM are formats); a different hour such as 16:00 is still rejected. Measures how often each happens.",
       "must_contain": ["marcos", "jueves", "contrato"],
       "must_contain_any": [["12", "doce"]],
       "must_not_contain": ["the ", " and "]
@@ -228,7 +228,7 @@
       "id": "toenglish-es-time",
       "verb": "toEnglish",
       "text": "La llamada con Marcos Álvarez es el jueves a las 15:00, así que por favor conéctense cinco minutos antes y traigan el contrato firmado con las 12 páginas que revisamos ayer.",
-      "comment": "Time convention, the other way: '15:00' -> '3 pm' or '3:00 PM' adds the hour 3, which gate 5 rejects (a 24-hour to 12-hour conversion is not treated as the same fact); keeping '15:00' passes. Measures how often each happens.",
+      "comment": "Time convention, the other way: '15:00' -> '3 pm' or '3:00 PM' is the same hour on the 12-hour clock and passes, like keeping '15:00'; a different hour such as 4 pm is still rejected. Measures how often each happens.",
       "must_contain": ["marcos", "thursday", "contract"],
       "must_contain_any": [["12", "twelve"]],
       "must_not_contain": [" el ", " que "]

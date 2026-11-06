@@ -87,12 +87,12 @@ enum EditGates {
         result.split(whereSeparator: { $0.isWhitespace }).count < minWordsForTranslationLanguageGate
     }
 
-    /// Numbers (digit runs) absent from the selection are new facts for every verb. A capitalised word is a new fact
-    /// only if the selection never had it in any case or accent (fix grammar may capitalise "monday" or restore "Lucía"),
-    /// unless the verb translates (Monday → lunes), the word opens a sentence, or it is AM or PM in any spelling.
+    /// Numbers (digit runs) absent from the selection are new facts for every verb, unless they are the same hour on the
+    /// other clock. A capitalised word is a new fact only if the selection never had it in any case or accent (fix grammar
+    /// may capitalise "monday" or restore "Lucía"), unless the verb translates (Monday → lunes), the word opens a sentence,
+    /// or it is AM or PM in any spelling.
     static func introducesNewFacts(selection: String, result: String, verb: EditVerb) -> Bool {
-        let selectionNumbers = Set(numbers(in: selection))
-        if numbers(in: result).contains(where: { !selectionNumbers.contains($0) }) { return true }
+        if introducesNewNumbers(selection: selection, result: result) { return true }
         guard !verb.isTranslation else { return false }
         let known = Set(words(in: selection).flatMap { [VoiceCommand.fold($0.text), VoiceCommand.fold(stemAndTail($0.text).stem)] })
         return words(in: joiningMeridiemDots(result)).contains { word in
@@ -105,12 +105,41 @@ enum EditGates {
         }
     }
 
+    private enum Meridiem { case am, pm }
+
+    private struct NumberToken {
+        let digits: String
+        let meridiem: Meridiem?
+    }
+
+    /// A model that translates "a las 15:00" writes "3:00 PM", and 15 and 3 are one hour, so a result number is not new
+    /// when the selection names its hour on the other clock. The marker is the evidence that a number is a time at all:
+    /// a bare "3" gets no conversion. Only PM reaches the afternoon ("3 AM" is 03:00), and only 1…11 PM against 13…23,
+    /// because 12 PM is already 12; any other mismatch is a changed hour, which is what this gate is for.
+    private static func introducesNewNumbers(selection: String, result: String) -> Bool {
+        let selectionTokens = numberTokens(in: selection)
+        let known = Set(selectionTokens.map(\.digits))
+        let hours = Set(selectionTokens.compactMap { Int($0.digits) })
+        let afternoonHours = Set(selectionTokens.filter { $0.meridiem == .pm }.compactMap { Int($0.digits) })
+        return numberTokens(in: result).contains { token in
+            if known.contains(token.digits) { return false }
+            guard let hour = Int(token.digits) else { return true }
+            if token.meridiem == .pm, (1...11).contains(hour), hours.contains(hour + 12) { return false }
+            if (13...23).contains(hour), afternoonHours.contains(hour - 12) { return false }
+            return true
+        }
+    }
+
     /// The digit runs of `text`. A run followed by ":MM" (exactly two digits, so "9:5" and "9:456" do not count) is an
     /// hour, and the minutes are a format, not a fact: "a las 9" read back as "9:00" is the same hour, and so is "9:45",
     /// because the gate exists to catch a changed hour and not to audit the minutes a model chose to spell out.
     static func numbers(in text: String) -> [String] {
+        numberTokens(in: text).map(\.digits)
+    }
+
+    private static func numberTokens(in text: String) -> [NumberToken] {
         let chars = Array(text)
-        var runs: [String] = []
+        var tokens: [NumberToken] = []
         var i = 0
         while i < chars.count {
             guard chars[i].isNumber else {
@@ -119,10 +148,27 @@ enum EditGates {
             }
             var end = i
             while end < chars.count, chars[end].isNumber { end += 1 }
-            runs.append(String(chars[i..<end]))
-            i = indexAfterMinutes(chars, from: end)
+            let afterMinutes = indexAfterMinutes(chars, from: end)
+            tokens.append(NumberToken(digits: String(chars[i..<end]), meridiem: meridiem(in: chars, from: afterMinutes)))
+            i = afterMinutes
         }
-        return runs
+        return tokens
+    }
+
+    /// The marker right after a number: optional spaces (the no-break ones macOS writes included, a newline not), then
+    /// "am", "pm", "a.m." or "p.m." in any case. A letter after it means a longer word, so "3 amigos" is not "3 am".
+    private static func meridiem(in chars: [Character], from start: Int) -> Meridiem? {
+        var i = start
+        while i < chars.count, chars[i].isWhitespace, !chars[i].isNewline { i += 1 }
+        guard i < chars.count else { return nil }
+        let first = chars[i].lowercased()
+        guard first == "a" || first == "p" else { return nil }
+        i += 1
+        if i < chars.count, chars[i] == "." { i += 1 }
+        guard i < chars.count, chars[i].lowercased() == "m" else { return nil }
+        i += 1
+        if i < chars.count, chars[i].isLetter { return nil }
+        return first == "p" ? .pm : .am
     }
 
     /// Skips each ":MM" that follows, so "9:00:00" is the hour 9 too.

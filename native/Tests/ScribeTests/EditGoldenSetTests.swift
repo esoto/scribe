@@ -149,20 +149,38 @@ final class EditGoldenSetTests: XCTestCase {
         XCTAssertFalse(editCasePassed(echoed))
     }
 
+    // MARK: the time cases — one hour on either clock is one fact, a different hour is not
+
+    func testTheOtherClockInATranslationIsTheSameHourNotANewFact() throws {
+        let toSpanish = try goldenCase("tospanish-en-time")
+        let militaryTime = "La llamada con Marcos Alvarez es el jueves a las 15:00, así que por favor únanse cinco minutos antes y traigan el contrato firmado con las 12 páginas que revisamos ayer."
+        let spanish = evaluateEditCase(toSpanish, rawOutput: militaryTime)
+        XCTAssertEqual(spanish.verdict, .accepted(militaryTime))
+        XCTAssertTrue(editCasePassed(spanish))
+
+        let toEnglish = try goldenCase("toenglish-es-time")
+        for twelveHour in ["3 pm", "3:00 PM", "3 p.m."] {
+            let english = "The call with Marcos Álvarez is on Thursday at \(twelveHour), so please connect five minutes early and bring the signed contract with the 12 pages we reviewed yesterday."
+            let result = evaluateEditCase(toEnglish, rawOutput: english)
+            XCTAssertEqual(result.verdict, .accepted(english), twelveHour)
+            XCTAssertTrue(editCasePassed(result), twelveHour)
+        }
+    }
+
+    func testAnotherHourInATranslationIsStillRejectedAsNewFacts() throws {
+        let toSpanish = try goldenCase("tospanish-en-time")
+        let wrongSpanish = "La llamada con Marcos Alvarez es el jueves a las 16:00, así que por favor únanse cinco minutos antes y traigan el contrato firmado con las 12 páginas que revisamos ayer."
+        XCTAssertEqual(evaluateEditCase(toSpanish, rawOutput: wrongSpanish).verdict, .rejected(.newFacts))
+
+        let toEnglish = try goldenCase("toenglish-es-time")
+        let wrongEnglish = "The call with Marcos Álvarez is on Thursday at 4:00 PM, so please connect five minutes early and bring the signed contract with the 12 pages we reviewed yesterday."
+        XCTAssertEqual(evaluateEditCase(toEnglish, rawOutput: wrongEnglish).verdict, .rejected(.newFacts))
+    }
+
     // MARK: the measured gate holes, pinned as they are today
 
     /// The 2.0 follow-ups record these as holes `EditGates` has today. The cases exist to measure them, so the tests
     /// pin today's verdict: when the gate changes on purpose, these are the lines that change with it.
-    func testAnotherNumberFormatInATranslationIsRejectedAsNewFacts() throws {
-        let toSpanish = try goldenCase("tospanish-en-time")
-        let militaryTime = "La llamada con Marcos Alvarez es el jueves a las 15:00, así que por favor únanse cinco minutos antes y traigan el contrato firmado con las 12 páginas que revisamos ayer."
-        XCTAssertEqual(evaluateEditCase(toSpanish, rawOutput: militaryTime).verdict, .rejected(.newFacts))
-
-        let toEnglish = try goldenCase("toenglish-es-time")
-        let twelveHour = "The call with Marcos Álvarez is on Thursday at 3 pm, so please connect five minutes early and bring the signed contract with the 12 pages we reviewed yesterday."
-        XCTAssertEqual(evaluateEditCase(toEnglish, rawOutput: twelveHour).verdict, .rejected(.newFacts))
-    }
-
     func testAPromotedCommonWordPassesTheGateAndFailsTheCasedCheck() throws {
         let testCase = try goldenCase("fix-en-2")
         let promoted = try XCTUnwrap(faithful["fix-en-2"]).replacingOccurrences(of: "stock rose", with: "stock Rose")
