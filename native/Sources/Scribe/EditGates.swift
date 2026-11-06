@@ -162,8 +162,9 @@ enum EditGates {
     ///   only the hour's own, so "the 9 reports are due at 9:30" → "the 9 reports are due at 9:00" passes.
     /// - A bare number of the same value also excuses an AM/PM swap, because a side with no marker says nothing against
     ///   either: "at 3 AM in room 3" → "at 3 PM in room 3" passes.
-    /// - Thousands groups and dotted dates take the fraction path and compare as written, so "1,000" → "1 000" and
-    ///   "3.50" → "3.5" are rejected. That is the safe side: a retry costs less than a changed number.
+    /// - Thousands groups and dotted dates take the fraction path and compare as written, so "1,000" → "1 000" is
+    ///   rejected. A trailing zero is never stripped on any path, so "3.50" → "3.5" was always rejected. That is the
+    ///   safe side: a retry costs less than a changed number.
     private static func isSameHour(_ r: NumberToken, _ s: NumberToken) -> Bool {
         if r.digits == s.digits {
             guard let resultMarker = r.meridiem, let selectionMarker = s.meridiem else { return true }
