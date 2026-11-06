@@ -75,11 +75,13 @@ func runEditCases(_ cases: [EditCase], backend: any CleanupModelBackend, tag: St
             continue
         }
         let maxTokens = EditPrompt.maxTokens(verb: verb, inputTokens: testCase.text.count / 4)
+        // The pipeline's own function, so the model sees in the eval exactly the instruction line it gets in the app.
+        let instruction = EditPrompt.instruction(verb: verb, selection: testCase.text)
         let known = testCase.knownFailures?.contains(modelID) ?? false
         let t0 = Date()
         let raw: String
         do {
-            raw = try await backend.edit(instruction: verb.instruction, text: testCase.text, maxTokens: maxTokens)
+            raw = try await backend.edit(instruction: instruction, text: testCase.text, maxTokens: maxTokens)
         } catch {
             let ms = Int(Date().timeIntervalSince(t0) * 1000)
             print("[\(tag)] \(known ? "KNOWN-FAIL" : "FAIL") [\(testCase.id)] \(ms) ms")
@@ -94,7 +96,7 @@ func runEditCases(_ cases: [EditCase], backend: any CleanupModelBackend, tag: St
         passed += ok ? 1 : 0
         print("[\(tag)] \(ok ? "PASS" : known ? "KNOWN-FAIL" : "FAIL") [\(testCase.id)] \(ms) ms")
         if !ok || testCase.comment != nil { print("    out: \(shown)") }
-        if case .rejected(let reason) = result.verdict { print("    gate: rejected (\(reason.rawValue))") }
+        if let gateLine = editGateLine(testCase, result, shown: shown) { print("    \(gateLine)") }
         guard !known else { continue }
         XCTAssertTrue(ok, editFailureMessage(testCase, result, shown: shown))
     }

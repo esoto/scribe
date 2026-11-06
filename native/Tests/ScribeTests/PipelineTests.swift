@@ -2083,6 +2083,14 @@ final class PipelineTests: XCTestCase {
         XCTAssertEqual(DictationPipeline.cleanupDeadline(words: 200, base: 6), 10.5, accuracy: 1e-9)
     }
 
+    func testCleanupDeadlineTakesAnExplicitSlopeAndDefaultsToThirtyMilliseconds() {
+        XCTAssertEqual(DictationPipeline.cleanupDeadline(words: 200, base: 6, perWord: 0.03), 10.5, accuracy: 1e-9)
+        XCTAssertEqual(DictationPipeline.cleanupDeadline(words: 200, base: 6, perWord: 0.045), 12.75, accuracy: 1e-9)
+        XCTAssertEqual(DictationPipeline.cleanupDeadline(words: 50, base: 6, perWord: 0.045), 6, "no growth up to fifty words")
+        XCTAssertEqual(DictationPipeline.cleanupDeadline(words: 1000, base: 6, perWord: 0.045), 20, "the cap holds for any slope")
+        XCTAssertEqual(DictationPipeline.cleanupDeadline(words: 1000, base: 30, perWord: 0.045), 30)
+    }
+
     func testCleanupDeadlineIsCappedAtTwentySeconds() {
         XCTAssertEqual(DictationPipeline.cleanupDeadline(words: 1000, base: 6), 20)
     }

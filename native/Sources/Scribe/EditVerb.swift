@@ -41,8 +41,9 @@ enum EditVerb: String, CaseIterable, Equatable {
         case .shorter: return (0.3, 0.9)
         case .fixGrammar: return (0.8, 1.25)
         case .formal: return (0.7, 1.4)
-        // Natural casual rewrites of a stiff selection measured 0.37–0.57, so the formal floor would reject them.
-        case .casual: return (0.4, 1.4)
+        // Natural casual rewrites of a stiff selection measured 0.36–0.57 (run 2: a faithful Spanish rewrite at 0.36 that
+        // kept every fact), so the formal floor would reject them and a 0.4 floor still rejected that one.
+        case .casual: return (0.35, 1.4)
         case .list: return (0.6, 1.6)
         case .toSpanish: return (0.8, 1.6)
         case .toEnglish: return (0.6, 1.3)

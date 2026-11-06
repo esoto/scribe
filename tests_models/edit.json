@@ -1,19 +1,21 @@
 {
-  "description": "Edit-by-voice golden set: 28 cases, four per EditVerb, run via `make test-models-edit` (CLEANUP_MODEL picks the model). Each output goes through EditGates.accept first; a gate rejection fails the case, then the phrase checks run on the accepted text (lowercase substring; phrases with a newline read the raw output; must_not_contain_cased is case-sensitive). The cases record reality: known_failures is set only with the user's sign-off and never for the default model.",
+  "description": "Edit-by-voice golden set: 28 cases, four per EditVerb, run via `make test-models-edit` (CLEANUP_MODEL picks the model). Each output goes through EditGates.accept first; a gate rejection fails the case, then the phrase checks run on the accepted text (lowercase substring; phrases with a newline read the raw output; must_not_contain_cased is case-sensitive; each must_contain_any group needs one of its alternatives as a whole word or number, which is how a digit may also be spelled out). The cases record reality: known_failures is set only with the user's sign-off and never for the default model.",
   "cases": [
     {
       "id": "shorter-en-1",
       "verb": "shorter",
       "text": "Hi everyone, I just wanted to quickly let you know that Marcos d'Angelo will be presenting the quarterly numbers on Thursday at 10 in the main conference room, and if at all possible it would be really great if everybody could try to arrive about 5 minutes early so that we can start on time.",
       "comment": "Particle name: gate 5 only checks capitalised words, so a model that drops or invents a lowercase-particle name is invisible to it. must_contain 'angelo' catches the drop.",
-      "must_contain": ["marcos", "angelo", "thursday", "10", "5"],
+      "must_contain": ["marcos", "angelo", "thursday"],
+      "must_contain_any": [["10", "ten"], ["5", "five"]],
       "must_not_contain": ["just wanted to", "if at all possible"]
     },
     {
       "id": "shorter-en-2",
       "verb": "shorter",
       "text": "So basically, what happened is that the invoice from Lucy Ortega for 450 dollars still has not been paid, and honestly I think we should probably look into it on Monday morning before it gets any later, because the due date was last Friday.",
-      "must_contain": ["ortega", "450", "monday", "friday"],
+      "must_contain": ["ortega", "monday", "friday"],
+      "must_contain_any": [["450", "four hundred fifty", "four hundred and fifty"]],
       "must_not_contain": ["basically", "honestly"]
     },
     {
@@ -21,21 +23,24 @@
       "verb": "shorter",
       "text": "Hola a todos, solo quería avisarles de que Lucía de la Cruz va a presentar los resultados del trimestre el jueves a las 10 en la sala grande, y si fuera posible sería muy bueno que todos llegaran unos 5 minutos antes para poder empezar a tiempo.",
       "comment": "Particle surname: 'de la Cruz' is lowercase-particle territory for gate 5.",
-      "must_contain": ["lucía", "cruz", "jueves", "10", "5"],
+      "must_contain": ["lucía", "cruz", "jueves"],
+      "must_contain_any": [["10", "diez"], ["5", "cinco"]],
       "must_not_contain": ["solo quería avisarles", "si fuera posible"]
     },
     {
       "id": "shorter-es-2",
       "verb": "shorter",
       "text": "O sea, la verdad es que el pedido de Ricardo Salas por 320 piezas todavía no llega, y la neta creo que deberíamos revisar con el proveedor el lunes en la mañana antes de que se haga más tarde, porque la fecha de entrega era el viernes pasado.",
-      "must_contain": ["salas", "320", "lunes", "viernes"],
+      "must_contain": ["salas", "lunes", "viernes"],
+      "must_contain_any": [["320", "trescientos veinte"]],
       "must_not_contain": ["o sea", "la neta"]
     },
     {
       "id": "fix-en-1",
       "verb": "fixGrammar",
       "text": "marcos told me the bakery on Main Street opens at 9 on saturday, but he recieved a message yesterday saying the owner is gonig to close early this week, so we should call them first and keep the two orders seperate before we plan the team lunch for 12 people.",
-      "must_contain": ["received", "going", "separate", "marcos", "saturday", "9", "12"],
+      "must_contain": ["received", "going", "separate", "marcos", "saturday"],
+      "must_contain_any": [["9", "nine"], ["12", "twelve"]],
       "must_not_contain": ["recieved", "gonig", "seperate"]
     },
     {
@@ -43,7 +48,8 @@
       "verb": "fixGrammar",
       "text": "marcos said the price of the stock rose on thursday and that he will presnt the 12 slides to the board, but honestly the headline is definately misleading and we should receive the final numbers befor noon on friday.",
       "comment": "Case promotion: 'rose' and 'will' are common words that are also names; gate 5 compares capitals folded against every selection word, so 'Rose' or 'Will' passes the gate. must_not_contain_cased counts how often a model does it.",
-      "must_contain": ["present", "before", "definitely", "marcos", "thursday", "12", "friday"],
+      "must_contain": ["present", "before", "definitely", "marcos", "thursday", "friday"],
+      "must_contain_any": [["12", "twelve"]],
       "must_not_contain": ["presnt", " befor ", "definately"],
       "must_not_contain_cased": ["Rose", "Will"]
     },
@@ -51,7 +57,8 @@
       "id": "fix-es-1",
       "verb": "fixGrammar",
       "text": "El lunes mi mamá y yo vamos a vizitar a Lucía Ramos, llegamos a las 9 de la mañana pero no sé si habrá tienpo para comer con ella antes de la reunión de las 3, porque despues tenemos que volver a la casa de mi tía.",
-      "must_contain": ["visitar", "tiempo", "después", "lucía", "lunes", "9", "3"],
+      "must_contain": ["visitar", "tiempo", "después", "lucía", "lunes"],
+      "must_contain_any": [["9", "nueve"], ["3", "tres"]],
       "must_not_contain": ["vizitar", "tienpo", "despues"]
     },
     {
@@ -59,14 +66,16 @@
       "verb": "fixGrammar",
       "text": "Mi papá dice que el martes a las 8 vamos a comprar los boletos para el conzierto de Carlos Vives, pero Marta no ha confirmdo si puede ir, y quiere que le mandemos la direccion del lugar antes del viernes.",
       "comment": "Accent fold: gate 5 folds accents both ways, so 'papá' -> 'Papa' passes the gate; must_contain 'papá' is the only thing that sees the accent drop.",
-      "must_contain": ["papá", "concierto", "confirmado", "dirección", "carlos", "martes", "8", "viernes"],
+      "must_contain": ["papá", "concierto", "confirmado", "dirección", "carlos", "martes", "viernes"],
+      "must_contain_any": [["8", "ocho"]],
       "must_not_contain": ["conzierto", "confirmdo", "direccion"]
     },
     {
       "id": "formal-en-1",
       "verb": "formal",
       "text": "hey Marcos, gonna need those 14 reports by tuesday, no way I can wait any longer, and wanna make sure the numbers are right before the board meeting on thursday so can u check them asap",
-      "must_contain": ["marcos", "14", "reports", "tuesday", "thursday"],
+      "must_contain": ["marcos", "reports", "tuesday", "thursday"],
+      "must_contain_any": [["14", "fourteen"]],
       "must_not_contain": ["gonna", "wanna", "hey marcos", " u "]
     },
     {
@@ -74,98 +83,111 @@
       "verb": "formal",
       "text": "need the signed contract from the vendor by friday. will check the 8 clauses with Ana on monday morning. can't sign anything until then, and probably need legal to look at page 12 too.",
       "comment": "Sentence-start names: the sentences have no subject, and gate 5 exempts a capitalised word that opens a sentence, so an invented subject ('John needs the contract') passes. must_not_contain lists the names small models reach for; a miss here proves nothing, a hit is a measured hole.",
-      "must_contain": ["contract", "friday", "ana", "8", "monday", "12"],
+      "must_contain": ["contract", "friday", "ana", "monday"],
+      "must_contain_any": [["8", "eight"], ["12", "twelve"]],
       "must_not_contain": ["john", "sarah", "michael", "david", "emily", "alex"]
     },
     {
       "id": "formal-es-1",
       "verb": "formal",
       "text": "oye Ricardo, ya quedó chido lo del reporte de las 20 ventas, pero la neta necesito que me lo mandes el martes porque el jueves va a venir el jefe y no quiero que se me arme el desmadre",
-      "must_contain": ["ricardo", "20", "martes", "jueves"],
+      "must_contain": ["ricardo", "martes", "jueves"],
+      "must_contain_any": [["20", "veinte"]],
       "must_not_contain": ["oye", "chido", "la neta", "desmadre"]
     },
     {
       "id": "formal-es-2",
       "verb": "formal",
       "text": "qué onda Lucía, mañana a las 9 me urge que me pases los 3 contratos del cliente porque si no se nos cae la junta del miércoles y el director ya está bien enojado, avísame cuando los tengas porfa",
-      "must_contain": ["lucía", "9", "3", "contratos", "miércoles"],
+      "must_contain": ["lucía", "contratos", "miércoles"],
+      "must_contain_any": [["9", "nueve"], ["3", "tres"]],
       "must_not_contain": ["qué onda", "porfa", "bien enojado"]
     },
     {
       "id": "casual-en-1",
       "verb": "casual",
       "text": "Dear Mr. Harris, please be advised that, pursuant to Section 4 of our agreement, I hereby confirm that the shipment of 40 units will be dispatched on Wednesday, and I would be most grateful if you could kindly acknowledge receipt at your earliest convenience.",
-      "must_contain": ["harris", "40", "wednesday"],
+      "must_contain": ["harris", "wednesday"],
+      "must_contain_any": [["40", "forty"]],
       "must_not_contain": ["hereby", "pursuant", "earliest convenience", "most grateful"]
     },
     {
       "id": "casual-en-2",
       "verb": "casual",
       "text": "To whom it may concern: we regret to inform you that the appointment with Dr. Patel scheduled for Friday at 2 has been rescheduled owing to unforeseen circumstances, and we kindly request that you contact our office at your convenience to arrange an alternative date.",
-      "must_contain": ["patel", "friday", "2"],
+      "must_contain": ["patel", "friday"],
+      "must_contain_any": [["2", "two"]],
       "must_not_contain": ["to whom it may concern", "regret to inform", "unforeseen circumstances", "owing to"]
     },
     {
       "id": "casual-es-1",
       "verb": "casual",
       "text": "Estimado Sr. Ramírez: Mediante la presente le informo que, conforme a lo acordado, la entrega de las 40 cajas se realizará el miércoles, por lo que le agradeceré confirmar la recepción a la brevedad posible.",
-      "must_contain": ["ramírez", "40", "miércoles"],
+      "must_contain": ["ramírez", "miércoles"],
+      "must_contain_any": [["40", "cuarenta"]],
       "must_not_contain": ["mediante la presente", "estimado sr", "a la brevedad", "conforme a lo acordado"]
     },
     {
       "id": "casual-es-2",
       "verb": "casual",
       "text": "Por medio de la presente nos permitimos comunicarle que la cita con la Dra. Torres, programada para el viernes a las 2, ha sido reprogramada debido a circunstancias imprevistas, por lo que le solicitamos comunicarse con nuestra oficina para acordar una nueva fecha.",
-      "must_contain": ["torres", "viernes", "2"],
+      "must_contain": ["torres", "viernes"],
+      "must_contain_any": [["2", "dos"]],
       "must_not_contain": ["por medio de la presente", "nos permitimos", "circunstancias imprevistas", "le solicitamos"]
     },
     {
       "id": "list-en-1",
       "verb": "list",
       "text": "Before we leave for the conference on Saturday morning, Marcos needs to book the hotel near the venue, pack the 2 laptops and the chargers, and print the tickets for everyone on the team.",
-      "must_contain": ["\n- ", "marcos", "hotel", "laptops", "tickets", "saturday", "2"],
+      "must_contain": ["\n- ", "marcos", "hotel", "laptops", "tickets", "saturday"],
+      "must_contain_any": [["2", "two"]],
       "must_not_contain": ["•", "\n1.", "\n* "]
     },
     {
       "id": "list-en-2",
       "verb": "list",
       "text": "On Monday Ana will review the budget for the new office, Luis will update the 5 sales forecasts for the quarter, and I will send the final report to the board before noon.",
-      "must_contain": ["\n- ", "ana", "luis", "budget", "forecasts", "report", "monday", "5"],
+      "must_contain": ["\n- ", "ana", "luis", "budget", "forecasts", "report", "monday"],
+      "must_contain_any": [["5", "five"]],
       "must_not_contain": ["•", "\n1.", "\n* "]
     },
     {
       "id": "list-es-1",
       "verb": "list",
       "text": "Antes de salir a la conferencia el sábado en la mañana, Marcos tiene que reservar el hotel cerca del lugar, empacar las 2 laptops y los cargadores, e imprimir los boletos para todos en el equipo.",
-      "must_contain": ["\n- ", "marcos", "hotel", "laptops", "boletos", "sábado", "2"],
+      "must_contain": ["\n- ", "marcos", "hotel", "laptops", "boletos", "sábado"],
+      "must_contain_any": [["2", "dos"]],
       "must_not_contain": ["•", "\n1.", "\n* "]
     },
     {
       "id": "list-es-2",
       "verb": "list",
       "text": "El lunes Ana revisará el presupuesto de la nueva oficina, Luis actualizará los 5 pronósticos de ventas del trimestre y yo mandaré el informe final al consejo antes del mediodía.",
-      "must_contain": ["\n- ", "ana", "luis", "presupuesto", "pronósticos", "informe", "lunes", "5"],
+      "must_contain": ["\n- ", "ana", "luis", "presupuesto", "pronósticos", "informe", "lunes"],
+      "must_contain_any": [["5", "cinco"]],
       "must_not_contain": ["•", "\n1.", "\n* "]
     },
     {
       "id": "tospanish-en-1",
       "verb": "toSpanish",
       "text": "Hi everyone, the meeting with Marcos Alvarez is on Tuesday at 10 in the main room. Please bring the 3 reports and the signed contract, and let me know if you cannot make it.",
-      "must_contain": ["marcos", "martes", "contrato", "10", "3"],
+      "must_contain": ["marcos", "martes", "contrato"],
+      "must_contain_any": [["10", "diez"], ["3", "tres"]],
       "must_not_contain": ["the ", " and "]
     },
     {
       "id": "tospanish-en-2",
       "verb": "toSpanish",
       "text": "Thanks again, Lucy. The invoice for 450 dollars is due on Friday, and Mr. Brown from accounting said he will review it on Monday if we send the receipts today.",
-      "must_contain": ["lucy", "factura", "450", "viernes", "lunes"],
+      "must_contain": ["lucy", "factura", "viernes", "lunes"],
+      "must_contain_any": [["450", "cuatrocientos cincuenta"]],
       "must_not_contain": ["the ", " and "]
     },
     {
       "id": "tospanish-en-short",
       "verb": "toSpanish",
       "text": "Good morning, team!",
-      "comment": "Short translation (the one deliberate exception to the 25-60 word rule): under six words gate 4 is skipped, since a greeting has no stopwords to score. The other gates and the phrases still apply, so an untranslated echo fails must_contain.",
+      "comment": "Short translation (the one deliberate exception to the 25-60 word rule): under six words gate 4 rejects only a score clearly on the wrong side, since a greeting has no stopwords to score. The other gates and the phrases still apply, so an untranslated echo fails must_contain.",
       "must_contain": ["buenos", "equipo"],
       "must_not_contain": ["the ", " and "]
     },
@@ -173,29 +195,32 @@
       "id": "tospanish-en-time",
       "verb": "toSpanish",
       "text": "The call with Marcos Alvarez is on Thursday at 3 pm, so please join five minutes early and bring the signed contract with the 12 pages we reviewed yesterday.",
-      "comment": "Time convention: a Spanish translation often writes '15:00'. Gate 5 reads 15 and 00 as new numbers and rejects it; '3 pm' passes. Measures how often each happens.",
-      "must_contain": ["marcos", "jueves", "contrato", "12"],
+      "comment": "Time convention: a Spanish translation often writes '15:00'. Gate 5 reads 15 and 3 pm as one hour, so '15:00', '3 pm' and '3:00 PM' all pass (AM/PM is a format, and ':00' on a bare hour adds nothing); a different hour such as 16:00, or minutes the selection never stated such as '3:30 PM', is still rejected. Measures how often each happens.",
+      "must_contain": ["marcos", "jueves", "contrato"],
+      "must_contain_any": [["12", "doce"]],
       "must_not_contain": ["the ", " and "]
     },
     {
       "id": "toenglish-es-1",
       "verb": "toEnglish",
       "text": "Hola a todos, la reunión con Marcos Álvarez es el martes a las 10 en la sala principal. Por favor traigan los 3 informes y el contrato firmado, y avísenme si no pueden venir.",
-      "must_contain": ["marcos", "tuesday", "contract", "10", "3"],
+      "must_contain": ["marcos", "tuesday", "contract"],
+      "must_contain_any": [["10", "ten"], ["3", "three"]],
       "must_not_contain": [" el ", " que "]
     },
     {
       "id": "toenglish-es-2",
       "verb": "toEnglish",
       "text": "Gracias otra vez, Lucía. La factura por 450 dólares vence el viernes, y el señor Brown de contabilidad dijo que la revisará el lunes si le mandamos los recibos hoy.",
-      "must_contain": ["invoice", "450", "friday", "monday", "brown"],
+      "must_contain": ["invoice", "friday", "monday", "brown"],
+      "must_contain_any": [["450", "four hundred fifty", "four hundred and fifty"]],
       "must_not_contain": [" el ", " que "]
     },
     {
       "id": "toenglish-es-short",
       "verb": "toEnglish",
       "text": "¡Buenos días, equipo!",
-      "comment": "Short translation (exception to the 25-60 word rule): under six words gate 4 is skipped, the other direction of tospanish-en-short. The phrases still apply.",
+      "comment": "Short translation (exception to the 25-60 word rule): under six words gate 4 rejects only a score clearly on the wrong side, the other direction of tospanish-en-short. The phrases still apply.",
       "must_contain": ["good morning", "team"],
       "must_not_contain": [" el ", " que "]
     },
@@ -203,8 +228,9 @@
       "id": "toenglish-es-time",
       "verb": "toEnglish",
       "text": "La llamada con Marcos Álvarez es el jueves a las 15:00, así que por favor conéctense cinco minutos antes y traigan el contrato firmado con las 12 páginas que revisamos ayer.",
-      "comment": "Time convention, the other way: '15:00' -> '3 pm' adds the digit 3, which gate 5 rejects; keeping '15:00' passes. Measures how often each happens.",
-      "must_contain": ["marcos", "thursday", "contract", "12"],
+      "comment": "Time convention, the other way: '15:00' -> '3 pm' or '3:00 PM' is the same hour on the 12-hour clock and passes, like keeping '15:00'; a different hour such as 4 pm, or different minutes such as '3:30 PM', is still rejected. Measures how often each happens.",
+      "must_contain": ["marcos", "thursday", "contract"],
+      "must_contain_any": [["12", "twelve"]],
       "must_not_contain": [" el ", " que "]
     }
   ]
