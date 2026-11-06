@@ -254,8 +254,12 @@ enum EditGates {
     }
 
     /// Words in order, with edge apostrophes trimmed so a quote mark ('Lucía') cannot hide a capital, each flagged when it
-    /// opens a sentence: at the start of the text or after ".", "?", "!" or a newline (CRLF included). A colon does not,
-    /// because "due Tuesday: Lucía will send it" is exactly where a model slips in a name.
+    /// opens a sentence: at the start of the text or after ".", "?", "!" or a newline (CRLF included), or after a colon
+    /// that a space follows. The terminator itself sets the flag, so closing quotes or brackets after it ("OK.” Also")
+    /// change nothing. A colon and a space open a sentence because a label or a greeting is followed by a capital in
+    /// correct English and Spanish ("SYSTEM: Please…", "Sr. Ramírez: Como…"), and run 2 rejected two correct edits for
+    /// reading that capital as a new name. The cost is accepted: a name a model slips in right after a colon ("due
+    /// Tuesday: Lucía will send it") is no longer caught here. A colon with no space after it ("9:Apple") is not a label.
     static func words(in text: String) -> [(text: String, opensSentence: Bool)] {
         var out: [(text: String, opensSentence: Bool)] = []
         var atSentenceStart = true
@@ -267,12 +271,14 @@ enum EditGates {
             out.append((word, atSentenceStart))
             atSentenceStart = false
         }
-        for ch in text {
+        let chars = Array(text)
+        for (i, ch) in chars.enumerated() {
             if ch.isLetter || isApostrophe(ch) {
                 token.append(ch)
             } else {
                 flush()
-                if ".?!".contains(ch) || ch.isNewline { atSentenceStart = true }
+                let labelColon = ch == ":" && i + 1 < chars.count && chars[i + 1].isWhitespace
+                if ".?!".contains(ch) || ch.isNewline || labelColon { atSentenceStart = true }
             }
         }
         flush()

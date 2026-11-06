@@ -314,10 +314,10 @@ final class EditGoldenSupportTests: XCTestCase {
 
     func testALengthRejectionPrintsTheRatioAndTheBand() {
         let selection = String(repeating: "ab ", count: 33) + "a"
-        let tooShort = String(repeating: "ab ", count: 12) + "a"
+        let tooShort = String(repeating: "ab ", count: 11) + "a"
         XCTAssertEqual(
             gateLine(makeCase(verb: "casual", text: selection), tooShort),
-            "gate: rejected (length ratio=0.37 band=0.4–1.4)")
+            "gate: rejected (length ratio=0.34 band=0.35–1.4)")
         let tooLong = String(repeating: "ab ", count: 43) + "a"
         XCTAssertEqual(
             gateLine(makeCase(verb: "fixGrammar", text: selection), tooLong),

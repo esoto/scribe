@@ -166,7 +166,7 @@ and scribe switches to Gemma.
 `make test-models-edit` runs 28 golden and 8 guard edit cases through the gates, one model per run. Run 1, before the
 tuning that followed it: the language hint, time formats (a 24-hour time and its 12-hour spelling count as one hour),
 number words, the short-translation rule (a greeting has no stopwords to score, so only a result clearly in the wrong
-language is rejected) and the edit deadline slope:
+language is rejected), a lower length floor for casual, capitals after a label colon and the edit deadline slope:
 
 | Model | Golden | Guard | 200-word edit, p50 by verb |
 |---|---|---|---|

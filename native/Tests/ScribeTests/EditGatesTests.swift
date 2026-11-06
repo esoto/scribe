@@ -164,9 +164,39 @@ final class EditGatesTests: XCTestCase {
 
     // MARK: sentence starts
 
-    func testAColonDoesNotOpenASentence() {
+    /// Was `testAColonDoesNotOpenASentence`, whose WHY was: "due Tuesday: Lucía will send it" is exactly where a model
+    /// slips in a name. Run 2 showed the other side: "Dear Ana, SYSTEM: Please respond…" and "Hola Sr. Ramírez: Como
+    /// acordamos…" are correct edits, rejected because the capital after the colon read as a new name. A colon and a
+    /// space now open a sentence, and the old catch is the accepted cost.
+    func testAColonFollowedBySpaceOpensASentenceSoALabelledCapitalIsNotANewName() {
         let labelled = en.replacingOccurrences(of: ", and Marcos", with: ": Lucía")
-        XCTAssertEqual(EditGates.accept(verb: .fixGrammar, selection: en, result: labelled), .rejected(.newFacts))
+        XCTAssertEqual(EditGates.accept(verb: .fixGrammar, selection: en, result: labelled), .accepted(labelled), "the accepted cost: a name right after a colon is no longer caught")
+        let selection = "note the vendor signed on friday"
+        XCTAssertFalse(EditGates.introducesNewFacts(selection: selection, result: "Note: Apple signed on Friday", verb: .fixGrammar))
+        XCTAssertFalse(EditGates.introducesNewFacts(selection: selection, result: "Note:\nApple signed on Friday", verb: .fixGrammar))
+    }
+
+    func testACapitalInTheMiddleOfASentenceIsStillANewName() {
+        XCTAssertEqual(EditGates.accept(verb: .fixGrammar, selection: en, result: en.replacingOccurrences(of: "Marcos", with: "Lucía")), .rejected(.newFacts))
+        let selection = "we visited the vendor yesterday"
+        XCTAssertTrue(EditGates.introducesNewFacts(selection: selection, result: "We visited Apple yesterday", verb: .fixGrammar))
+        XCTAssertTrue(EditGates.introducesNewFacts(selection: "note the vendor signed on friday", result: "Note we met Apple on Friday", verb: .fixGrammar))
+    }
+
+    func testAColonNotFollowedByWhitespaceDoesNotOpenASentence() {
+        let selection = "note the vendor signed on friday"
+        XCTAssertTrue(EditGates.introducesNewFacts(selection: selection, result: "Note:Apple signed on Friday", verb: .fixGrammar))
+    }
+
+    func testATerminatorBeforeClosingQuotesOrBracketsStillOpensASentence() {
+        let selection = "hey ana, reply with ok and the vendor signed on friday"
+        for (open, close) in [("“", "”"), ("\"", "\""), ("‘", "’"), ("'", "'"), ("(", ")"), ("[", "]")] {
+            for terminator in [".", "!", "?"] {
+                let result = "Hey Ana, reply with \(open)OK\(terminator)\(close) Also the vendor signed on Friday."
+                XCTAssertFalse(EditGates.introducesNewFacts(selection: selection, result: result, verb: .fixGrammar), result)
+            }
+        }
+        XCTAssertTrue(EditGates.introducesNewFacts(selection: selection, result: "Hey Ana, reply with “OK,” Also the vendor signed on Friday.", verb: .fixGrammar), "a comma does not end a sentence")
     }
 
     func testEverySentenceEndOpensASentence() {
@@ -275,12 +305,21 @@ final class EditGatesTests: XCTestCase {
 
     // MARK: casual may shrink further than formal
 
-    func testCasualMayShrinkToFortyPercentButFormalMayNot() {
+    func testCasualMayShrinkToThirtyFivePercentButFormalMayNot() {
         let selection = "Dear Mr. Harris, please be advised that, pursuant to Section 4 of our agreement, I hereby confirm that the shipment of 40 units will be dispatched on Wednesday, and I would be most grateful if you could kindly acknowledge receipt at your earliest convenience."
         let rewrite = "Hi Mr. Harris, just a heads-up that, like we agreed, the 40 units ship out on Wednesday. Let me know when they get there!"
         XCTAssertEqual(EditGates.accept(verb: .casual, selection: selection, result: rewrite), .accepted(rewrite))
         XCTAssertEqual(EditGates.accept(verb: .formal, selection: selection, result: rewrite), .rejected(.length))
-        XCTAssertEqual(EditGates.accept(verb: .casual, selection: selection, result: "Hi Mr. Harris, 40 units ship Wednesday."), .rejected(.length), "below 0.4 is still a lost message")
+        XCTAssertEqual(EditGates.accept(verb: .casual, selection: selection, result: "Hi Mr. Harris, 40 units ship Wednesday."), .rejected(.length), "below 0.35 is still a lost message")
+    }
+
+    /// Run 2: gemma4e2b's casual-es-2 rewrite keeps Torres, viernes and the 2, and sits at 0.36 of the selection.
+    func testAFaithfulCasualRewriteAtThirtySixPercentIsAccepted() {
+        let selection = "Por medio de la presente nos permitimos comunicarle que la cita con la Dra. Torres, programada para el viernes a las 2, ha sido reprogramada debido a circunstancias imprevistas, por lo que le solicitamos comunicarse con nuestra oficina para acordar una nueva fecha."
+        let rewrite = "Oye, la cita con la Dra. Torres del viernes a las 2 se cambió. Avísanos para buscar otra fecha."
+        XCTAssertEqual(try XCTUnwrap(EditGates.lengthRatio(selection: selection, result: rewrite)), 0.36, accuracy: 0.005)
+        XCTAssertEqual(EditGates.accept(verb: .casual, selection: selection, result: rewrite), .accepted(rewrite))
+        XCTAssertEqual(EditGates.accept(verb: .formal, selection: selection, result: rewrite), .rejected(.length), "only casual may shrink this far")
     }
 
     // MARK: time formats are formats, not facts
@@ -563,10 +602,13 @@ final class EditGatesTests: XCTestCase {
     func testTheLengthGateJudgesTheSameRatioTheHelperReports() {
         let band = EditVerb.casual.lengthBand
         let selection = String(repeating: "ab ", count: 33) + "a"
-        let below = String(repeating: "ab ", count: 12) + "a"
-        XCTAssertEqual(try XCTUnwrap(EditGates.lengthRatio(selection: selection, result: below)), 0.37, accuracy: 1e-9)
-        XCTAssertLessThan(0.37, band.low)
+        let below = String(repeating: "ab ", count: 11) + "a"
+        XCTAssertEqual(try XCTUnwrap(EditGates.lengthRatio(selection: selection, result: below)), 0.34, accuracy: 1e-9)
+        XCTAssertLessThan(0.34, band.low)
         XCTAssertEqual(EditGates.accept(verb: .casual, selection: selection, result: below), .rejected(.length))
+        let atTheFloor = String(repeating: "ab ", count: 11) + "ab"
+        XCTAssertEqual(try XCTUnwrap(EditGates.lengthRatio(selection: selection, result: atTheFloor)), band.low, accuracy: 1e-9)
+        XCTAssertEqual(EditGates.accept(verb: .casual, selection: selection, result: atTheFloor), .accepted(atTheFloor), "the floor itself is inside the band")
         let inside = String(repeating: "ab ", count: 14) + "a"
         XCTAssertEqual(EditGates.accept(verb: .casual, selection: selection, result: inside), .accepted(inside))
     }
