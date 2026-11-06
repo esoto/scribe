@@ -96,13 +96,13 @@ enum EditGates {
     }
 
     /// Numbers (digit runs) absent from the selection are new facts for every verb, unless they are one fact spelled
-    /// another way: leading zeros ("08:00" and "8:00 AM"), the same hour on the other clock, or the ":00" a bare hour
-    /// gains. A minute is a fact once stated: a result time "H:MM" is known when the selection states that hour with
-    /// the same minutes, or states the bare hour and the result's minutes are 00, so "at 9" may become "9:00" but
-    /// never "9:45", and "3:30" never "3:45". A result bare hour is known when the selection has that hour with or
-    /// without minutes. A capitalised word is a new fact only if the selection never had it in any case or accent (fix
-    /// grammar may capitalise "monday" or restore "Lucía"), unless the verb translates (Monday → lunes), the word opens
-    /// a sentence, or it is AM or PM in any spelling.
+    /// another way: a whole number's leading zeros ("08:00" and "8:00 AM"; a fraction keeps its zeros), the same hour on
+    /// the other clock, or the ":00" a bare hour gains. A minute is a fact once stated: a result time "H:MM" is known
+    /// when the selection states that hour with the same minutes, or states the bare hour and the result's minutes are
+    /// 00, so "at 9" may become "9:00" but never "9:45", and "3:30" never "3:45". A result bare hour is known when the
+    /// selection has that hour with or without minutes. A capitalised word is a new fact only if the selection never
+    /// had it in any case or accent (fix grammar may capitalise "monday" or restore "Lucía"), unless the verb
+    /// translates (Monday → lunes), the word opens a sentence, or it is AM or PM in any spelling.
     static func introducesNewFacts(selection: String, result: String, verb: EditVerb) -> Bool {
         if introducesNewNumbers(selection: selection, result: result) { return true }
         guard !verb.isTranslation else { return false }
@@ -139,7 +139,8 @@ enum EditGates {
     /// The result number `r` says nothing the selection number `s` did not. The hour must match (see `isSameHour`).
     /// Minutes are compared as facts: a result's minutes must be the ones `s` states, or "00" when `s` is a bare hour,
     /// because a model that writes "9" as "9:00" has added a format and no information, and "9:45" has added a time.
-    /// A bare result number has no minutes to check.
+    /// A bare result number has no minutes to check. Which selection number excuses a ":00" is not tied to the hour's own
+    /// token; the recorded hole is in the comment above `isSameHour`.
     private static func isKnown(_ r: NumberToken, from s: NumberToken) -> Bool {
         guard isSameHour(r, s) else { return false }
         guard let minutes = r.minutes else { return true }
@@ -149,21 +150,28 @@ enum EditGates {
     /// A model that translates "a las 15:00" writes "3:00 PM", and 15 and 3 are one hour, so a result number is not new
     /// when the selection names its hour on the other clock. Only PM reaches the afternoon ("3 AM" is 03:00), and only
     /// 1…11 PM against 13…23, because 12 PM is already 12; any other mismatch is a changed hour, which is what this gate
-    /// is for.
+    /// is for. Equal digits are one hour unless both sides carry a marker and the markers differ: "3 AM" and "3 PM" are
+    /// twelve hours apart, as "3 AM" and 15 already were. A side with no marker ("a las 3") says nothing against either.
     ///
-    /// Only the 12-hour side has evidence that the number is a time: the PM marker. A result 13…23 is excused by a
-    /// selection "3 PM" and a result "3 PM" by a selection 15, but nothing says the 15 is a clock hour, so "deliver the
-    /// 15 boxes" → "deliver the 15 boxes at 3 PM" passes with an invented time. The hole needs a coincidence of values
-    /// and is recorded here, not closed.
+    /// Two holes are recorded here, not closed; each needs a coincidence of values.
+    /// - Only the 12-hour side has evidence that the number is a time: the PM marker. A result 13…23 is excused by a
+    ///   selection "3 PM" and a result "3 PM" by a selection 15, but nothing says the 15 is a clock hour, so "deliver the
+    ///   15 boxes" → "deliver the 15 boxes at 3 PM" passes with an invented time.
+    /// - The ":00" a bare hour may gain (`isKnown`) is excused by any bare number of that value in the selection, not
+    ///   only the hour's own, so "the 9 reports are due at 9:30" → "the 9 reports are due at 9:00" passes.
     private static func isSameHour(_ r: NumberToken, _ s: NumberToken) -> Bool {
-        if r.digits == s.digits { return true }
+        if r.digits == s.digits {
+            guard let resultMarker = r.meridiem, let selectionMarker = s.meridiem else { return true }
+            return resultMarker == selectionMarker
+        }
         guard let hour = Int(r.digits), let other = Int(s.digits) else { return false }
         if r.meridiem == .pm, (1...11).contains(hour), other == hour + 12 { return true }
         return (13...23).contains(hour) && s.meridiem == .pm && other == hour - 12
     }
 
-    /// The digit runs of `text` with leading zeros stripped; the ":MM" (":SS") after a run is part of that run, so
-    /// "9:45" lists as 9. The minutes are kept in `numberTokens` for `introducesNewFacts`, which judges them.
+    /// The digit runs of `text`, whole numbers with leading zeros stripped and a fraction's digits as written; the ":MM"
+    /// (":SS") after a run is part of that run, so "9:45" lists as 9. The minutes are kept in `numberTokens` for
+    /// `introducesNewFacts`, which judges them.
     static func numbers(in text: String) -> [String] {
         numberTokens(in: text).map(\.digits)
     }
@@ -180,17 +188,26 @@ enum EditGates {
             var end = i
             while end < chars.count, chars[end].isNumber { end += 1 }
             let (minutes, afterMinutes) = minutesAfter(chars, from: end)
+            let run = String(chars[i..<end])
             tokens.append(
                 NumberToken(
-                    digits: strippingLeadingZeros(String(chars[i..<end])), minutes: minutes,
+                    digits: followsDecimalSeparator(chars, at: i) ? run : strippingLeadingZeros(run), minutes: minutes,
                     meridiem: meridiem(in: chars, from: afterMinutes)))
             i = afterMinutes
         }
         return tokens
     }
 
-    /// Spanish 24-hour text writes "08:00" and a translation writes "8:00 AM": the zero is spelling, not a fact. A run of
-    /// zeros stays one zero, so "0" is still a number and never an empty one.
+    /// A digit run that directly follows "." or "," after a digit is a fraction ("0.05", "2,05"), and its digits are
+    /// compared as written: "0.5" and "0.05" differ by a factor of ten, and the tokenizer sees them as the runs "0" and
+    /// "5" against "0" and "05". A "." that follows a letter or a space starts no fraction.
+    private static func followsDecimalSeparator(_ chars: [Character], at i: Int) -> Bool {
+        i >= 2 && (chars[i - 1] == "." || chars[i - 1] == ",") && chars[i - 2].isNumber
+    }
+
+    /// Spanish 24-hour text writes "08:00" and a translation writes "8:00 AM": the zero is spelling, not a fact. That
+    /// holds for a whole number only (see `followsDecimalSeparator`). A run of zeros stays one zero, so "0" is still a
+    /// number and never an empty one.
     private static func strippingLeadingZeros(_ digits: String) -> String {
         let rest = digits.drop(while: { $0 == "0" })
         return rest.isEmpty ? "0" : String(rest)
@@ -239,10 +256,11 @@ enum EditGates {
     private static let meridiems: Set<String> = ["am", "pm"]
 
     /// "a.m.", "p.m." and the RAE's "a. m." (any case) become "am." and "pm.", so their letters are one word that
-    /// `meridiems` excuses and the final dot still ends a sentence, as it did before the marker was excused.
+    /// `meridiems` excuses and the final dot still ends a sentence, as it did before the marker was excused. The marker
+    /// may follow a digit ("10P.M."), which a word boundary would not allow, so only a letter before it rules it out.
     private static func joiningMeridiemDots(_ text: String) -> String {
         text.replacingOccurrences(
-            of: "\\b([ap])\\.[^\\S\\r\\n]*(m)\\b", with: "$1$2", options: [.regularExpression, .caseInsensitive])
+            of: "(?<![A-Za-z])([ap])\\.[^\\S\\r\\n]*(m)\\b", with: "$1$2", options: [.regularExpression, .caseInsensitive])
     }
 
     private static func isApostrophe(_ ch: Character) -> Bool { ch == "'" || ch == "’" }

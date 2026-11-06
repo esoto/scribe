@@ -81,7 +81,7 @@ final class EditPipeline {
         frontmost: @escaping () -> pid_t? = { nil },
         replacementPairs: @escaping () -> [ReplacementPair] = { [] },
         sinks: EditSinks,
-        runWithDeadline: @escaping DeadlineRunner = { try await withDeadline($0, $1) },
+        runWithDeadline: DeadlineRunner? = nil,
         onLog: ((String) -> Void)? = nil
     ) {
         self.recorder = recorder
@@ -97,7 +97,9 @@ final class EditPipeline {
         self.frontmost = frontmost
         self.replacementPairs = replacementPairs
         self.sinks = sinks
-        self.runWithDeadline = runWithDeadline
+        // Resolved here, not as a default argument, so a caller that passes nothing (the app and the timeout tests)
+        // gets the one production runner and a harness never keeps a copy of it.
+        self.runWithDeadline = runWithDeadline ?? { try await withDeadline($0, $1) }
         self.onLog = onLog
     }
 

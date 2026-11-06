@@ -172,8 +172,24 @@ final class EditGatesTests: XCTestCase {
         let labelled = en.replacingOccurrences(of: ", and Marcos", with: ": Lucía")
         XCTAssertEqual(EditGates.accept(verb: .fixGrammar, selection: en, result: labelled), .accepted(labelled), "the accepted cost: a name right after a colon is no longer caught")
         let selection = "note the vendor signed on friday"
-        XCTAssertFalse(EditGates.introducesNewFacts(selection: selection, result: "Note: Apple signed on Friday", verb: .fixGrammar))
-        XCTAssertFalse(EditGates.introducesNewFacts(selection: selection, result: "Note:\nApple signed on Friday", verb: .fixGrammar))
+        // One line each, so only the colon rule can excuse the capital: a newline would also open the sentence.
+        for space in [" ", "\u{00A0}", "\t"] {
+            let result = "Note:\(space)Apple signed on Friday"
+            XCTAssertFalse(EditGates.introducesNewFacts(selection: selection, result: result, verb: .fixGrammar), result.debugDescription)
+        }
+    }
+
+    /// The scan looks one character past the colon, so a text that ends there must stop at the end instead of reading
+    /// past it. A selection that ends in a colon ("Here is the list:") is ordinary.
+    func testATextThatEndsInAColonIsScannedWithoutReadingPastTheEnd() {
+        XCTAssertEqual(EditGates.words(in: "Note:").map(\.text), ["Note"])
+        XCTAssertEqual(EditGates.words(in: "Note:").map(\.opensSentence), [true])
+        XCTAssertEqual(EditGates.words(in: ":").count, 0)
+        XCTAssertEqual(EditGates.words(in: "Note :").map(\.text), ["Note"])
+        let selection = "Here is the list of the three vendors we spoke to last week:"
+        XCTAssertFalse(EditGates.introducesNewFacts(selection: selection, result: selection, verb: .fixGrammar))
+        XCTAssertEqual(EditGates.accept(verb: .fixGrammar, selection: selection, result: selection), .accepted(selection))
+        XCTAssertFalse(EditGates.introducesNewFacts(selection: "here is the list of the vendors", result: "Here is the list of the vendors:", verb: .fixGrammar), "a result that ends in a colon")
     }
 
     func testACapitalInTheMiddleOfASentenceIsStillANewName() {
@@ -419,6 +435,32 @@ final class EditGatesTests: XCTestCase {
         XCTAssertTrue(EditGates.introducesNewFacts(selection: "ticket 1", result: "ticket 10", verb: .fixGrammar))
     }
 
+    /// "0.05" tokenises as the runs "0" and "05". Stripping the zero of "05" would make it "5" and "0.5" the same number,
+    /// a tenfold change in a dose or a rate, so only a whole number sheds its leading zeros.
+    func testAFractionKeepsItsZeros() {
+        let changed = [
+            ("Take 0.5 mg twice a day", "Take 0.05 mg twice a day"), ("Take 0.05 mg twice a day", "Take 0.5 mg twice a day"),
+            ("Tome 2,5 % cada día", "Tome 2,05 % cada día"), ("Tome 2,05 % cada día", "Tome 2,5 % cada día"),
+            ("about 1.5 million", "about 1.05 million"), ("about 1.05 million", "about 1.5 million"),
+            ("about 3.50 percent", "about 3.5 percent"), ("a total of 12.005", "a total of 12.05"),
+        ]
+        for (selection, result) in changed {
+            XCTAssertTrue(EditGates.introducesNewFacts(selection: selection, result: result, verb: .fixGrammar), "\(selection) → \(result)")
+        }
+        let long = "The nurse will give 0.5 mg of the drug twice a day, and Marcos will check the chart on Thursday."
+        XCTAssertEqual(EditGates.accept(verb: .fixGrammar, selection: long, result: long.replacingOccurrences(of: "0.5", with: "0.05")), .rejected(.newFacts))
+        XCTAssertEqual(EditGates.accept(verb: .fixGrammar, selection: long, result: long), .accepted(long))
+        XCTAssertEqual(EditGates.numbers(in: "0.5 and 0.05 and 2,05 and 2,5"), ["0", "5", "0", "05", "2", "05", "2", "5"], "the fraction's digits are listed as written")
+    }
+
+    func testOnlyAFractionIsExemptFromTheLeadingZeroRule() {
+        XCTAssertFalse(EditGates.introducesNewFacts(selection: "a las 08:00", result: "at 8:00 AM", verb: .toEnglish), "minutes are not a fraction")
+        XCTAssertFalse(EditGates.introducesNewFacts(selection: "Take 0.05 mg", result: "Take 0.05 mg", verb: .fixGrammar), "a fraction as written is the same fraction")
+        XCTAssertFalse(EditGates.introducesNewFacts(selection: "ticket 007 and 0.5", result: "ticket 7 and 0.5", verb: .fixGrammar), "a whole number next to a fraction still sheds its zeros")
+        XCTAssertFalse(EditGates.introducesNewFacts(selection: "agent.007", result: "agent 7", verb: .fixGrammar), "a dot that does not follow a digit starts no fraction")
+        XCTAssertFalse(EditGates.introducesNewFacts(selection: "item 12. 007 is next", result: "item 12. 7 is next", verb: .fixGrammar), "a space after the dot ends the number")
+    }
+
     func testTheRAESpellingWithASpaceAfterEachDotIsAMeridiemMarker() {
         for marker in ["p. m.", "P. M.", "p. m", "P.M.", "p.\u{00A0}m."] {
             XCTAssertFalse(EditGates.introducesNewFacts(selection: "a las 15:00", result: "at 3:00 \(marker)", verb: .toEnglish), marker.debugDescription)
@@ -436,6 +478,22 @@ final class EditGatesTests: XCTestCase {
         let spanish = "La llamada con Marcos Álvarez es el jueves a las 15:00, así que por favor conéctense cinco minutos antes y traigan el contrato firmado."
         let english = "The call with Marcos Álvarez is on Thursday at 3:00 p. m., so please join five minutes early and bring the signed contract."
         XCTAssertEqual(EditGates.accept(verb: .toEnglish, selection: spanish, result: english), .accepted(english))
+    }
+
+    /// "10P.M." has no space and no word boundary before the P, but it is the marker the clock reads, so its letters are
+    /// not a new capitalised word either.
+    func testADottedMarkerGluedToItsNumberIsNotANewCapitalisedWord() {
+        let pairs = [("pm", "10P.M."), ("pm", "10p.m."), ("pm", "10P. M."), ("am", "10A.M."), ("am", "10a.m.")]
+        for (marker, glued) in pairs {
+            let selection = "Marcos presents the quarterly numbers on Thursday at 10 \(marker) in the main room."
+            let result = "Marcos presents the quarterly numbers on Thursday at \(glued) in the main room."
+            XCTAssertEqual(EditGates.accept(verb: .fixGrammar, selection: selection, result: result), .accepted(result), glued)
+        }
+        let selection = "Marcos presents the quarterly numbers on Thursday at 10 in the main room."
+        for invented in ["10Pam", "10 Pam", "10Amy"] {
+            let result = selection.replacingOccurrences(of: "at 10", with: "at \(invented)")
+            XCTAssertEqual(EditGates.accept(verb: .fixGrammar, selection: selection, result: result), .rejected(.newFacts), invented)
+        }
     }
 
     func testAWordAfterASpacedMeridiemStillOpensASentence() {
@@ -531,6 +589,35 @@ final class EditGatesTests: XCTestCase {
         let huge = String(repeating: "9", count: 30)
         XCTAssertTrue(EditGates.introducesNewFacts(selection: "a las 15", result: "at \(huge) pm", verb: .toEnglish))
         XCTAssertFalse(EditGates.introducesNewFacts(selection: "ticket \(huge) a las 15", result: "ticket \(huge) at 3 pm", verb: .toEnglish))
+    }
+
+    /// Equal digits are one hour unless both sides name a marker and the markers differ: "3 AM" and "3 PM" are twelve
+    /// hours apart, and "3 AM" against "15:00" was already a new fact for the same reason.
+    func testSwappingTheMeridiemOnTheSameHourIsANewFact() {
+        let long = "The call is on Thursday at 3 AM, so please join five minutes early and bring the signed contract."
+        XCTAssertEqual(EditGates.accept(verb: .fixGrammar, selection: long, result: long.replacingOccurrences(of: "3 AM", with: "3 PM")), .rejected(.newFacts))
+        XCTAssertEqual(EditGates.accept(verb: .fixGrammar, selection: long, result: long), .accepted(long))
+        let swapped = [("the call is at 3 AM", "the call is at 3 PM"), ("at 3 pm", "at 3 a.m."), ("at 12 am", "at 12 pm"), ("at 3:30 PM", "at 3:30 AM")]
+        for (selection, result) in swapped {
+            XCTAssertTrue(EditGates.introducesNewFacts(selection: selection, result: result, verb: .fixGrammar), "\(selection) → \(result)")
+        }
+        let same = [("at 3 PM", "at 3 p.m."), ("at 3 p. m.", "at 3 PM"), ("a las 3", "at 3 AM"), ("at 3 AM", "at 3"), ("at 3 PM", "at 3:00 PM")]
+        for (selection, result) in same {
+            XCTAssertFalse(EditGates.introducesNewFacts(selection: selection, result: result, verb: .toEnglish), "\(selection) → \(result)")
+        }
+        XCTAssertFalse(EditGates.introducesNewFacts(selection: "at 3 PM", result: "a las 15:00", verb: .toSpanish))
+        XCTAssertTrue(EditGates.introducesNewFacts(selection: "at 3 AM", result: "a las 15:00", verb: .toSpanish))
+    }
+
+    /// A RECORDED HOLE, not a rule: ":00" is excused by any bare number of the same value, so the 9 of "9 reports"
+    /// excuses an invented "9:00" for the "9:30". It needs a coincidence of values and is recorded above `isSameHour`.
+    func testRecordedHoleABareCountOfTheSameValueExcusesAnOnTheHourMinuteForm() {
+        XCTAssertFalse(
+            EditGates.introducesNewFacts(selection: "the 9 reports are due at 9:30", result: "the 9 reports are due at 9:00", verb: .fixGrammar),
+            "recorded hole: 9:30 became 9:00 and the gate does not see it")
+        XCTAssertTrue(
+            EditGates.introducesNewFacts(selection: "the 9 reports are due at 9:30", result: "the 9 reports are due at 9:45", verb: .fixGrammar),
+            "the hole is only the on-the-hour form")
     }
 
     func testOnlyPMReachesTheAfternoonHours() {

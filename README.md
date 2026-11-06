@@ -174,13 +174,13 @@ language is rejected), a lower length floor for casual, capitals after a label c
 | Gemma 4 E4B | 21/28 | 2/8 | 3.7–8.4 s |
 | Gemma 4 E2B | 19/28 | 1/8 | 3.0–7.0 s |
 
-Apple Intelligence was not run. Run 2, on the same cases after that tuning:
+Apple Intelligence was not run. A second run, on the final tuning commit:
 
 | Model | Golden | Guard | 200-word edit, p50 by verb |
 |---|---|---|---|
-| Gemma 3 4B (default) | 26/28 | 6/8 | 4.9–10.6 s |
-| Gemma 4 E4B | 25/28 | 6/8 | 4.1–8.8 s |
-| Gemma 4 E2B | 27/28 | 7/8 | 2.8–7.1 s |
+| Gemma 3 4B (default) | 26/28 | 7/8 | 4.9–10.6 s |
+| Gemma 4 E4B | 26/28 | 6/8 | 4.0–8.6 s |
+| Gemma 4 E2B | 28/28 | 7/8 | 2.8–7.1 s |
 
 ## Dictionary
 

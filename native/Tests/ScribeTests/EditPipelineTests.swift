@@ -71,7 +71,8 @@ final class EditPipelineTests: XCTestCase {
         modelIsGemma4: Bool = false,
         runner: ((@escaping () async -> Void) -> Void)? = nil,
         clock: FakeClock = FakeClock(),
-        runWithDeadline: @escaping EditPipeline.DeadlineRunner = { try await withDeadline($0, $1) }
+        // nil is the pipeline's own production runner: the timeout tests must run it, not a copy kept in this harness.
+        runWithDeadline: EditPipeline.DeadlineRunner? = nil
     ) -> Harness {
         let states = Box<PipelineState>()
         let notices = Box<String>()
