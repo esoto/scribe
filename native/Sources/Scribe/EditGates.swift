@@ -12,17 +12,31 @@ enum EditVerdict: Equatable {
 /// Deterministic checks on an edit result. The first failure rejects; a rejection pastes nothing, so these are
 /// deliberately strict — a wrong edit in the user's document costs more than a retry.
 enum EditGates {
-    /// Under this many words a translation skips the stopword gate: a greeting scores about 0, so ±2 would reject it.
+    /// Under this many words a translation is rejected only for a score clearly on the wrong side: a greeting scores
+    /// about 0, so requiring ±2 would reject every correct one, but an English "translation" that scores 2 is still English.
     static let minWordsForTranslationLanguageGate = 6
 
     static func accept(verb: EditVerb, selection: String, result: String) -> EditVerdict {
         let out = normalize(result, verb: verb)
         guard !out.isEmpty else { return .rejected(.empty) }
         guard !answered(out, selection: selection, verb: verb) else { return .rejected(.answered) }
-        guard Gates.lengthOk(raw: selection, cleaned: out, band: verb.lengthBand) else { return .rejected(.length) }
+        guard lengthOk(verb: verb, selection: selection, result: out) else { return .rejected(.length) }
         guard languageOk(selection: selection, result: out, verb: verb) else { return .rejected(.language) }
         guard !introducesNewFacts(selection: selection, result: out, verb: verb) else { return .rejected(.newFacts) }
         return .accepted(out)
+    }
+
+    /// Result characters over selection characters, the number the length gate judges; nil when either is empty.
+    /// Pass the normalised result, as `accept` does.
+    static func lengthRatio(selection: String, result: String) -> Double? {
+        guard !selection.isEmpty, !result.isEmpty else { return nil }
+        return Double(result.count) / Double(selection.count)
+    }
+
+    private static func lengthOk(verb: EditVerb, selection: String, result: String) -> Bool {
+        guard let ratio = lengthRatio(selection: selection, result: result) else { return false }
+        let band = verb.lengthBand
+        return band.low <= ratio && ratio <= band.high
     }
 
     /// A list keeps its line structure (at most one blank line in a row); everything else collapses like cleanup does.
@@ -63,8 +77,8 @@ enum EditGates {
 
     static func languageOk(selection: String, result: String, verb: EditVerb) -> Bool {
         switch verb {
-        case .toSpanish: return isTooShortToScore(result) || Gates.langScore(result) <= -2
-        case .toEnglish: return isTooShortToScore(result) || Gates.langScore(result) >= 2
+        case .toSpanish: return isTooShortToScore(result) ? Gates.langScore(result) < 2 : Gates.langScore(result) <= -2
+        case .toEnglish: return isTooShortToScore(result) ? Gates.langScore(result) > -2 : Gates.langScore(result) >= 2
         default: return Gates.languageConsistent(raw: selection, cleaned: result)
         }
     }
@@ -75,14 +89,15 @@ enum EditGates {
 
     /// Numbers (digit runs) absent from the selection are new facts for every verb. A capitalised word is a new fact
     /// only if the selection never had it in any case or accent (fix grammar may capitalise "monday" or restore "Lucía"),
-    /// unless the verb translates (Monday → lunes) or the word opens a sentence.
+    /// unless the verb translates (Monday → lunes), the word opens a sentence, or it is AM or PM in any spelling.
     static func introducesNewFacts(selection: String, result: String, verb: EditVerb) -> Bool {
         let selectionNumbers = Set(numbers(in: selection))
         if numbers(in: result).contains(where: { !selectionNumbers.contains($0) }) { return true }
         guard !verb.isTranslation else { return false }
         let known = Set(words(in: selection).flatMap { [VoiceCommand.fold($0.text), VoiceCommand.fold(stemAndTail($0.text).stem)] })
-        return words(in: result).contains { word in
+        return words(in: joiningMeridiemDots(result)).contains { word in
             guard !word.opensSentence, word.text.first?.isUppercase == true else { return false }
+            if meridiems.contains(word.text.lowercased()) { return false }
             if known.contains(VoiceCommand.fold(word.text)) { return false }
             // "I'll" and "Marcos's" are a known word plus a clitic; "O'Brien" is not "O" plus anything.
             let (stem, tail) = stemAndTail(word.text)
@@ -90,8 +105,43 @@ enum EditGates {
         }
     }
 
+    /// The digit runs of `text`. A run followed by ":MM" (exactly two digits, so "9:5" and "9:456" do not count) is an
+    /// hour, and the minutes are a format, not a fact: "a las 9" read back as "9:00" is the same hour, and so is "9:45",
+    /// because the gate exists to catch a changed hour and not to audit the minutes a model chose to spell out.
     static func numbers(in text: String) -> [String] {
-        text.split(whereSeparator: { !$0.isNumber }).map(String.init)
+        let chars = Array(text)
+        var runs: [String] = []
+        var i = 0
+        while i < chars.count {
+            guard chars[i].isNumber else {
+                i += 1
+                continue
+            }
+            var end = i
+            while end < chars.count, chars[end].isNumber { end += 1 }
+            runs.append(String(chars[i..<end]))
+            i = indexAfterMinutes(chars, from: end)
+        }
+        return runs
+    }
+
+    /// Skips each ":MM" that follows, so "9:00:00" is the hour 9 too.
+    private static func indexAfterMinutes(_ chars: [Character], from start: Int) -> Int {
+        var i = start
+        while i + 2 < chars.count, chars[i] == ":", chars[i + 1].isNumber, chars[i + 2].isNumber,
+            !(i + 3 < chars.count && chars[i + 3].isNumber)
+        {
+            i += 3
+        }
+        return i
+    }
+
+    private static let meridiems: Set<String> = ["am", "pm"]
+
+    /// "a.m." and "p.m." (any case) become "am." and "pm.", so their letters are one word that `meridiems` excuses
+    /// and the final dot still ends a sentence, as it did before the marker was excused.
+    private static func joiningMeridiemDots(_ text: String) -> String {
+        text.replacingOccurrences(of: "\\b([ap])\\.(m)\\b", with: "$1$2", options: [.regularExpression, .caseInsensitive])
     }
 
     private static func isApostrophe(_ ch: Character) -> Bool { ch == "'" || ch == "’" }

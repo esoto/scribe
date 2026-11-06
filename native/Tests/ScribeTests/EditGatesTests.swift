@@ -202,7 +202,7 @@ final class EditGatesTests: XCTestCase {
         XCTAssertEqual(EditGates.accept(verb: .formal, selection: es, result: "O sea, el informe de O'Bri sale el martes."), .rejected(.newFacts))
     }
 
-    // MARK: short translations skip the stopword gate — a greeting has no stopwords to score
+    // MARK: short translations are held to the stopword score only on the wrong side — a greeting has no stopwords to score
 
     func testAShortTranslationIsAcceptedOnLanguage() {
         // "a" sits in both stopword lists, so these greetings miss the ±2 threshold in either direction
@@ -261,5 +261,129 @@ final class EditGatesTests: XCTestCase {
         XCTAssertEqual(EditGates.accept(verb: .casual, selection: selection, result: rewrite), .accepted(rewrite))
         XCTAssertEqual(EditGates.accept(verb: .formal, selection: selection, result: rewrite), .rejected(.length))
         XCTAssertEqual(EditGates.accept(verb: .casual, selection: selection, result: "Hi Mr. Harris, 40 units ship Wednesday."), .rejected(.length), "below 0.4 is still a lost message")
+    }
+
+    // MARK: time formats are formats, not facts
+
+    func testABareHourAndItsMinutesFormAreTheSameFact() {
+        let selection = "Marcos presents the quarterly numbers on Thursday at 9 in the main room."
+        let withMinutes = "Marcos presents the quarterly numbers on Thursday at 9:00 in the main room."
+        XCTAssertEqual(EditGates.accept(verb: .fixGrammar, selection: selection, result: withMinutes), .accepted(withMinutes))
+
+        let spanish = "Nos vemos el jueves a las 9 en la sala principal para revisar los números."
+        let spanishWithMinutes = "Nos vemos el jueves a las 9:00 en la sala principal para revisar los números."
+        XCTAssertEqual(EditGates.accept(verb: .formal, selection: spanish, result: spanishWithMinutes), .accepted(spanishWithMinutes))
+    }
+
+    func testAnHourWithMeridiemGainsItsMinutesWithoutGainingAFact() {
+        let selection = "The call is on Thursday at 3 pm, so please join five minutes early."
+        let result = "The call is on Thursday at 3:00 PM, so please join five minutes early."
+        XCTAssertEqual(EditGates.accept(verb: .formal, selection: selection, result: result), .accepted(result))
+    }
+
+    func testTheSelectionsMinutesFormCountsAsItsBareHourToo() {
+        let selection = "Marcos presents the quarterly numbers on Thursday at 3:30 in the main room."
+        let bare = "Marcos presents the quarterly numbers on Thursday at 3 in the main room."
+        XCTAssertEqual(EditGates.accept(verb: .fixGrammar, selection: selection, result: bare), .accepted(bare))
+        XCTAssertEqual(EditGates.accept(verb: .fixGrammar, selection: selection, result: selection), .accepted(selection))
+    }
+
+    /// Minutes are a format: "9" read back as "9:45" still names the hour the speaker named, and the gate's job is to
+    /// catch a changed hour, not to audit the minutes a model chose to spell. Documented here so a stricter gate is a decision.
+    func testMinutesTheSelectionNeverStatedAreAcceptedBecauseTheyAreAFormat() {
+        let selection = "Marcos presents the quarterly numbers on Thursday at 9 in the main room."
+        let result = "Marcos presents the quarterly numbers on Thursday at 9:45 in the main room."
+        XCTAssertEqual(EditGates.accept(verb: .fixGrammar, selection: selection, result: result), .accepted(result))
+        XCTAssertEqual(EditGates.numbers(in: "at 9:45 and 14:05"), ["9", "14"])
+    }
+
+    func testAGenuinelyNewHourOrNumberIsStillRejectedInAnyTimeFormat() {
+        let selection = "Marcos presents the quarterly numbers on Thursday at 9 in the main room."
+        for changed in ["at 10:00", "at 10", "at 9:00 for 5 people", "at 19:00"] {
+            let result = selection.replacingOccurrences(of: "at 9", with: changed)
+            XCTAssertEqual(EditGates.accept(verb: .fixGrammar, selection: selection, result: result), .rejected(.newFacts), changed)
+        }
+        // A time-like run is only minutes when it is exactly two digits: "9:5" is two numbers, "9:456" is too.
+        XCTAssertEqual(EditGates.numbers(in: "at 9:5 or 9:456"), ["9", "5", "9", "456"])
+    }
+
+    func testMeridiemMarkersAreNeverNewCapitalisedWords() {
+        let selection = "Marcos presents the quarterly numbers on Thursday at 10 in the main room."
+        for marker in ["AM", "PM", "am", "pm", "Am", "Pm", "a.m.", "p.m.", "A.M.", "P.M."] {
+            let result = selection.replacingOccurrences(of: "at 10", with: "at 10 \(marker)")
+            XCTAssertEqual(EditGates.accept(verb: .fixGrammar, selection: selection, result: result), .accepted(result), marker)
+        }
+    }
+
+    func testOnlyTheMeridiemMarkersAreExcusedNotAnyCapitalisedLookalike() {
+        let selection = "Marcos presents the quarterly numbers on Thursday at 10 in the main room."
+        for invented in ["Pam", "Pma", "Amy"] {
+            let result = selection.replacingOccurrences(of: "at 10", with: "at 10 with \(invented)")
+            XCTAssertEqual(EditGates.accept(verb: .formal, selection: selection, result: result), .rejected(.newFacts), invented)
+        }
+    }
+
+    func testAWordAfterADottedMeridiemStillOpensASentence() {
+        let selection = "Marcos presents the quarterly numbers on Thursday at 10 in the main room and we start on time."
+        let result = "Marcos presents the quarterly numbers on Thursday at 10 a.m. We start on time in the main room."
+        XCTAssertEqual(EditGates.accept(verb: .fixGrammar, selection: selection, result: result), .accepted(result), "the dot of a.m. ends the sentence, as it did before the marker was excused")
+    }
+
+    // MARK: short translations are rejected only on the wrong side of the stopword score
+
+    func testAShortTranslationIsRejectedWhenItsScoreIsClearlyOnTheWrongSide() {
+        XCTAssertEqual(Gates.langScore("The team is here now"), 2)
+        XCTAssertEqual(EditGates.accept(verb: .toSpanish, selection: "Good morning, team!", result: "The team is here now"), .rejected(.language), "English with score 2 is not Spanish")
+        XCTAssertEqual(Gates.langScore("El equipo está aquí"), -2)
+        XCTAssertEqual(EditGates.accept(verb: .toEnglish, selection: "¡Buenos días, equipo!", result: "El equipo está aquí"), .rejected(.language), "Spanish with score -2 is not English")
+    }
+
+    func testAShortTranslationOneStepFromNeutralIsStillAccepted() {
+        XCTAssertEqual(Gates.langScore("The team over here"), 1)
+        XCTAssertEqual(EditGates.accept(verb: .toSpanish, selection: "Meet the team here", result: "The team over here"), .accepted("The team over here"))
+        XCTAssertEqual(Gates.langScore("El equipo aquí"), -1)
+        XCTAssertEqual(EditGates.accept(verb: .toEnglish, selection: "¡Buenos días, equipo!", result: "El equipo aquí"), .accepted("El equipo aquí"))
+    }
+
+    /// The short rule follows the RESULT's word count, as the six-word rule always has: a six-word selection that
+    /// translates into five words is held to the wrong-side check, not to the ±2 threshold.
+    func testASixWordSelectionWithAFiveWordResultFollowsTheShortRule() {
+        let selection = "Hello, good morning to everyone here"
+        XCTAssertEqual(selection.split(separator: " ").count, 6)
+        let five = "Hola, muy buenos días, queridos"
+        XCTAssertEqual(five.split(separator: " ").count, 5)
+        XCTAssertEqual(Gates.langScore(five), 0)
+        XCTAssertEqual(EditGates.accept(verb: .toSpanish, selection: selection, result: five), .accepted(five), "score 0 on five words is neutral, not a failure")
+        let englishFive = "The conference attendees are present"
+        XCTAssertEqual(englishFive.split(separator: " ").count, 5)
+        XCTAssertEqual(EditGates.accept(verb: .toSpanish, selection: selection, result: englishFive), .rejected(.language), "five words, but clearly English")
+    }
+
+    func testAFourWordNonTranslationFlipIsStillRejected() {
+        let selection = "The team is here"
+        let flipped = "El equipo está aquí"
+        XCTAssertEqual(selection.split(separator: " ").count, 4)
+        XCTAssertEqual(EditGates.accept(verb: .formal, selection: selection, result: flipped), .rejected(.language), "short formal edits keep the consistency gate")
+        XCTAssertEqual(EditGates.accept(verb: .formal, selection: selection, result: selection), .accepted(selection))
+    }
+
+    // MARK: the ratio the length gate used
+
+    func testLengthRatioIsResultCharactersOverSelectionCharacters() {
+        XCTAssertEqual(try XCTUnwrap(EditGates.lengthRatio(selection: "abcd", result: "ab")), 0.5, accuracy: 1e-9)
+        XCTAssertEqual(try XCTUnwrap(EditGates.lengthRatio(selection: "ab", result: "abcd")), 2.0, accuracy: 1e-9)
+        XCTAssertNil(EditGates.lengthRatio(selection: "", result: "ab"))
+        XCTAssertNil(EditGates.lengthRatio(selection: "ab", result: ""))
+    }
+
+    func testTheLengthGateJudgesTheSameRatioTheHelperReports() {
+        let band = EditVerb.casual.lengthBand
+        let selection = String(repeating: "ab ", count: 33) + "a"
+        let below = String(repeating: "ab ", count: 12) + "a"
+        XCTAssertEqual(try XCTUnwrap(EditGates.lengthRatio(selection: selection, result: below)), 0.37, accuracy: 1e-9)
+        XCTAssertLessThan(0.37, band.low)
+        XCTAssertEqual(EditGates.accept(verb: .casual, selection: selection, result: below), .rejected(.length))
+        let inside = String(repeating: "ab ", count: 14) + "a"
+        XCTAssertEqual(EditGates.accept(verb: .casual, selection: selection, result: inside), .accepted(inside))
     }
 }

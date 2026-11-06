@@ -25,6 +25,13 @@ final class EditPipeline {
     static let notAnEditHint = "Not an edit — say shorter, formal, to Spanish…"
     static let noModelHint = "No cleanup model — pick one in Settings › Models"
 
+    /// Gemma 3 needs 10.35 s for a 200-word translation, which dictation's 0.03 s a word (10.5 s) all but spends.
+    static let secondsPerWordOverFifty = 0.045
+
+    static func deadline(words: Int, base: Double) -> Double {
+        DictationPipeline.cleanupDeadline(words: words, base: base, perWord: secondsPerWordOverFifty)
+    }
+
     private let recorder: RecorderLike
     private var stt: SttEngine
     private let backend: () -> (any CleanupModelBackend)?
@@ -257,15 +264,16 @@ final class EditPipeline {
         let words = selection.text.split(whereSeparator: { $0.isWhitespace }).count
         // The first edit after launch or an idle unload builds its warm prefix inside the call; E5 measures whether
         // that needs a pre-warm.
-        let deadline = DictationPipeline.cleanupDeadline(words: words, base: config.cleanupTimeout)
+        let deadline = Self.deadline(words: words, base: config.cleanupTimeout)
         let maxTokens = EditPrompt.maxTokens(verb: verb, inputTokens: selection.text.count / 4)
+        let instruction = EditPrompt.instruction(verb: verb, selection: selection.text)
         let t1 = clock()
         let verdict: EditVerdict
         var resultChars = 0
         do {
             // withDeadline also cancels the call when the deadline fires, so Gemma's token loop frees the model.
             let out = try await withDeadline(deadline) {
-                try await backend.edit(instruction: verb.instruction, text: selection.text, maxTokens: maxTokens)
+                try await backend.edit(instruction: instruction, text: selection.text, maxTokens: maxTokens)
             }
             resultChars = out.count
             verdict = EditGates.accept(verb: verb, selection: selection.text, result: out)

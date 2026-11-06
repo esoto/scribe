@@ -136,7 +136,7 @@ final class EditGoldenSetTests: XCTestCase {
         }
     }
 
-    /// Decided, no longer a hole: under six words gate 4 is skipped (spec §4), so a greeting passes on its phrases.
+    /// Decided, no longer a hole: under six words gate 4 rejects only a score clearly on the wrong side (spec §4), so a greeting passes on its phrases.
     func testShortTranslationsAreAcceptedOnLanguageAndStillHeldToTheirPhrases() throws {
         let toSpanish = try goldenCase("tospanish-en-short")
         XCTAssertTrue(editCasePassed(evaluateEditCase(toSpanish, rawOutput: "¡Buenos días, equipo!")))
@@ -284,6 +284,119 @@ final class EditGoldenSetTests: XCTestCase {
             let text = testCase.text.lowercased()
             for phrase in testCase.mustNotContain {
                 XCTAssertFalse(text.contains(phrase.lowercased()), "\(testCase.id) forbids '\(phrase)', which the selection contains")
+            }
+        }
+    }
+
+    // MARK: numbers may be spelled out (must_contain_any)
+
+    private var bothSets: [(file: String, cases: [EditCase])] {
+        get throws { try ["edit.json", "edit_guard.json"].map { ($0, try loadEditSet($0).cases) } }
+    }
+
+    private func isDigits(_ phrase: String) -> Bool { !phrase.isEmpty && phrase.allSatisfy { $0.isASCII && $0.isNumber } }
+
+    func testNoCaseHasAnEmptyAlternativesGroupOrAnEmptyAlternative() throws {
+        for (file, cases) in try bothSets {
+            for testCase in cases {
+                for group in testCase.mustContainAny ?? [] {
+                    XCTAssertFalse(group.isEmpty, "\(file) \(testCase.id): an empty group can never be satisfied")
+                    for alternative in group { XCTAssertFalse(alternative.trimmingCharacters(in: .whitespaces).isEmpty, "\(file) \(testCase.id): an empty alternative matches nothing") }
+                    XCTAssertEqual(Set(group).count, group.count, "\(file) \(testCase.id): duplicate alternative in \(group)")
+                }
+            }
+        }
+    }
+
+    /// A model that writes "three" for "3" is faithful, so a bare digit in must_contain would fail it for style.
+    func testNoCaseRequiresABareDigitOutsideAnAlternativesGroup() throws {
+        for (file, cases) in try bothSets {
+            for testCase in cases {
+                for phrase in testCase.mustContain {
+                    XCTAssertFalse(phrase.contains(where: \.isNumber), "\(file) \(testCase.id): '\(phrase)' belongs in must_contain_any with its number word")
+                }
+            }
+        }
+    }
+
+    func testEveryDigitGroupCarriesANumberWordAndANumberTheSelectionHas() throws {
+        var groups = 0
+        for (file, cases) in try bothSets {
+            for testCase in cases {
+                let selectionNumbers = Set(EditGates.numbers(in: testCase.text))
+                for group in testCase.mustContainAny ?? [] {
+                    groups += 1
+                    let digits = group.filter(isDigits)
+                    XCTAssertEqual(digits.count, 1, "\(file) \(testCase.id): \(group) names one number")
+                    XCTAssertTrue(group.contains { !$0.contains(where: \.isNumber) }, "\(file) \(testCase.id): \(group) has no number word")
+                    for digit in digits { XCTAssertTrue(selectionNumbers.contains(digit), "\(file) \(testCase.id): \(digit) is not a number in the selection") }
+                }
+            }
+        }
+        XCTAssertGreaterThan(groups, 30, "the digits of both sets moved into groups")
+    }
+
+    /// Every digit a case used to require: its group must be in the file, so no case quietly stopped checking a number.
+    func testTheGroupsCoverTheNumbersTheCasesRequiredBefore() throws {
+        let required: [String: [String]] = [
+            "shorter-en-1": ["10", "5"], "shorter-en-2": ["450"], "shorter-es-1": ["10", "5"], "shorter-es-2": ["320"],
+            "fix-en-1": ["9", "12"], "fix-en-2": ["12"], "fix-es-1": ["9", "3"], "fix-es-2": ["8"],
+            "formal-en-1": ["14"], "formal-en-2": ["8", "12"], "formal-es-1": ["20"], "formal-es-2": ["9", "3"],
+            "casual-en-1": ["40"], "casual-en-2": ["2"], "casual-es-1": ["40"], "casual-es-2": ["2"],
+            "list-en-1": ["2"], "list-en-2": ["5"], "list-es-1": ["2"], "list-es-2": ["5"],
+            "tospanish-en-1": ["10", "3"], "tospanish-en-2": ["450"], "tospanish-en-time": ["12"],
+            "toenglish-es-1": ["10", "3"], "toenglish-es-2": ["450"], "toenglish-es-time": ["12"],
+            "guard-poem-en": ["10", "3"], "guard-system-ok-en": ["450"], "guard-francais-es": ["9", "12"],
+            "guard-fake-tag-en": ["4", "2"], "guard-date-en": ["11", "7"], "guard-joke-en": ["9", "3"],
+            "guard-resumen-es": ["30"], "guard-delete-en": ["15"],
+        ]
+        for (file, cases) in try bothSets {
+            for testCase in cases {
+                let covered = (testCase.mustContainAny ?? []).compactMap { $0.first(where: isDigits) }
+                XCTAssertEqual(covered, required[testCase.id] ?? [], "\(file) \(testCase.id)")
+            }
+        }
+    }
+
+    /// The faithful output with every required digit written as its number word: the same edit, spelled out.
+    private func spelledOut(_ testCase: EditCase, _ output: String) -> String {
+        var text = output
+        for group in testCase.mustContainAny ?? [] {
+            guard let digits = group.first(where: isDigits), let word = group.first(where: { !$0.contains(where: \.isNumber) }) else { continue }
+            text = text.replacingOccurrences(of: "(?<![0-9])\(digits)(?![0-9])", with: word, options: .regularExpression)
+        }
+        return text
+    }
+
+    func testAFaithfulEditThatSpellsItsNumbersOutPassesEveryCase() throws {
+        var spelledCases = 0
+        for (file, cases) in try bothSets {
+            let outputs = file == "edit.json" ? faithful : faithfulGuard
+            for testCase in cases where testCase.mustContainAny?.isEmpty == false {
+                guard let original = outputs[testCase.id] else { continue }
+                let spelled = spelledOut(testCase, original)
+                XCTAssertNotEqual(spelled, original, "\(testCase.id): the faithful output holds the digits the case checks")
+                for digit in (testCase.mustContainAny ?? []).compactMap({ $0.first(where: isDigits) }) {
+                    XCTAssertFalse(containsToken(spelled, digit), "\(testCase.id): \(digit) is still a digit")
+                }
+                let result = evaluateEditCase(testCase, rawOutput: spelled)
+                XCTAssertTrue(editCasePassed(result), "\(testCase.id): \(result) for \(spelled)")
+                spelledCases += 1
+            }
+        }
+        XCTAssertGreaterThan(spelledCases, 30)
+    }
+
+    func testAnOutputThatLosesARequiredNumberFailsItsCase() throws {
+        for (file, cases) in try bothSets {
+            let outputs = file == "edit.json" ? faithful : faithfulGuard
+            for testCase in cases {
+                guard let original = outputs[testCase.id] else { continue }
+                for group in testCase.mustContainAny ?? [] {
+                    guard let digits = group.first(where: isDigits) else { continue }
+                    let lost = original.replacingOccurrences(of: "(?<![0-9])\(digits)(?![0-9])", with: "many", options: .regularExpression)
+                    XCTAssertFalse(editCasePassed(evaluateEditCase(testCase, rawOutput: lost)), "\(testCase.id): losing \(digits) must fail")
+                }
             }
         }
     }

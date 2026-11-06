@@ -161,6 +161,21 @@ not receive learned terms. Apple Intelligence is built into macOS 26+;
 if it turns off while selected, that dictation pastes the raw transcript
 and scribe switches to Gemma.
 
+### Edit evals (2.0)
+
+`make test-models-edit` runs 28 golden and 8 guard edit cases through the gates, one model per run. Run 1, before the
+language hint, time-format, number-word and deadline tuning:
+
+| Model | Golden | Guard | 200-word edit, p50 by verb |
+|---|---|---|---|
+| Gemma 3 4B (default) | 18/28 | 2/8 | 4.4–10.4 s |
+| Gemma 4 E4B | 21/28 | 2/8 | 3.7–8.4 s |
+| Gemma 4 E2B | 19/28 | 1/8 | 3.0–7.0 s |
+
+Apple Intelligence was not run. Run 2, on the same cases after the tuning, is recorded by the maintainer.
+
+<!-- run 2 -->
+
 ## Dictionary
 
 Cleanup knows generic English and Spanish, not *your* nouns. The dictionary
@@ -244,7 +259,7 @@ Most of these have a control in **Settings…** (⌘,), the menu, or the Diction
 | `engine` | `parakeet` | `parakeet` \| `whisper` (menu) |
 | `cleanupEnabled` | true | Gemma cleanup pass on/off (menu) |
 | `minWords` | 4 | utterances shorter than this skip cleanup |
-| `cleanupTimeout` | 6.0 | seconds before falling back to raw text; each part of a dictation gets 0.03 s more per word over 50, up to 20 s (a value set above 20 is used as is), so long latched dictations are not cut short |
+| `cleanupTimeout` | 6.0 | seconds before falling back to raw text; each part of a dictation gets 0.03 s more per word over 50, and an edit 0.045 s, up to 20 s (a value set above 20 is used as is), so long latched dictations and long selections are not cut short |
 | `restoreDelay` | 2.0 | seconds before restoring the prior clipboard (Settings) |
 | `energyGate` | 0.0005 | silence gate (anti-hallucination); speech ~0.001+ |
 | `sounds` | true | start/error sounds (Settings) |
