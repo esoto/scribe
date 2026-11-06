@@ -253,6 +253,26 @@ final class EditGatesTests: XCTestCase {
         XCTAssertEqual(EditGates.accept(verb: .fixGrammar, selection: selection, result: "<instruction>" + selection), .rejected(.answered))
     }
 
+    // MARK: an echoed language hint is an answer
+
+    /// The selection names both languages, so gate 5 sees no new capitalised word in the echo and only gate 2 can stop it.
+    func testAResultThatOpensWithEitherHintSentenceIsAnAnswer() {
+        let selection = "Please translate the 3 slides from English into Spanish before Friday, and send the final deck to Marcos once the review is done so we can plan the rest of the week."
+        XCTAssertEqual(EditGates.accept(verb: .formal, selection: selection, result: selection), .accepted(selection), "the control: the faithful edit passes")
+        for hint in [EditPrompt.englishHint, EditPrompt.spanishHint, EditPrompt.englishHint.lowercased()] {
+            let echoed = hint + " " + selection
+            XCTAssertFalse(EditGates.introducesNewFacts(selection: selection, result: echoed, verb: .formal), "gate 5 is blind to: \(hint)")
+            XCTAssertTrue(EditGates.languageOk(selection: selection, result: echoed, verb: .formal), "gate 4 is blind to: \(hint)")
+            XCTAssertTrue(EditGates.answered(echoed, selection: selection, verb: .formal), hint)
+            XCTAssertEqual(EditGates.accept(verb: .formal, selection: selection, result: echoed), .rejected(.answered), hint)
+        }
+    }
+
+    func testAHintSentenceInTheMiddleOfAResultIsNotAnEcho() {
+        let selection = "Please note that the manual says: The text is in English; answer in English. Send the 3 copies to Marcos before Friday so we can plan the week."
+        XCTAssertEqual(EditGates.accept(verb: .fixGrammar, selection: selection, result: selection), .accepted(selection))
+    }
+
     // MARK: casual may shrink further than formal
 
     func testCasualMayShrinkToFortyPercentButFormalMayNot() {
@@ -288,13 +308,101 @@ final class EditGatesTests: XCTestCase {
         XCTAssertEqual(EditGates.accept(verb: .fixGrammar, selection: selection, result: selection), .accepted(selection))
     }
 
-    /// Minutes are a format: "9" read back as "9:45" still names the hour the speaker named, and the gate's job is to
-    /// catch a changed hour, not to audit the minutes a model chose to spell. Documented here so a stricter gate is a decision.
-    func testMinutesTheSelectionNeverStatedAreAcceptedBecauseTheyAreAFormat() {
+    /// "9" read back as "9:45" names a minute the speaker never said. Minutes are a fact once stated, so a model may add
+    /// ":00" to a bare hour and nothing else.
+    func testMinutesTheSelectionNeverStatedAreANewFact() {
         let selection = "Marcos presents the quarterly numbers on Thursday at 9 in the main room."
         let result = "Marcos presents the quarterly numbers on Thursday at 9:45 in the main room."
+        XCTAssertEqual(EditGates.accept(verb: .fixGrammar, selection: selection, result: result), .rejected(.newFacts))
+        XCTAssertTrue(EditGates.introducesNewFacts(selection: "a las 9", result: "a las 9:45", verb: .fixGrammar))
+        XCTAssertFalse(EditGates.introducesNewFacts(selection: "a las 9", result: "a las 9:00", verb: .fixGrammar))
+        XCTAssertEqual(EditGates.numbers(in: "at 9:45 and 14:05"), ["9", "14"], "numbers(in:) lists the hours; the minutes ride along with them")
+    }
+
+    func testAChangedMinuteIsANewFactWhenTheSelectionStatedOne() {
+        let changes = [
+            ("at 3:30", "at 3:45"), ("at 14:30", "at 14:15"), ("the score was 21:15", "the score was 21:18"),
+            ("at 9:30", "at 9:00"), ("at 9:00", "at 9:30"),
+        ]
+        for (selection, result) in changes {
+            XCTAssertTrue(EditGates.introducesNewFacts(selection: selection, result: result, verb: .fixGrammar), "\(selection) → \(result)")
+        }
+        let long = "Marcos presents the quarterly numbers on Thursday at 3:30 in the main room."
+        let moved = long.replacingOccurrences(of: "3:30", with: "3:45")
+        XCTAssertEqual(EditGates.accept(verb: .fixGrammar, selection: long, result: moved), .rejected(.newFacts))
+    }
+
+    func testTheSameMinutesOrABareHourAreNotNew() {
+        let kept = [
+            ("at 3:30", "at 3:30"), ("at 9:30", "at 9"), ("at 9:00", "at 9"), ("at 9", "at 9:00"), ("at 9:00", "at 9:00"),
+            ("at 9", "at 9:00:00"), ("at 9:00", "at 9:00:00"), ("at 9:00:30", "at 9:00:30"),
+        ]
+        for (selection, result) in kept {
+            XCTAssertFalse(EditGates.introducesNewFacts(selection: selection, result: result, verb: .fixGrammar), "\(selection) → \(result)")
+        }
+        XCTAssertTrue(EditGates.introducesNewFacts(selection: "at 9", result: "at 9:00:30", verb: .fixGrammar), "seconds are minutes the speaker never said")
+        XCTAssertTrue(EditGates.introducesNewFacts(selection: "at 9:30 and 10", result: "at 10:30", verb: .fixGrammar), "a minute is the hour's own: 10 had none")
+    }
+
+    func testStatedMinutesAreAFactAcrossTheClocksToo() {
+        let same = [
+            ("a las 15:30", "at 3:30 PM", EditVerb.toEnglish), ("a las 15", "at 3:00 PM", .toEnglish), ("15:00", "3 PM", .toEnglish),
+            ("a las 15:30", "at 3 PM", .toEnglish), ("at 3:30 PM", "a las 15:30", .toSpanish), ("at 3 PM", "a las 15:00", .toSpanish),
+            ("at 3:30 PM", "a las 15", .toSpanish),
+        ]
+        for (selection, result, verb) in same {
+            XCTAssertFalse(EditGates.introducesNewFacts(selection: selection, result: result, verb: verb), "\(selection) → \(result)")
+        }
+        let changed = [
+            ("a las 15:30", "at 3:45 PM", EditVerb.toEnglish), ("a las 15", "at 3:30 PM", .toEnglish), ("at 3:30 PM", "a las 15:45", .toSpanish),
+            ("at 3 PM", "a las 15:30", .toSpanish), ("a las 15:30", "at 4:30 PM", .toEnglish),
+        ]
+        for (selection, result, verb) in changed {
+            XCTAssertTrue(EditGates.introducesNewFacts(selection: selection, result: result, verb: verb), "\(selection) → \(result)")
+        }
+        let spanish = "La llamada con Marcos Álvarez es el jueves a las 15:30, así que por favor conéctense cinco minutos antes y traigan el contrato firmado."
+        let kept = "The call with Marcos Álvarez is on Thursday at 3:30 PM, so please join five minutes early and bring the signed contract."
+        XCTAssertEqual(EditGates.accept(verb: .toEnglish, selection: spanish, result: kept), .accepted(kept))
+        XCTAssertEqual(EditGates.accept(verb: .toEnglish, selection: spanish, result: kept.replacingOccurrences(of: "3:30", with: "3:45")), .rejected(.newFacts))
+    }
+
+    func testLeadingZerosDoNotMakeANumberNew() {
+        XCTAssertFalse(EditGates.introducesNewFacts(selection: "a las 08:00", result: "at 8:00 AM", verb: .toEnglish))
+        XCTAssertFalse(EditGates.introducesNewFacts(selection: "at 8:00 AM", result: "a las 08:00", verb: .toSpanish))
+        XCTAssertFalse(EditGates.introducesNewFacts(selection: "ticket 007", result: "ticket 7", verb: .fixGrammar))
+        XCTAssertFalse(EditGates.introducesNewFacts(selection: "ticket 7", result: "ticket 007", verb: .fixGrammar))
+        XCTAssertFalse(EditGates.introducesNewFacts(selection: "a las 15:00", result: "at 03:00 PM", verb: .toEnglish), "the zero is stripped before the clock conversion")
+        XCTAssertEqual(EditGates.numbers(in: "007 and 7 and 0 and 000 and 08:05"), ["7", "7", "0", "0", "8"], "an all-zero run stays one zero")
+        XCTAssertTrue(EditGates.introducesNewFacts(selection: "ticket 0", result: "ticket 7", verb: .fixGrammar))
+        XCTAssertTrue(EditGates.introducesNewFacts(selection: "ticket 7", result: "ticket 0", verb: .fixGrammar))
+        XCTAssertFalse(EditGates.introducesNewFacts(selection: "ticket 0", result: "ticket 00", verb: .fixGrammar))
+        XCTAssertTrue(EditGates.introducesNewFacts(selection: "ticket 10", result: "ticket 1", verb: .fixGrammar), "only LEADING zeros go")
+        XCTAssertTrue(EditGates.introducesNewFacts(selection: "ticket 1", result: "ticket 10", verb: .fixGrammar))
+    }
+
+    func testTheRAESpellingWithASpaceAfterEachDotIsAMeridiemMarker() {
+        for marker in ["p. m.", "P. M.", "p. m", "P.M.", "p.\u{00A0}m."] {
+            XCTAssertFalse(EditGates.introducesNewFacts(selection: "a las 15:00", result: "at 3:00 \(marker)", verb: .toEnglish), marker.debugDescription)
+        }
+        XCTAssertTrue(EditGates.introducesNewFacts(selection: "a las 15:00", result: "at 3:00 a. m.", verb: .toEnglish), "a. m. is the morning: 3 AM is not 15:00")
+        XCTAssertTrue(EditGates.introducesNewFacts(selection: "a las 15", result: "at 3 p. more", verb: .toEnglish), "a letter after the m is a longer word")
+        XCTAssertTrue(EditGates.introducesNewFacts(selection: "a las 15", result: "at 3 p.\nm.", verb: .toEnglish), "a newline is not the space RAE writes")
+
+        // The letters of the marker are never a new capitalised word, with or without the space.
+        let selection = "Marcos presents the quarterly numbers on Thursday at 10 in the main room."
+        for marker in ["a. m.", "p. m.", "A. M.", "P. M."] {
+            let result = selection.replacingOccurrences(of: "at 10", with: "at 10 \(marker)")
+            XCTAssertEqual(EditGates.accept(verb: .fixGrammar, selection: selection, result: result), .accepted(result), marker)
+        }
+        let spanish = "La llamada con Marcos Álvarez es el jueves a las 15:00, así que por favor conéctense cinco minutos antes y traigan el contrato firmado."
+        let english = "The call with Marcos Álvarez is on Thursday at 3:00 p. m., so please join five minutes early and bring the signed contract."
+        XCTAssertEqual(EditGates.accept(verb: .toEnglish, selection: spanish, result: english), .accepted(english))
+    }
+
+    func testAWordAfterASpacedMeridiemStillOpensASentence() {
+        let selection = "Marcos presents the quarterly numbers on Thursday at 10 in the main room and we start on time."
+        let result = "Marcos presents the quarterly numbers on Thursday at 10 a. m. We start on time in the main room."
         XCTAssertEqual(EditGates.accept(verb: .fixGrammar, selection: selection, result: result), .accepted(result))
-        XCTAssertEqual(EditGates.numbers(in: "at 9:45 and 14:05"), ["9", "14"])
     }
 
     func testAGenuinelyNewHourOrNumberIsStillRejectedInAnyTimeFormat() {

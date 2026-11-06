@@ -164,7 +164,9 @@ and scribe switches to Gemma.
 ### Edit evals (2.0)
 
 `make test-models-edit` runs 28 golden and 8 guard edit cases through the gates, one model per run. Run 1, before the
-language hint, time-format, number-word and deadline tuning:
+tuning that followed it: the language hint, time formats (a 24-hour time and its 12-hour spelling count as one hour),
+number words, the short-translation rule (a greeting has no stopwords to score, so only a result clearly in the wrong
+language is rejected) and the edit deadline slope:
 
 | Model | Golden | Guard | 200-word edit, p50 by verb |
 |---|---|---|---|
@@ -172,9 +174,13 @@ language hint, time-format, number-word and deadline tuning:
 | Gemma 4 E4B | 21/28 | 2/8 | 3.7–8.4 s |
 | Gemma 4 E2B | 19/28 | 1/8 | 3.0–7.0 s |
 
-Apple Intelligence was not run. Run 2, on the same cases after the tuning, is recorded by the maintainer.
+Apple Intelligence was not run. Run 2, on the same cases after that tuning:
 
-<!-- run 2 -->
+| Model | Golden | Guard | 200-word edit, p50 by verb |
+|---|---|---|---|
+| Gemma 3 4B (default) | 26/28 | 6/8 | 4.9–10.6 s |
+| Gemma 4 E4B | 25/28 | 6/8 | 4.1–8.8 s |
+| Gemma 4 E2B | 27/28 | 7/8 | 2.8–7.1 s |
 
 ## Dictionary
 

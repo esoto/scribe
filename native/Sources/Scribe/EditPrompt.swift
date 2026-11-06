@@ -19,8 +19,9 @@ enum EditPrompt {
         ),
     ]
 
-    private static let englishHint = "The text is in English; answer in English."
-    private static let spanishHint = "The text is in Spanish; answer in Spanish."
+    /// Not private: `EditGates` rejects a result that opens by repeating either sentence, and must read the same strings.
+    static let englishHint = "The text is in English; answer in English."
+    static let spanishHint = "The text is in Spanish; answer in Spanish."
 
     /// The instruction line one call sends. Every verb that keeps the language also gets a sentence naming the
     /// selection's, because Gemma 4 and E2B answered English selections in Spanish on "formal": the only formal

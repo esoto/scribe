@@ -59,14 +59,22 @@ enum EditGates {
 
     private static let promptTags = ["<text", "<instruction", "</text", "</instruction"]
 
-    /// The model talked instead of editing: a tag, the instruction echoed, or a preamble the selection itself did not
-    /// open with ("Claro que sí…" as a selection is not an answer). A tag counts the same way — only when the selection
-    /// does not carry that tag itself, because a faithful edit of a pasted prompt keeps the literal "</text>" it was given.
+    /// The two language-hint sentences exactly as the model is sent them, folded like the instruction echo is.
+    private static let foldedHints = [EditPrompt.englishHint, EditPrompt.spanishHint].map(VoiceCommand.fold)
+
+    /// The model talked instead of editing: a tag, the instruction or a language hint echoed, or a preamble the
+    /// selection itself did not open with ("Claro que sí…" as a selection is not an answer). A tag counts the same way —
+    /// only when the selection does not carry that tag itself, because a faithful edit of a pasted prompt keeps the
+    /// literal "</text>" it was given.
     static func answered(_ result: String, selection: String, verb: EditVerb) -> Bool {
         let lower = result.lowercased()
         let selectionLower = selection.lowercased()
         if promptTags.contains(where: { lower.contains($0) && !selectionLower.contains($0) }) { return true }
-        if VoiceCommand.fold(result).hasPrefix(VoiceCommand.fold(verb.instruction)) { return true }
+        let folded = VoiceCommand.fold(result)
+        if folded.hasPrefix(VoiceCommand.fold(verb.instruction)) { return true }
+        // Gate 5 stops an echoed hint only by accident ("English" is a new capitalised word), which fails as soon as
+        // the selection itself names a language.
+        if foldedHints.contains(where: { folded.hasPrefix($0) }) { return true }
         return opensWithPreamble(result) && !opensWithPreamble(selection)
     }
 
@@ -87,10 +95,14 @@ enum EditGates {
         result.split(whereSeparator: { $0.isWhitespace }).count < minWordsForTranslationLanguageGate
     }
 
-    /// Numbers (digit runs) absent from the selection are new facts for every verb, unless they are the same hour on the
-    /// other clock. A capitalised word is a new fact only if the selection never had it in any case or accent (fix grammar
-    /// may capitalise "monday" or restore "Lucía"), unless the verb translates (Monday → lunes), the word opens a sentence,
-    /// or it is AM or PM in any spelling.
+    /// Numbers (digit runs) absent from the selection are new facts for every verb, unless they are one fact spelled
+    /// another way: leading zeros ("08:00" and "8:00 AM"), the same hour on the other clock, or the ":00" a bare hour
+    /// gains. A minute is a fact once stated: a result time "H:MM" is known when the selection states that hour with
+    /// the same minutes, or states the bare hour and the result's minutes are 00, so "at 9" may become "9:00" but
+    /// never "9:45", and "3:30" never "3:45". A result bare hour is known when the selection has that hour with or
+    /// without minutes. A capitalised word is a new fact only if the selection never had it in any case or accent (fix
+    /// grammar may capitalise "monday" or restore "Lucía"), unless the verb translates (Monday → lunes), the word opens
+    /// a sentence, or it is AM or PM in any spelling.
     static func introducesNewFacts(selection: String, result: String, verb: EditVerb) -> Bool {
         if introducesNewNumbers(selection: selection, result: result) { return true }
         guard !verb.isTranslation else { return false }
@@ -107,32 +119,51 @@ enum EditGates {
 
     private enum Meridiem { case am, pm }
 
+    /// One digit run. `digits` has its leading zeros stripped ("08" → "8", "000" → "0"). `minutes` is the ":MM" or
+    /// ":MM:SS" that followed it, nil for a bare number, and "00" for any all-zero tail so "9:00" and "9:00:00" agree.
     private struct NumberToken {
         let digits: String
+        let minutes: String?
         let meridiem: Meridiem?
     }
 
-    /// A model that translates "a las 15:00" writes "3:00 PM", and 15 and 3 are one hour, so a result number is not new
-    /// when the selection names its hour on the other clock. The marker is the evidence that a number is a time at all:
-    /// a bare "3" gets no conversion. Only PM reaches the afternoon ("3 AM" is 03:00), and only 1…11 PM against 13…23,
-    /// because 12 PM is already 12; any other mismatch is a changed hour, which is what this gate is for.
+    private static let onTheHour = "00"
+
     private static func introducesNewNumbers(selection: String, result: String) -> Bool {
         let selectionTokens = numberTokens(in: selection)
-        let known = Set(selectionTokens.map(\.digits))
-        let hours = Set(selectionTokens.compactMap { Int($0.digits) })
-        let afternoonHours = Set(selectionTokens.filter { $0.meridiem == .pm }.compactMap { Int($0.digits) })
         return numberTokens(in: result).contains { token in
-            if known.contains(token.digits) { return false }
-            guard let hour = Int(token.digits) else { return true }
-            if token.meridiem == .pm, (1...11).contains(hour), hours.contains(hour + 12) { return false }
-            if (13...23).contains(hour), afternoonHours.contains(hour - 12) { return false }
-            return true
+            !selectionTokens.contains { isKnown(token, from: $0) }
         }
     }
 
-    /// The digit runs of `text`. A run followed by ":MM" (exactly two digits, so "9:5" and "9:456" do not count) is an
-    /// hour, and the minutes are a format, not a fact: "a las 9" read back as "9:00" is the same hour, and so is "9:45",
-    /// because the gate exists to catch a changed hour and not to audit the minutes a model chose to spell out.
+    /// The result number `r` says nothing the selection number `s` did not. The hour must match (see `isSameHour`).
+    /// Minutes are compared as facts: a result's minutes must be the ones `s` states, or "00" when `s` is a bare hour,
+    /// because a model that writes "9" as "9:00" has added a format and no information, and "9:45" has added a time.
+    /// A bare result number has no minutes to check.
+    private static func isKnown(_ r: NumberToken, from s: NumberToken) -> Bool {
+        guard isSameHour(r, s) else { return false }
+        guard let minutes = r.minutes else { return true }
+        return minutes == s.minutes || (s.minutes == nil && minutes == onTheHour)
+    }
+
+    /// A model that translates "a las 15:00" writes "3:00 PM", and 15 and 3 are one hour, so a result number is not new
+    /// when the selection names its hour on the other clock. Only PM reaches the afternoon ("3 AM" is 03:00), and only
+    /// 1…11 PM against 13…23, because 12 PM is already 12; any other mismatch is a changed hour, which is what this gate
+    /// is for.
+    ///
+    /// Only the 12-hour side has evidence that the number is a time: the PM marker. A result 13…23 is excused by a
+    /// selection "3 PM" and a result "3 PM" by a selection 15, but nothing says the 15 is a clock hour, so "deliver the
+    /// 15 boxes" → "deliver the 15 boxes at 3 PM" passes with an invented time. The hole needs a coincidence of values
+    /// and is recorded here, not closed.
+    private static func isSameHour(_ r: NumberToken, _ s: NumberToken) -> Bool {
+        if r.digits == s.digits { return true }
+        guard let hour = Int(r.digits), let other = Int(s.digits) else { return false }
+        if r.meridiem == .pm, (1...11).contains(hour), other == hour + 12 { return true }
+        return (13...23).contains(hour) && s.meridiem == .pm && other == hour - 12
+    }
+
+    /// The digit runs of `text` with leading zeros stripped; the ":MM" (":SS") after a run is part of that run, so
+    /// "9:45" lists as 9. The minutes are kept in `numberTokens` for `introducesNewFacts`, which judges them.
     static func numbers(in text: String) -> [String] {
         numberTokens(in: text).map(\.digits)
     }
@@ -148,46 +179,70 @@ enum EditGates {
             }
             var end = i
             while end < chars.count, chars[end].isNumber { end += 1 }
-            let afterMinutes = indexAfterMinutes(chars, from: end)
-            tokens.append(NumberToken(digits: String(chars[i..<end]), meridiem: meridiem(in: chars, from: afterMinutes)))
+            let (minutes, afterMinutes) = minutesAfter(chars, from: end)
+            tokens.append(
+                NumberToken(
+                    digits: strippingLeadingZeros(String(chars[i..<end])), minutes: minutes,
+                    meridiem: meridiem(in: chars, from: afterMinutes)))
             i = afterMinutes
         }
         return tokens
     }
 
+    /// Spanish 24-hour text writes "08:00" and a translation writes "8:00 AM": the zero is spelling, not a fact. A run of
+    /// zeros stays one zero, so "0" is still a number and never an empty one.
+    private static func strippingLeadingZeros(_ digits: String) -> String {
+        let rest = digits.drop(while: { $0 == "0" })
+        return rest.isEmpty ? "0" : String(rest)
+    }
+
     /// The marker right after a number: optional spaces (the no-break ones macOS writes included, a newline not), then
-    /// "am", "pm", "a.m." or "p.m." in any case. A letter after it means a longer word, so "3 amigos" is not "3 am".
+    /// "am", "pm", "a.m." or "p.m." in any case. A Spanish model also writes the RAE's "a. m." and "p. m." with a space
+    /// after each dot, which would otherwise leave the hour with no marker to convert. A letter after it means a longer
+    /// word, so "3 amigos" is not "3 am".
     private static func meridiem(in chars: [Character], from start: Int) -> Meridiem? {
         var i = start
-        while i < chars.count, chars[i].isWhitespace, !chars[i].isNewline { i += 1 }
+        skipSpaces(chars, &i)
         guard i < chars.count else { return nil }
         let first = chars[i].lowercased()
         guard first == "a" || first == "p" else { return nil }
         i += 1
-        if i < chars.count, chars[i] == "." { i += 1 }
+        if i < chars.count, chars[i] == "." {
+            i += 1
+            skipSpaces(chars, &i)
+        }
         guard i < chars.count, chars[i].lowercased() == "m" else { return nil }
         i += 1
         if i < chars.count, chars[i].isLetter { return nil }
         return first == "p" ? .pm : .am
     }
 
-    /// Skips each ":MM" that follows, so "9:00:00" is the hour 9 too.
-    private static func indexAfterMinutes(_ chars: [Character], from start: Int) -> Int {
+    private static func skipSpaces(_ chars: [Character], _ i: inout Int) {
+        while i < chars.count, chars[i].isWhitespace, !chars[i].isNewline { i += 1 }
+    }
+
+    /// Each ":MM" that follows an hour (exactly two digits, so "9:5" and "9:456" are not minutes), joined by colons, and
+    /// the index after them. "9:00:00" is "9:00", so every all-zero tail reads "00".
+    private static func minutesAfter(_ chars: [Character], from start: Int) -> (minutes: String?, next: Int) {
+        var groups: [String] = []
         var i = start
         while i + 2 < chars.count, chars[i] == ":", chars[i + 1].isNumber, chars[i + 2].isNumber,
             !(i + 3 < chars.count && chars[i + 3].isNumber)
         {
+            groups.append(String(chars[(i + 1)...(i + 2)]))
             i += 3
         }
-        return i
+        guard !groups.isEmpty else { return (nil, start) }
+        return (groups.allSatisfy { $0 == onTheHour } ? onTheHour : groups.joined(separator: ":"), i)
     }
 
     private static let meridiems: Set<String> = ["am", "pm"]
 
-    /// "a.m." and "p.m." (any case) become "am." and "pm.", so their letters are one word that `meridiems` excuses
-    /// and the final dot still ends a sentence, as it did before the marker was excused.
+    /// "a.m.", "p.m." and the RAE's "a. m." (any case) become "am." and "pm.", so their letters are one word that
+    /// `meridiems` excuses and the final dot still ends a sentence, as it did before the marker was excused.
     private static func joiningMeridiemDots(_ text: String) -> String {
-        text.replacingOccurrences(of: "\\b([ap])\\.(m)\\b", with: "$1$2", options: [.regularExpression, .caseInsensitive])
+        text.replacingOccurrences(
+            of: "\\b([ap])\\.[^\\S\\r\\n]*(m)\\b", with: "$1$2", options: [.regularExpression, .caseInsensitive])
     }
 
     private static func isApostrophe(_ ch: Character) -> Bool { ch == "'" || ch == "’" }

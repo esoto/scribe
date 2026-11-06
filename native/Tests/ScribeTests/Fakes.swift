@@ -189,18 +189,15 @@ final class FakeEditBackend: CleanupModelBackend, @unchecked Sendable {
     let out: String
     let err: Error?
     let hang: Bool
-    /// Real seconds the call takes before it answers, for a test of the deadline the pipeline gave it.
-    let delay: Double
     /// Runs inside `edit`, so a test can move the fake clock by "model time".
     let onEdit: (() -> Void)?
     private let lock = NSLock()
     private var _edits: [(instruction: String, text: String, maxTokens: Int)] = []
 
-    init(out: String = "", err: Error? = nil, hang: Bool = false, delay: Double = 0, onEdit: (() -> Void)? = nil) {
+    init(out: String = "", err: Error? = nil, hang: Bool = false, onEdit: (() -> Void)? = nil) {
         self.out = out
         self.err = err
         self.hang = hang
-        self.delay = delay
         self.onEdit = onEdit
     }
 
@@ -210,7 +207,6 @@ final class FakeEditBackend: CleanupModelBackend, @unchecked Sendable {
         lock.withLock { _edits.append((instruction, text, maxTokens)) }
         onEdit?()
         if hang { await hangForever() }
-        if delay > 0 { try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000)) }
         if let err { throw err }
         return out
     }

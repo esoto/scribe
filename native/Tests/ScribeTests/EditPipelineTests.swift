@@ -70,7 +70,8 @@ final class EditPipelineTests: XCTestCase {
         pairs: [ReplacementPair] = [],
         modelIsGemma4: Bool = false,
         runner: ((@escaping () async -> Void) -> Void)? = nil,
-        clock: FakeClock = FakeClock()
+        clock: FakeClock = FakeClock(),
+        runWithDeadline: @escaping EditPipeline.DeadlineRunner = { try await withDeadline($0, $1) }
     ) -> Harness {
         let states = Box<PipelineState>()
         let notices = Box<String>()
@@ -109,6 +110,7 @@ final class EditPipelineTests: XCTestCase {
                 },
                 onStat: { stats.append($0) },
                 runner: runner ?? { work in runBlocking(work) }),
+            runWithDeadline: runWithDeadline,
             onLog: { logs.append($0) })
         return Harness(
             pipeline: pipeline, clock: clock, states: states, notices: notices, verdicts: verdicts, problems: problems,
@@ -385,19 +387,28 @@ final class EditPipelineTests: XCTestCase {
         XCTAssertLessThan(EditPipeline.deadline(words: 100_000, base: PipelineConfig().cleanupTimeout), PipelineConfig().queueMaxAge)
     }
 
-    /// The call site, not just the function: 80 words with a 0.05 s base get 1.4 s at 0.045 s a word and only 0.95 s at
-    /// dictation's 0.03, and the model takes 1.15 s.
+    /// The call site, not just the function: the deadline the pipeline hands the model call is read off the runner, so
+    /// no clock runs and nothing waits. 80 words with a 0.05 s base get 1.4 s at the edit's 0.045 s a word, where
+    /// dictation's 0.03 would give 0.95 s.
     func testAnEditOfEightyWordsGetsTheEditSlopeAtTheCallSite() {
         let words = Array(repeating: "we shipped the build today", count: 16).joined(separator: " ")
         XCTAssertEqual(words.split(separator: " ").count, 80)
+        let config = PipelineConfig(cleanupTimeout: 0.05)
+        let asked = Box<Double>()
         let h = make(
-            heard: "fix the grammar",
-            backend: FakeEditBackend(out: words, delay: 1.15), reader: FakeSelectionReader(selection(words)),
-            config: PipelineConfig(cleanupTimeout: 0.05))
+            heard: "fix the grammar", out: words, reader: FakeSelectionReader(selection(words)), config: config,
+            runWithDeadline: { seconds, work in
+                asked.append(seconds)
+                return try await work()
+            })
 
         edit(h)
 
-        XCTAssertEqual(h.verdicts.value, ["Fix grammar"], "a 0.03 s slope would have timed this edit out")
+        XCTAssertEqual(asked.value.count, 2, "one deadline for the transcription, one for the model call")
+        XCTAssertEqual(try XCTUnwrap(asked.value.first), config.sttTimeout, accuracy: 1e-9)
+        XCTAssertEqual(try XCTUnwrap(asked.value.last), 1.4, accuracy: 1e-9)
+        XCTAssertEqual(DictationPipeline.cleanupDeadline(words: 80, base: 0.05), 0.95, accuracy: 1e-9, "dictation's slope would have given the model less")
+        XCTAssertEqual(h.verdicts.value, ["Fix grammar"])
         XCTAssertEqual(h.stats.value.first?.accepted, true)
         XCTAssertEqual(h.replacer.replaced.count, 1)
     }

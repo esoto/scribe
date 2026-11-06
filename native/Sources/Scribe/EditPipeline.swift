@@ -32,6 +32,10 @@ final class EditPipeline {
         DictationPipeline.cleanupDeadline(words: words, base: base, perWord: secondsPerWordOverFifty)
     }
 
+    /// How a call is run under its deadline. A test swaps in a recorder, so the number the pipeline computed is read
+    /// off the call instead of being inferred from a model that takes real time to answer.
+    typealias DeadlineRunner = (Double, @escaping @Sendable () async throws -> String) async throws -> String
+
     private let recorder: RecorderLike
     private var stt: SttEngine
     private let backend: () -> (any CleanupModelBackend)?
@@ -46,6 +50,7 @@ final class EditPipeline {
     /// Read fresh each edit: a misheard instruction ("shorted") is fixed by the Dictionary like a dictation.
     private let replacementPairs: () -> [ReplacementPair]
     private let sinks: EditSinks
+    private let runWithDeadline: DeadlineRunner
     private let onLog: ((String) -> Void)?
 
     private(set) var engineName: String
@@ -76,6 +81,7 @@ final class EditPipeline {
         frontmost: @escaping () -> pid_t? = { nil },
         replacementPairs: @escaping () -> [ReplacementPair] = { [] },
         sinks: EditSinks,
+        runWithDeadline: @escaping DeadlineRunner = { try await withDeadline($0, $1) },
         onLog: ((String) -> Void)? = nil
     ) {
         self.recorder = recorder
@@ -91,6 +97,7 @@ final class EditPipeline {
         self.frontmost = frontmost
         self.replacementPairs = replacementPairs
         self.sinks = sinks
+        self.runWithDeadline = runWithDeadline
         self.onLog = onLog
     }
 
@@ -239,7 +246,7 @@ final class EditPipeline {
         let heardRaw: String
         do {
             let engine = stt
-            heardRaw = Gates.normalize(try await withDeadline(config.sttTimeout) { try await engine.transcribe(pcm) })
+            heardRaw = Gates.normalize(try await runWithDeadline(config.sttTimeout) { try await engine.transcribe(pcm) })
         } catch {
             // The type only: an engine's message is not ours to vouch for.
             onLog?("edit: transcription failed (\(engineName)): \(type(of: error))")
@@ -272,7 +279,7 @@ final class EditPipeline {
         var resultChars = 0
         do {
             // withDeadline also cancels the call when the deadline fires, so Gemma's token loop frees the model.
-            let out = try await withDeadline(deadline) {
+            let out = try await runWithDeadline(deadline) {
                 try await backend.edit(instruction: instruction, text: selection.text, maxTokens: maxTokens)
             }
             resultChars = out.count
