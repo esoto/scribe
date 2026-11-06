@@ -119,8 +119,9 @@ enum EditGates {
 
     private enum Meridiem { case am, pm }
 
-    /// One digit run. `digits` has its leading zeros stripped ("08" → "8", "000" → "0"). `minutes` is the ":MM" or
-    /// ":MM:SS" that followed it, nil for a bare number, and "00" for any all-zero tail so "9:00" and "9:00:00" agree.
+    /// One digit run. `digits` of a whole number has its leading zeros stripped ("08" → "8", "000" → "0"); a fraction (a
+    /// run after "." or "," that follows a digit) is compared as written. `minutes` is the ":MM" or ":MM:SS" that
+    /// followed it, nil for a bare number, and "00" for any all-zero tail so "9:00" and "9:00:00" agree.
     private struct NumberToken {
         let digits: String
         let minutes: String?
@@ -153,12 +154,16 @@ enum EditGates {
     /// is for. Equal digits are one hour unless both sides carry a marker and the markers differ: "3 AM" and "3 PM" are
     /// twelve hours apart, as "3 AM" and 15 already were. A side with no marker ("a las 3") says nothing against either.
     ///
-    /// Two holes are recorded here, not closed; each needs a coincidence of values.
+    /// Holes are recorded here, not closed; the first three need a coincidence of values and the last is the strict side.
     /// - Only the 12-hour side has evidence that the number is a time: the PM marker. A result 13…23 is excused by a
     ///   selection "3 PM" and a result "3 PM" by a selection 15, but nothing says the 15 is a clock hour, so "deliver the
     ///   15 boxes" → "deliver the 15 boxes at 3 PM" passes with an invented time.
     /// - The ":00" a bare hour may gain (`isKnown`) is excused by any bare number of that value in the selection, not
     ///   only the hour's own, so "the 9 reports are due at 9:30" → "the 9 reports are due at 9:00" passes.
+    /// - A bare number of the same value also excuses an AM/PM swap, because a side with no marker says nothing against
+    ///   either: "at 3 AM in room 3" → "at 3 PM in room 3" passes.
+    /// - Thousands groups and dotted dates take the fraction path and compare as written, so "1,000" → "1 000" and
+    ///   "3.50" → "3.5" are rejected. That is the safe side: a retry costs less than a changed number.
     private static func isSameHour(_ r: NumberToken, _ s: NumberToken) -> Bool {
         if r.digits == s.digits {
             guard let resultMarker = r.meridiem, let selectionMarker = s.meridiem else { return true }
@@ -257,10 +262,11 @@ enum EditGates {
 
     /// "a.m.", "p.m." and the RAE's "a. m." (any case) become "am." and "pm.", so their letters are one word that
     /// `meridiems` excuses and the final dot still ends a sentence, as it did before the marker was excused. The marker
-    /// may follow a digit ("10P.M."), which a word boundary would not allow, so only a letter before it rules it out.
+    /// may follow a digit ("10P.M."), which a word boundary would not allow, so only a letter before it rules it out — any
+    /// letter, because the "a" that ends "María" in "María. M. Pérez" is no marker.
     private static func joiningMeridiemDots(_ text: String) -> String {
         text.replacingOccurrences(
-            of: "(?<![A-Za-z])([ap])\\.[^\\S\\r\\n]*(m)\\b", with: "$1$2", options: [.regularExpression, .caseInsensitive])
+            of: "(?<!\\p{L})([ap])\\.[^\\S\\r\\n]*(m)\\b", with: "$1$2", options: [.regularExpression, .caseInsensitive])
     }
 
     private static func isApostrophe(_ ch: Character) -> Bool { ch == "'" || ch == "’" }

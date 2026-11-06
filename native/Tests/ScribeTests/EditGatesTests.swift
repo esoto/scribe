@@ -496,6 +496,18 @@ final class EditGatesTests: XCTestCase {
         }
     }
 
+    /// "a. M." after a name that ends in an accented letter ("María") is a sentence end and an initial, not a marker,
+    /// so the lookbehind that keeps "Pam" and "Amy" out of the marker rule must treat any letter as a word before it.
+    func testAnAccentedLetterBeforeADottedMarkerLookalikeIsNotAMarkerBoundary() {
+        for name in ["María", "Lucía", "Sofía", "García"] {
+            let text = "Se lo envié a \(name). M. Pérez para que lo revise mañana por la tarde."
+            XCTAssertEqual(EditGates.accept(verb: .fixGrammar, selection: text, result: text), .accepted(text), name)
+        }
+        let selection = "Marcos presents the quarterly numbers on Thursday at 10 pm in the main room."
+        let glued = "Marcos presents the quarterly numbers on Thursday at 10P.M. in the main room."
+        XCTAssertEqual(EditGates.accept(verb: .fixGrammar, selection: selection, result: glued), .accepted(glued), "a digit before the marker still joins it")
+    }
+
     func testAWordAfterASpacedMeridiemStillOpensASentence() {
         let selection = "Marcos presents the quarterly numbers on Thursday at 10 in the main room and we start on time."
         let result = "Marcos presents the quarterly numbers on Thursday at 10 a. m. We start on time in the main room."
