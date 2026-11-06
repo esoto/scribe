@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>scribe — hold a key, speak, it's typed</title>
-<meta name="description" content="Personal hold-to-talk dictation for macOS — fully local, English + Spanish, with voice commands, a hands-free latch and a dictionary you can teach. No cloud, no accounts. Audio and text never leave the machine.">
+<meta name="description" content="Personal hold-to-talk dictation for macOS — fully local, English + Spanish, with voice commands, a hands-free latch, edit-by-voice on selected text and a dictionary you can teach. No cloud, no accounts. Audio and text never leave the machine.">
 <meta property="og:title" content="scribe — hold a key, speak, it's typed">
 <meta property="og:description" content="Fully local hold-to-talk dictation for macOS, with voice commands. No cloud, no accounts. Audio and text never leave the machine.">
 <meta property="og:url" content="https://scribe.estebansoto.dev">
@@ -189,6 +189,10 @@
       <div class="t">Snippets</div>
       <div class="d">A spoken trigger — "my address" — stands for a block of text, said alone or inside a sentence. The text takes its place after cleanup, so the model never sees it and its line breaks survive.</div>
     </div>
+    <div class="cell">
+      <div class="t">Edit what you selected</div>
+      <div class="d">Select text anywhere, hold ⇧ with the hotkey and say "make it shorter", "fix the grammar", "make it formal", "make it casual", "make it a list", "translate to Spanish" or "translate to English" (Spanish works too). scribe copies the selection, edits it on the local model and pastes the result over it; ⌘Z undoes. A result that fails a check is not pasted — the pill says why.</div>
+    </div>
   </div>
   <p class="note">A command counts only as the whole utterance: "please send it to the team" is text. Line breaks count anywhere; to dictate one of these phrases as words, say "the words" first ("the words new line"; Spanish "las palabras"), or turn voice commands off for one app in Settings › Apps. If the recognizer keeps mishearing a command, add a Dictionary pair for what it hears.</p>
 </section>
@@ -249,7 +253,7 @@
       </div>
       <div class="cell">
         <div class="t">Transcripts never saved</div>
-        <div class="d">History keeps the last 10 dictations by default, in memory only. Transcripts are never written to disk. scribe writes your dictionary (words and phrases), a diagnostic log that contains no dictated text, and — only when a dictation fails — one audio file you can delete. Dictations are marked transient, so clipboard managers that honor the marker skip them; a copy you make from History is an ordinary copy. Stats are per-day counts and timings, never text. App rules are app names, bundle ids and switches; snippets are your own text, stored in plain text.</div>
+        <div class="d">History keeps the last 10 dictations by default, in memory only. Transcripts are never written to disk. scribe writes your dictionary (words and phrases), a diagnostic log that contains no dictated text, and — only when a dictation fails — one audio file you can delete. Dictations are marked transient, so clipboard managers that honor the marker skip them; a copy you make from History is an ordinary copy. Stats are per-day counts and timings, never text. App rules are app names, bundle ids and switches; snippets are your own text, stored in plain text. An edit copies the selected text from the app in front, sends it to the local model, pastes the result and puts your clipboard back; the text is kept nowhere. The copy is made by the app itself, so a clipboard manager you run may record your own selection.</div>
       </div>
       <div class="cell">
         <div class="t">Nothing sent</div>
