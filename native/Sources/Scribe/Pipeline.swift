@@ -127,7 +127,9 @@ final class DictationPipeline {
         history: History,
         config: PipelineConfig,
         clock: @escaping () -> Double,
-        runner: ((@escaping () async -> Void) -> Void)? = nil,
+        // No default: a worker of its own beside the coordinator's would let an edit's ⌘C run between this
+        // dictation's ⌘V and its clipboard restore, and a forgotten argument must not compile.
+        runner: @escaping (@escaping () async -> Void) -> Void,
         frontmost: @escaping () -> pid_t? = { nil },
         frontmostBundleID: @escaping () -> String? = { nil },
         profileFor: @escaping (String?) -> AppProfile? = { _ in nil },
@@ -156,7 +158,7 @@ final class DictationPipeline {
         self.config = config
         self.holdThreshold = config.holdThreshold
         self.clock = clock
-        self.runner = runner ?? DictationPipeline.makeSerialRunner()
+        self.runner = runner
         self.frontmost = frontmost
         self.frontmostBundleID = frontmostBundleID
         self.profileFor = profileFor
@@ -525,10 +527,11 @@ final class DictationPipeline {
         return .success(out)
     }
 
-    // MARK: - Default runner
+    // MARK: - Serial runner
 
-    /// One serial worker per pipeline: FIFO AsyncStream drained by a single Task, so dictations never overlap.
-    private static func makeSerialRunner() -> (@escaping () async -> Void) -> Void {
+    /// One serial worker: FIFO AsyncStream drained by a single Task, so jobs never overlap. The coordinator makes one
+    /// and hands it to both pipelines, so an edit's selection read can never interleave with a dictation's paste.
+    static func makeSerialRunner() -> (@escaping () async -> Void) -> Void {
         let worker = SerialWorker()
         return { work in worker.enqueue(work) }
     }

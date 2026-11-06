@@ -99,4 +99,29 @@ final class GemmaEditStructureTests: XCTestCase {
         XCTAssertNil(backend.warmSystemPromptForTesting)
         XCTAssertTrue(backend.warmPrefixSlotsForTesting.isEmpty)
     }
+
+    /// A model that cannot load is reported under the edit label, by type only: `LazyModel` logs a failed load from
+    /// `preload()` alone, and an edit is the first caller when the user has never dictated.
+    func testAnEditThatCannotLoadTheModelLogsTheErrorTypeAndNothingElse() async {
+        let logs = Locked<[String]>([])
+        let backend = GemmaBackend(
+            customModelPath: "/nonexistent/\(UUID().uuidString)", onLog: { line in logs.mutate { $0.append(line) } })
+
+        do {
+            _ = try await backend.edit(instruction: "Translate it to Spanish.", text: "the confidential selection", maxTokens: 20)
+            XCTFail("a model that is not there cannot edit")
+        } catch let error as CleanupError {
+            XCTAssertTrue(error.message.hasPrefix("edit failed: "), error.message)
+            XCTAssertFalse(error.message.contains("confidential"))
+        } catch {
+            XCTFail("the failure must arrive as a CleanupError, got \(error)")
+        }
+
+        let loadLines = logs.value.filter { $0.hasPrefix("edit: model load failed: ") }
+        XCTAssertEqual(loadLines.count, 1, "\(logs.value)")
+        for line in logs.value {
+            XCTAssertFalse(line.contains("confidential"), line)
+            XCTAssertFalse(line.contains("Translate it"), line)
+        }
+    }
 }

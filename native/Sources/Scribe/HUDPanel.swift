@@ -77,11 +77,11 @@ struct HUDView: View {
         HStack(spacing: 10) {
             Text(hudGlyph(model.phase))
                 .font(.system(size: 13, weight: .semibold, design: .monospaced))
-                .foregroundStyle(model.phase == .listening ? Color.red : Color.primary)
+                .foregroundStyle(model.phase.isLive ? Color.red : Color.primary)
             Text(hudLabel(model.phase))
                 .font(.system(size: 13, weight: .medium))
                 .lineLimit(1)
-            if model.phase == .listening {
+            if model.phase.isLive {
                 LevelBars(level: model.level)
             }
         }

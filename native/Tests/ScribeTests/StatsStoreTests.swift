@@ -22,6 +22,18 @@ final class StatsStoreTests: XCTestCase {
         DictationStat(words: words, cleaned: cleaned, rawFallback: fallback, sttMs: stt, cleanupMs: cleanup)
     }
 
+    private func editStat(
+        _ verb: EditVerb = .shorter, stt: Int = 300, edit: Int? = 900, accepted: Bool = true,
+        rejection: EditRejection? = nil
+    ) -> EditStat {
+        EditStat(verb: verb, sttMs: stt, editMs: edit, accepted: accepted, rejection: rejection)
+    }
+
+    private func dayJSON() throws -> [String: Any] {
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: fileURL)) as? [String: Any])
+        return try XCTUnwrap((json["days"] as? [[String: Any]])?.first)
+    }
+
     private func daysAgo(_ n: Int) -> Date { calendar.date(byAdding: .day, value: -n, to: noon)! }
 
     func testRecordsCountsAndLatenciesForToday() {
@@ -146,6 +158,122 @@ final class StatsStoreTests: XCTestCase {
         XCTAssertEqual(Set(day.keys), ["day", "dictations", "words", "cleaned", "rawFallbacks", "sttMs", "cleanupMs"])
     }
 
+    // MARK: - Edits
+
+    func testRecordsEditCountsAndLatencies() {
+        let store = makeStore()
+        store.record(editStat(.shorter, edit: 900), at: noon, calendar: calendar)
+        store.record(editStat(.formal, edit: 1500, accepted: false, rejection: .length), at: noon, calendar: calendar)
+        store.record(editStat(.shorter, edit: 700), at: noon, calendar: calendar)
+
+        let today = store.summary(days: 1, now: noon, calendar: calendar)
+        XCTAssertEqual(today.edits, 3)
+        XCTAssertEqual(today.editsAccepted, 2)
+        XCTAssertEqual(today.editP50, 900)
+        XCTAssertEqual(today.dictations, 0, "an edit is not a dictation")
+        XCTAssertEqual(today.words, 0)
+        XCTAssertNil(today.sttP50, "an edit's transcription time is not a dictation's")
+    }
+
+    func testEditsAreCountedPerVerbUnderTheirLogNames() throws {
+        let store = makeStore()
+        store.record(editStat(.shorter), at: noon, calendar: calendar)
+        store.record(editStat(.toSpanish), at: noon, calendar: calendar)
+        store.record(editStat(.shorter), at: noon, calendar: calendar)
+        _ = store.summary(days: 1, now: noon, calendar: calendar)
+
+        let byVerb = try XCTUnwrap(try dayJSON()["editsByVerb"] as? [String: Int])
+        XCTAssertEqual(byVerb, ["shorter": 2, "to_spanish": 1])
+    }
+
+    func testAnEditWithoutAModelTimeAddsNoLatencySample() {
+        let store = makeStore()
+        store.record(editStat(edit: nil, accepted: false), at: noon, calendar: calendar)
+
+        let today = store.summary(days: 1, now: noon, calendar: calendar)
+        XCTAssertEqual(today.edits, 1)
+        XCTAssertNil(today.editP50)
+    }
+
+    func testEditLatencySamplesStopAtTheCapButCountsContinue() throws {
+        let store = makeStore()
+        for _ in 0..<(StatsStore.maxSamplesPerDay + 5) {
+            store.record(editStat(), at: noon, calendar: calendar)
+        }
+        let s = store.summary(days: 1, now: noon, calendar: calendar)
+        XCTAssertEqual(s.edits, StatsStore.maxSamplesPerDay + 5)
+        XCTAssertEqual((try dayJSON()["editMs"] as? [Int])?.count, StatsStore.maxSamplesPerDay)
+    }
+
+    func testEditsAndDictationsShareADayAndTheRetention() {
+        let store = makeStore()
+        store.record(editStat(), at: daysAgo(200), calendar: calendar)
+        store.record(stat(words: 5), at: noon, calendar: calendar)
+        store.record(editStat(), at: noon, calendar: calendar)
+
+        let all = store.summary(days: 365, now: noon, calendar: calendar)
+        XCTAssertEqual(all.dictations, 1)
+        XCTAssertEqual(all.words, 5)
+        XCTAssertEqual(all.edits, 1, "the 200-day-old edit was pruned like a dictation would be")
+    }
+
+    func testTheEditKeysAreAbsentFromTheFileUntilAnEditIsRecorded() throws {
+        let store = makeStore()
+        store.record(stat(), at: noon, calendar: calendar)
+        _ = store.summary(days: 1, now: noon, calendar: calendar)
+        XCTAssertEqual(
+            Set(try dayJSON().keys), ["day", "dictations", "words", "cleaned", "rawFallbacks", "sttMs", "cleanupMs"],
+            "a dictation-only day writes the file it always did")
+
+        store.record(editStat(), at: noon, calendar: calendar)
+        _ = store.summary(days: 1, now: noon, calendar: calendar)
+        let day = try dayJSON()
+        XCTAssertEqual(
+            Set(day.keys),
+            ["day", "dictations", "words", "cleaned", "rawFallbacks", "sttMs", "cleanupMs", "edits", "editsAccepted", "editMs", "editsByVerb"])
+    }
+
+    func testTheFileHoldsNothingButCountsAndFixedVerbNamesForEdits() throws {
+        let store = makeStore()
+        for verb in EditVerb.allCases { store.record(editStat(verb), at: noon, calendar: calendar) }
+        _ = store.summary(days: 1, now: noon, calendar: calendar)
+
+        let day = try dayJSON()
+        XCTAssertEqual(day["edits"] as? Int, EditVerb.allCases.count)
+        XCTAssertEqual(Set((day["editsByVerb"] as? [String: Int] ?? [:]).keys), Set(EditVerb.allCases.map(\.logName)))
+        XCTAssertTrue((day["editMs"] as? [Int]) != nil)
+    }
+
+    func testAnOldFileWithoutTheEditKeysStillLoadsAndTakesEdits() throws {
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try #"{"version": 1, "days": [{"day": "2023-11-14", "dictations": 7, "words": 70, "cleaned": 6, "rawFallbacks": 1, "sttMs": [100], "cleanupMs": [200]}]}"#
+            .write(to: fileURL, atomically: true, encoding: .utf8)
+
+        let store = makeStore()
+        var today = store.summary(days: 1, now: noon, calendar: calendar)
+        XCTAssertEqual(today.dictations, 7)
+        XCTAssertEqual(today.words, 70)
+        XCTAssertEqual(today.edits, 0)
+        XCTAssertEqual(today.editsAccepted, 0)
+        XCTAssertNil(today.editP50)
+
+        store.record(editStat(), at: noon, calendar: calendar)
+        today = store.summary(days: 1, now: noon, calendar: calendar)
+        XCTAssertEqual(today.dictations, 7)
+        XCTAssertEqual(today.edits, 1)
+    }
+
+    func testEditCountsPersistAcrossInstances() {
+        let store = makeStore()
+        store.record(editStat(), at: noon, calendar: calendar)
+        _ = store.summary(days: 1, now: noon, calendar: calendar)
+
+        let reopened = makeStore().summary(days: 1, now: noon, calendar: calendar)
+        XCTAssertEqual(reopened.edits, 1)
+        XCTAssertEqual(reopened.editsAccepted, 1)
+        XCTAssertEqual(reopened.editP50, 900)
+    }
+
     func testOnChangeFiresAfterAWrite() {
         let store = makeStore()
         let fired = expectation(description: "onChange")
@@ -205,6 +333,19 @@ final class StatsStoreTests: XCTestCase {
         XCTAssertEqual(statsCountsLine(s), "12 dictations · 480 words · ≈ 12 min of typing")
     }
 
+    func testEditsLine() {
+        var s = StatsSummary(days: 1, dictations: 0, words: 0, cleaned: 0, rawFallbacks: 0)
+        XCTAssertNil(statsEditsLine(s), "no edits, no line")
+        s.edits = 1
+        s.editsAccepted = 1
+        XCTAssertEqual(statsEditsLine(s), "1 edit · 1 accepted")
+        s.edits = 12
+        s.editsAccepted = 9
+        XCTAssertEqual(statsEditsLine(s), "12 edits · 9 accepted")
+        s.editsAccepted = 0
+        XCTAssertEqual(statsEditsLine(s), "12 edits · 0 accepted")
+    }
+
     func testLatencyAndFallbackLines() {
         var s = StatsSummary(days: 1, dictations: 50, words: 500, cleaned: 46, rawFallbacks: 2)
         XCTAssertNil(statsLatencyLine(s))
@@ -218,6 +359,15 @@ final class StatsStoreTests: XCTestCase {
         s.cleaned = 0
         s.rawFallbacks = 0
         XCTAssertNil(statsFallbackLine(s))
+    }
+
+    @MainActor
+    func testStatsModelRefreshesAfterAnEdit() async {
+        let store = makeStore()
+        let model = StatsModel(store: store, now: { [noon] in noon })
+        store.record(editStat(), at: noon)
+        let refreshed = await eventually { model.today.edits == 1 && model.month.edits == 1 }
+        XCTAssertTrue(refreshed)
     }
 
     @MainActor

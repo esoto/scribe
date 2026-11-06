@@ -269,4 +269,19 @@ final class AppSettingsTests: XCTestCase {
         defaults.set("latch", forKey: "hotkeyMode")
         XCTAssertEqual(settings.hotkeyMode, .hold)
     }
+
+    // MARK: - 2.0 key
+
+    func testEditByVoiceIsOnByDefault() {
+        XCTAssertTrue(settings.editEnabled)
+    }
+
+    func testEditEnabledRoundTripsUnderItsKey() {
+        settings.editEnabled = false
+        XCTAssertEqual(defaults.object(forKey: "editEnabled") as? Bool, false)
+        XCTAssertFalse(AppSettings(defaults: defaults).editEnabled)
+
+        settings.editEnabled = true
+        XCTAssertTrue(AppSettings(defaults: defaults).editEnabled)
+    }
 }

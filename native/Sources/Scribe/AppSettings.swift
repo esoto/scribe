@@ -31,6 +31,7 @@ final class AppSettings {
         static let voiceCommandsEnabled = "voiceCommandsEnabled"
         static let urlSchemeEnabled = "urlSchemeEnabled"
         static let hudEnabled = "hudEnabled"
+        static let editEnabled = "editEnabled"
         static let hotkeyMode = "hotkeyMode"
         static let didImportToml = "didImportToml"
     }
@@ -85,6 +86,12 @@ final class AppSettings {
     var hudEnabled: Bool {
         get { defaults.object(forKey: Key.hudEnabled) as? Bool ?? true }
         set { defaults.set(newValue, forKey: Key.hudEnabled) }
+    }
+
+    /// Hold ⇧ with the hotkey over a selection to edit it by voice. On by default; off, the chord is a plain hold.
+    var editEnabled: Bool {
+        get { defaults.object(forKey: Key.editEnabled) as? Bool ?? true }
+        set { defaults.set(newValue, forKey: Key.editEnabled) }
     }
 
     /// Hold is the default and what the privacy copy promises; latching is opt-in.

@@ -99,7 +99,7 @@ struct OnboardingWindow: View {
                 )
                 permissionRow(
                     .accessibility,
-                    detail: "Needed to paste transcribed text into the focused app.",
+                    detail: "Needed to paste transcribed text and, for edits, to copy the selected text.",
                     systemImage: "accessibility"
                 )
                 permissionRow(

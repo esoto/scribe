@@ -12,6 +12,9 @@ protocol SelectionReplacing {
     func replaceSelection(
         _ text: String, target: pid_t?, restoring snapshot: [PasteboardItemData]?, copiedChangeCount: Int
     ) throws
+
+    /// The edit ended without a paste: puts back what the ⌘C displaced, on the same terms as `replaceSelection`.
+    func restoreClipboardAfterCopy(_ snapshot: [PasteboardItemData]?, copiedChangeCount: Int)
 }
 
 extension Paster: SelectionReplacing {}
@@ -53,6 +56,11 @@ final class GuardedPaster: Pasting, SelectionReplacing {
         try refuseUnlessReachable(text, target: target)
         try inner.replaceSelection(
             text, target: target, restoring: snapshot, copiedChangeCount: copiedChangeCount)
+    }
+
+    /// Not a paste, so neither guard applies: the clipboard goes back even when focus has moved or Accessibility is off.
+    func restoreClipboardAfterCopy(_ snapshot: [PasteboardItemData]?, copiedChangeCount: Int) {
+        inner.restoreClipboardAfterCopy(snapshot, copiedChangeCount: copiedChangeCount)
     }
 
     private func refuseUnlessReachable(_ text: String, target: pid_t?) throws {

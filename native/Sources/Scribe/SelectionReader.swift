@@ -25,14 +25,16 @@ final class PasteboardSelectionReader: SelectionReader {
     private let keys: KeyPressing
     private let waitSeconds: Double
     private let pollSeconds: Double
-    private let settle: () -> Void
+    private let settle: () async -> Void
     private let sleep: (Double) async -> Void
 
-    /// `settle` runs first in `read`, before the snapshot: scribe's own recent paste (and the restore it has
+    /// `settle` is awaited first in `read`, before the snapshot: scribe's own recent paste (and the restore it has
     /// pending) must be out of the way, or the snapshot would be scribe's text rather than the user's clipboard.
+    /// It may wait out a paste that is still being consumed, so it is async. It has no default: a reader left
+    /// unwired would snapshot scribe's own paste, and that must not compile.
     init(
         pasteboard: PasteboardLike, keys: KeyPressing, waitSeconds: Double = 0.3, pollSeconds: Double = 0.02,
-        settle: @escaping () -> Void = {},
+        settle: @escaping () async -> Void,
         sleep: @escaping (Double) async -> Void = { try? await Task.sleep(nanoseconds: UInt64($0 * 1e9)) }
     ) {
         self.pasteboard = pasteboard
@@ -44,7 +46,7 @@ final class PasteboardSelectionReader: SelectionReader {
     }
 
     func read(target: pid_t?) async throws -> Selection? {
-        settle()
+        await settle()
         let snapshot = pasteboard.snapshot()
         let before = pasteboard.changeCount()
         try keys.press(.commandC, target: target)
@@ -57,7 +59,8 @@ final class PasteboardSelectionReader: SelectionReader {
         let copiedChangeCount = pasteboard.changeCount()
         guard copiedChangeCount != before else { return nil }
         guard let text = pasteboard.string()?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else {
-            if let snapshot { pasteboard.restore(snapshot) }
+            // An empty snapshot clears: whatever the app copied (an image, say) must not outlive an edit that never was.
+            pasteboard.restore(snapshot ?? [])
             return nil
         }
         return Selection(text: text, snapshot: snapshot, copiedChangeCount: copiedChangeCount)

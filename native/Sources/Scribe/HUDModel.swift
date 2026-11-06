@@ -1,17 +1,21 @@
 import Foundation
 
 /// What the recording pill shows. `result` is the one-line verdict after a dictation ("Pasted", "Pasted raw — …");
-/// `problem` is the same one-liner for a failure, with the ⚠ the menu bar uses for it.
+/// `problem` is the same one-liner for a failure, with the ⚠ the menu bar uses for it. `editing` is `listening` for
+/// an edit-by-voice hold: its own case so the live phases stay payload-free.
 enum HUDPhase: Equatable {
-    case hidden, listening, processing
+    case hidden, listening, editing, processing
     case result(String)
     case problem(String)
+
+    /// The microphone is open and the level bars are on screen.
+    var isLive: Bool { self == .listening || self == .editing }
 }
 
 func hudGlyph(_ phase: HUDPhase) -> String {
     switch phase {
     case .hidden: return ""
-    case .listening: return "●"
+    case .listening, .editing: return "●"
     case .processing: return "⋯"
     case .result: return "◦"
     case .problem: return "⚠"
@@ -22,6 +26,7 @@ func hudLabel(_ phase: HUDPhase) -> String {
     switch phase {
     case .hidden: return ""
     case .listening: return "Listening"
+    case .editing: return "Editing"
     case .processing: return "Transcribing…"
     case .result(let text): return text
     case .problem(let text): return text
@@ -54,14 +59,14 @@ final class HUDModel: ObservableObject {
 
     func show(_ next: HUDPhase) {
         if next != phase { phase = next }
-        if next != .listening, level != 0 { level = 0 }
+        if !next.isLive, level != 0 { level = 0 }
     }
 
     func hide() { show(.hidden) }
 
-    /// Only while listening; otherwise a late chunk would move bars that are not on screen.
+    /// Only while listening or editing; otherwise a late chunk would move bars that are not on screen.
     func setLevel(rms: Double) {
-        guard phase == .listening else { return }
+        guard phase.isLive else { return }
         let decayed = max(hudLevel(rms: rms), level * 0.6)
         // The change threshold below would otherwise strand the bars just above flat after the last word.
         let next = decayed < 0.025 ? 0 : decayed

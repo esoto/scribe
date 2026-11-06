@@ -204,7 +204,15 @@ final class GemmaBackend: CleanupModelBackend, @unchecked Sendable {
     /// parity gate is built on the cleanup wrap. Nothing of `text` or `instruction` is logged or put in an error.
     func edit(instruction: String, text: String, maxTokens: Int) async throws -> String {
         do {
-            let container = try await lazyModel.get()
+            let container: ModelContainer
+            do {
+                container = try await lazyModel.get()
+            } catch {
+                // `LazyModel` logs a failed load from `preload()` only, and an edit may be the first caller. A load
+                // error holds no selection text, so its type is safe to record.
+                onLog?("edit: model load failed: \(type(of: error))")
+                throw error
+            }
             let parameters = GenerateParameters(maxTokens: maxTokens, temperature: 0.0)
             let edited = try await container.perform { context in
                 await self.warmUpIfNeeded(

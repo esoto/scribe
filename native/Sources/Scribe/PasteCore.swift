@@ -10,10 +10,13 @@ final class Paster {
     private let pasteboard: PasteboardLike
     private let postCmdV: () throws -> Void
     private let schedule: (Double, @escaping () -> Void) -> Void
+    private let clock: () -> Double
+    private let sleep: (Double) async -> Void
     private var restoreDelay: Double
-    /// The user's clipboard and the changeCount of our last set. While the clipboard still shows our own
-    /// paste, a new dictation must not snapshot it in place of the user's content.
-    private var pending: (items: [PasteboardItemData], setCount: Int)?
+    /// The user's clipboard, the changeCount of our last set, and when the restore that paste scheduled is due (on
+    /// `clock`). While the clipboard still shows our own paste, a new dictation must not snapshot it in place of the
+    /// user's content, and an edit must not copy before the app has had its paste.
+    private var pending: (items: [PasteboardItemData], setCount: Int, restoreAt: Double)?
     // paste() runs on the pipeline worker, restore() on main.
     private let lock = NSLock()
 
@@ -21,12 +24,16 @@ final class Paster {
         pasteboard: PasteboardLike,
         postCmdV: @escaping () throws -> Void,
         schedule: @escaping (Double, @escaping () -> Void) -> Void,
-        restoreDelay: Double
+        restoreDelay: Double,
+        clock: @escaping () -> Double = { ProcessInfo.processInfo.systemUptime },
+        sleep: @escaping (Double) async -> Void = { try? await Task.sleep(nanoseconds: UInt64(max($0, 0) * 1e9)) }
     ) {
         self.pasteboard = pasteboard
         self.postCmdV = postCmdV
         self.schedule = schedule
         self.restoreDelay = restoreDelay
+        self.clock = clock
+        self.sleep = sleep
     }
 
     /// Settings change at runtime; the next paste schedules its restore with the new delay.
@@ -64,8 +71,9 @@ final class Paster {
             }
             pasteboard.setTransient(text)
             let setCount = pasteboard.changeCount()
-            pending = saved.map { ($0, setCount) }
-            return (saved, setCount, restoreDelay)
+            let delay = restoreDelay
+            pending = saved.map { ($0, setCount, clock() + delay) }
+            return (saved, setCount, delay)
         }
 
         do {
@@ -98,6 +106,25 @@ final class Paster {
             pending = nil
             guard pasteboard.changeCount() == current.setCount else { return }
             pasteboard.restore(current.items)
+        }
+    }
+
+    /// Waits until the restore a recent paste scheduled is due, then runs it. The selection reader awaits this before
+    /// its ⌘C: restoring sooner could land before the app has read the pasteboard for ⌘V, and the app would paste the
+    /// user's clipboard instead of the dictation. Returns at once when no paste is pending or its delay has passed.
+    func settlePendingRestore() async {
+        let wait = lock.withLock { pending.map { max(0, $0.restoreAt - clock()) } } ?? 0
+        if wait > 0 { await sleep(wait) }
+        restorePendingNow()
+    }
+
+    /// An edit that ends without a paste (nothing to do, rejected, failed): puts back the clipboard the reader's ⌘C
+    /// displaced, an empty one when `snapshot` is nil. A clipboard that moved since the copy is the user's own copy
+    /// during the model call, and stays.
+    func restoreClipboardAfterCopy(_ snapshot: [PasteboardItemData]?, copiedChangeCount: Int) {
+        lock.withLock {
+            guard pasteboard.changeCount() == copiedChangeCount else { return }
+            pasteboard.restore(snapshot ?? [])
         }
     }
 

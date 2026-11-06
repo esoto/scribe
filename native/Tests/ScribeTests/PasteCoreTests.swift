@@ -15,9 +15,13 @@ final class PasteCoreTests: XCTestCase {
             return items.isEmpty ? nil : items
         }
 
+        /// Lets a test see when the clipboard is put back.
+        var onRestore: () -> Void = {}
+
         func restore(_ items: [PasteboardItemData]) {
             self.items = items
             count += 1
+            onRestore()
         }
 
         func setTransient(_ s: String) {
@@ -483,5 +487,155 @@ final class PasteCoreTests: XCTestCase {
         sched.fireAll()
 
         XCTAssertEqual(pb.items, usersClipboard)
+    }
+
+    // MARK: - settlePendingRestore
+
+    /// A paster whose clock and sleep are fake: a sleep takes exactly as long as it was asked to.
+    private func settlingPaster(
+        _ pb: FakePasteboard, _ sched: FakeScheduler, _ clock: FakeClock, sleeps: Box<Double>,
+        restoreDelay: Double = 2.0, whileWaiting: @escaping () -> Void = {}
+    ) -> Paster {
+        Paster(
+            pasteboard: pb, postCmdV: {}, schedule: sched.schedule, restoreDelay: restoreDelay, clock: clock.now,
+            sleep: { seconds in
+                sleeps.append(seconds)
+                whileWaiting()
+                clock.t += seconds
+            })
+    }
+
+    func test_settlePendingRestore_waits_out_the_rest_of_the_restore_delay_and_then_restores() async throws {
+        let pb = FakePasteboard(items: usersClipboard)
+        let sched = FakeScheduler()
+        let clock = FakeClock()
+        let sleeps = Box<Double>()
+        var shownWhileWaiting: Data?
+        let paster = settlingPaster(pb, sched, clock, sleeps: sleeps) { shownWhileWaiting = pb.items.first?[self.text] }
+        try paster.paste("dictated")
+        clock.t = 0.125
+
+        await paster.settlePendingRestore()
+
+        XCTAssertEqual(sleeps.value, [1.875], "2 s after the paste, not 2 s after the settle")
+        XCTAssertEqual(shownWhileWaiting, Data("dictated".utf8), "no restore before the wait is over")
+        XCTAssertEqual(pb.items, usersClipboard)
+        let count = pb.changeCount()
+        sched.fire()
+        XCTAssertEqual(pb.changeCount(), count, "the scheduled restore found nothing left to do")
+    }
+
+    func test_settlePendingRestore_does_not_wait_for_a_paste_older_than_the_restore_delay() async throws {
+        let pb = FakePasteboard(items: usersClipboard)
+        let sched = FakeScheduler()
+        let clock = FakeClock()
+        let sleeps = Box<Double>()
+        let paster = settlingPaster(pb, sched, clock, sleeps: sleeps)
+        try paster.paste("dictated")
+        clock.t = 2.5  // the scheduled restore has not run yet: the main queue is busy
+
+        await paster.settlePendingRestore()
+
+        XCTAssertEqual(sleeps.value, [])
+        XCTAssertEqual(pb.items, usersClipboard)
+    }
+
+    func test_settlePendingRestore_waits_for_the_delay_the_paste_was_scheduled_with() async throws {
+        let pb = FakePasteboard(items: usersClipboard)
+        let sched = FakeScheduler()
+        let clock = FakeClock()
+        let sleeps = Box<Double>()
+        let paster = settlingPaster(pb, sched, clock, sleeps: sleeps)
+        try paster.paste("dictated")
+        paster.setRestoreDelay(0.5)
+        clock.t = 0.125
+
+        await paster.settlePendingRestore()
+
+        XCTAssertEqual(sleeps.value, [1.875], "the paste scheduled its restore at 2 s; a later setting does not move it")
+    }
+
+    func test_settlePendingRestore_leaves_a_clipboard_the_user_changed_while_it_waited() async throws {
+        let pb = FakePasteboard(items: usersClipboard)
+        let sched = FakeScheduler()
+        let clock = FakeClock()
+        let copied = [[text: Data("copied while waiting".utf8)]]
+        let paster = settlingPaster(pb, sched, clock, sleeps: Box<Double>()) { pb.userCopies(copied) }
+        try paster.paste("dictated")
+        clock.t = 0.125
+
+        await paster.settlePendingRestore()
+
+        XCTAssertEqual(pb.items, copied)
+    }
+
+    func test_settlePendingRestore_without_a_paste_neither_waits_nor_touches_anything() async {
+        let pb = FakePasteboard(items: usersClipboard)
+        let sleeps = Box<Double>()
+        let paster = settlingPaster(pb, FakeScheduler(), FakeClock(), sleeps: sleeps)
+        let count = pb.changeCount()
+
+        await paster.settlePendingRestore()
+
+        XCTAssertEqual(sleeps.value, [])
+        XCTAssertEqual(pb.changeCount(), count)
+        XCTAssertEqual(pb.snapshotCalls, 0)
+    }
+
+    func test_settlePendingRestore_after_a_copy_only_has_nothing_to_wait_for() async {
+        let pb = FakePasteboard(items: usersClipboard)
+        let sleeps = Box<Double>()
+        let paster = settlingPaster(pb, FakeScheduler(), FakeClock(), sleeps: sleeps)
+
+        paster.copyOnly("left for a manual paste")
+        await paster.settlePendingRestore()
+
+        XCTAssertEqual(sleeps.value, [])
+        XCTAssertEqual(pb.items.first?[text], Data("left for a manual paste".utf8))
+    }
+
+    func test_the_default_sleep_and_clock_really_wait() async throws {
+        let pb = FakePasteboard(items: usersClipboard)
+        let paster = Paster(pasteboard: pb, postCmdV: {}, schedule: { _, _ in }, restoreDelay: 0.02)
+        try paster.paste("dictated")
+        let started = ContinuousClock.now
+
+        await paster.settlePendingRestore()
+
+        XCTAssertGreaterThanOrEqual(ContinuousClock.now - started, .milliseconds(10))
+        XCTAssertEqual(pb.items, usersClipboard)
+    }
+
+    // MARK: - restoreClipboardAfterCopy
+
+    func test_restoreClipboardAfterCopy_puts_back_the_clipboard_from_before_the_copy() {
+        let pb = FakePasteboard(items: selectionOnClipboard)
+        let paster = Paster(pasteboard: pb, postCmdV: {}, schedule: { _, _ in }, restoreDelay: 2.0)
+
+        paster.restoreClipboardAfterCopy(usersClipboard, copiedChangeCount: pb.changeCount())
+
+        XCTAssertEqual(pb.items, usersClipboard)
+    }
+
+    func test_restoreClipboardAfterCopy_with_no_snapshot_leaves_the_clipboard_empty_as_it_was() {
+        let pb = FakePasteboard(items: selectionOnClipboard)
+        let paster = Paster(pasteboard: pb, postCmdV: {}, schedule: { _, _ in }, restoreDelay: 2.0)
+
+        paster.restoreClipboardAfterCopy(nil, copiedChangeCount: pb.changeCount())
+
+        XCTAssertTrue(pb.items.isEmpty, "nil means the clipboard was empty before the copy")
+    }
+
+    func test_restoreClipboardAfterCopy_keeps_a_copy_the_user_made_since() {
+        let pb = FakePasteboard(items: selectionOnClipboard)
+        let paster = Paster(pasteboard: pb, postCmdV: {}, schedule: { _, _ in }, restoreDelay: 2.0)
+        let copiedCount = pb.changeCount()
+        let newer = [[text: Data("copied during the model call".utf8)]]
+        pb.userCopies(newer)
+
+        paster.restoreClipboardAfterCopy(usersClipboard, copiedChangeCount: copiedCount)
+        paster.restoreClipboardAfterCopy(nil, copiedChangeCount: copiedCount)
+
+        XCTAssertEqual(pb.items, newer)
     }
 }

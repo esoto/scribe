@@ -26,6 +26,12 @@ enum NoticeKind {
     case problem, info
 }
 
+/// Which pipeline a state came from. The two share one microphone and are never both armed, so while one holds it the
+/// other's job states (a queued job finishing) are not the hold's news.
+enum PipelineSource {
+    case dictation, edit
+}
+
 /// The slice of `HotkeyMonitor` the coordinator drives; the real one installs a `CGEventTap`.
 protocol HotkeyMonitoring: AnyObject {
     var onModifierEvent: ((String) -> Void)? { get set }
@@ -54,6 +60,8 @@ struct PipelineSinks {
     let saveFailedAudio: ([Float]) -> Void
     let onHint: (String) -> Void
     let onPasted: () -> Void
+    /// The coordinator's one serial worker, shared with the edit pipeline.
+    let runner: (@escaping () async -> Void) -> Void
 }
 
 /// Recording runtime: the pipeline, the hotkey tap, the hold watchdog, the published state with its sticky
@@ -76,8 +84,13 @@ final class DictationCoordinator: ObservableObject {
     /// Runs first, so it is already under way when the watchdog is armed and the pipeline starts.
     var onKeyDown: () -> Void = {}
 
+    /// Extra key-down work for an edit, after `onKeyDown`: an edit needs the cleanup model whatever the cleanup toggle says.
+    var onEditKeyDown: () -> Void = {}
+
     // IUOs: both factories hand back objects whose callbacks reach `self`, which needs a fully initialized self.
     private(set) var pipeline: DictationPipeline!
+    /// nil when edit-by-voice is not wired (tests, or a build without it): a chord is then a plain hold.
+    private(set) var editPipeline: EditPipeline?
     private var hotkeyMonitor: HotkeyMonitoring!
     private(set) var errorRevert: Task<Void, Never>?
     private(set) var hintClear: Task<Void, Never>?
@@ -108,6 +121,8 @@ final class DictationCoordinator: ObservableObject {
     /// The recording pill; nil in tests that don't care about it.
     private let hud: HUDModel?
     private let hudEnabled: () -> Bool
+    /// Read at every chord, so the Settings toggle needs no callback.
+    private let editEnabled: () -> Bool
     private let hudResultSeconds: Double
     /// A hold shorter than this is a discarded tap, so the pill waits it out before showing.
     private var holdThreshold: Double
@@ -116,12 +131,16 @@ final class DictationCoordinator: ObservableObject {
     /// A latched recording has no key to release, so it gets its own, longer cap.
     private let latchMaxSeconds: Double
     private let now: () -> Double
+    /// True from a chord's key-down to its release (or the watchdog, sleep, a hotkey or microphone change). While it
+    /// holds, the one microphone belongs to the edit and every other key-down is ignored. Main-only.
+    private var editing = false
 
     init(
         recorder: RecorderPreparing,
         pipelineConfig: PipelineConfig,
         hotkey: HotKey,
         makePipeline: (PipelineSinks) -> DictationPipeline,
+        makeEditPipeline: ((EditSinks) -> EditPipeline)? = nil,
         makeHotkeyMonitor: @escaping (_ key: HotKey, _ onDown: @escaping (Bool) -> Void, _ onUp: @escaping () -> Void)
             -> HotkeyMonitoring,
         notifier: Notifier,
@@ -138,6 +157,9 @@ final class DictationCoordinator: ObservableObject {
         repasteDelay: Double = 0.2,
         hud: HUDModel? = nil,
         hudEnabled: @escaping () -> Bool = { true },
+        editEnabled: @escaping () -> Bool = { false },
+        // Straight to the store, like the dictation's `onStats`: it hops to its own queue.
+        onEditStat: @escaping (EditStat) -> Void = { _ in },
         hudResultSeconds: Double = HUDModel.resultSeconds,
         // nil follows pipelineConfig, which is also where the pipeline's tap cutoff starts.
         holdThreshold: Double? = nil,
@@ -164,6 +186,7 @@ final class DictationCoordinator: ObservableObject {
         self.repasteDelay = repasteDelay
         self.hud = hud
         self.hudEnabled = hudEnabled
+        self.editEnabled = editEnabled
         self.hudResultSeconds = hudResultSeconds
         let resolvedThreshold = holdThreshold ?? pipelineConfig.holdThreshold
         self.holdThreshold = resolvedThreshold
@@ -173,12 +196,14 @@ final class DictationCoordinator: ObservableObject {
         self.now = now
         self.log = log
 
+        // One worker for both pipelines: an edit's ⌘C must never run between a dictation's ⌘V and its restore.
+        let runner = DictationPipeline.makeSerialRunner()
         // The pipeline calls these from its own threads; each hops to the main actor.
         self.pipeline = makePipeline(
             PipelineSinks(
                 onState: { [weak self] newState in
                     Task { @MainActor in
-                        self?.applyState(newState)
+                        self?.applyState(newState, from: .dictation)
                     }
                 },
                 onNotice: { [weak self] message in
@@ -200,7 +225,33 @@ final class DictationCoordinator: ObservableObject {
                     Task { @MainActor in
                         self?.playPasteCue()
                     }
-                }))
+                },
+                runner: runner))
+        self.editPipeline = makeEditPipeline?(
+            EditSinks(
+                onState: { [weak self] newState in
+                    Task { @MainActor in
+                        self?.applyState(newState, from: .edit)
+                    }
+                },
+                onNotice: { [weak self] message in
+                    Task { @MainActor in
+                        self?.notify(message)
+                    }
+                },
+                // The verdict is the pill's and the status row's, the same one-liner a dictation's hint is.
+                onVerdict: { [weak self] message in
+                    Task { @MainActor in
+                        self?.showHint(message)
+                    }
+                },
+                onProblem: { [weak self] message in
+                    Task { @MainActor in
+                        self?.showProblem(message)
+                    }
+                },
+                onStat: onEditStat,
+                runner: runner))
         self.hotkeyMonitor = buildHotkeyMonitor(for: hotkey)
     }
 
@@ -236,6 +287,7 @@ final class DictationCoordinator: ObservableObject {
             MainActor.assumeIsolated {
                 self?.holdWatchdog?.cancel()
                 self?.pipeline.cancelHold()
+                self?.cancelEdit()
                 self?.hotkeyMonitor.forgetHeldKey()
                 // The latch's tap may never come; on wake the first tap must start a recording, not stop a dead one.
                 self?.taps.reset()
@@ -276,6 +328,7 @@ final class DictationCoordinator: ObservableObject {
             endHold()
             taps.reset()
         }
+        if editing { endEdit() }
         preferredMicrophoneUID = uid
         recorder.setPreferredInput(uid: uid)
         log("microphone set to \(uid ?? "system default")")
@@ -306,6 +359,7 @@ final class DictationCoordinator: ObservableObject {
         holdThreshold = seconds
         taps.tapMax = seconds
         pipeline.setHoldThreshold(seconds)
+        editPipeline?.setHoldThreshold(seconds)
     }
 
     /// A recording in progress ends first: its tap or release was read under the old mode, and the interpreter's
@@ -320,6 +374,8 @@ final class DictationCoordinator: ObservableObject {
     /// `pipeline.isArmed` is the seam for "a hold is in progress": it flips synchronously with the recorder, while
     /// `state` only follows after the pipeline's hop to the main actor, so two quick toggles would misread it.
     func toggleLatched() {
+        // The microphone is the edit's until its key comes up; a second recording on it would end both.
+        guard !editing else { return }
         if pipeline.isArmed {
             endHold()
             taps.reset()
@@ -349,6 +405,7 @@ final class DictationCoordinator: ObservableObject {
     func setHotkey(_ key: HotKey) {
         holdWatchdog?.cancel()
         pipeline.cancelHold()
+        cancelEdit()
         taps.reset()
         hotkeyMonitor.uninstall()
 
@@ -367,7 +424,11 @@ final class DictationCoordinator: ObservableObject {
 
     // MARK: - Pipeline callbacks (always entered on @MainActor — see the sinks in init)
 
-    func applyState(_ newState: PipelineState) {
+    func applyState(_ newState: PipelineState, from source: PipelineSource = .dictation) {
+        // Before anything is touched: a job in the other pipeline under a live hold, whatever it ends in, must not flip
+        // the glyph, cancel the delayed Listening pill, hide the pill, or sound a failure over the hold. Only the
+        // hold's own .recording is news.
+        if newState != .recording, microphoneIsHeldByTheOther(than: source) { return }
         state = newState
         errorRevert?.cancel()
         hudShow?.cancel()
@@ -383,8 +444,11 @@ final class DictationCoordinator: ObservableObject {
         if let hud, hudEnabled() {
             hudHide?.cancel()
             switch newState {
-            case .recording: showListeningAfterTheTapThreshold(hud)
-            case .processing: hud.show(.processing)
+            case .recording:
+                // An edit's pill is already up (`beginEdit`), and "Listening" would take its label back.
+                if !editing { showListeningAfterTheTapThreshold(hud) }
+            case .processing:
+                hud.show(.processing)
             case .error:
                 hud.show(.problem("Error — check log"))
                 scheduleHudHide(hud)
@@ -401,6 +465,15 @@ final class DictationCoordinator: ObservableObject {
             playSound("Pop")
         } else if newState == .error {
             playSound("Basso")
+        }
+    }
+
+    /// Every state of the other pipeline but `.recording` is ignored while this one is armed, so a held dictation never
+    /// sees an edit job's states (a sticky `.error` included) and a held edit never sees a dictation job's.
+    private func microphoneIsHeldByTheOther(than source: PipelineSource) -> Bool {
+        switch source {
+        case .dictation: return editing
+        case .edit: return pipeline.isArmed
         }
     }
 
@@ -440,6 +513,16 @@ final class DictationCoordinator: ObservableObject {
             return
         }
         showVerdictOnPill(message)
+        keepAsHint(message)
+    }
+
+    /// An edit's failure: the same one-liner as a verdict, as ⚠ on the pill (spec: any failure shows the problem).
+    func showProblem(_ message: String) {
+        showProblemOnPill(message)
+        keepAsHint(message)
+    }
+
+    private func keepAsHint(_ message: String) {
         hint = message
         hintClear?.cancel()
         let seconds = hintSeconds
@@ -461,7 +544,26 @@ final class DictationCoordinator: ObservableObject {
         guard let hud, hudEnabled() else { return }
         switch hud.phase {
         case .processing, .result, .problem: hud.show(.result(text))
-        case .hidden, .listening: break
+        case .hidden, .listening, .editing: break
+        }
+    }
+
+    /// Like a verdict, a problem replaces the job's ⋯ and never a live pill. Unlike one it may also appear on a hidden
+    /// pill — a recorder that would not start has no job pill to replace — but only with no hold live: the hide it
+    /// schedules (a verdict relies on the job's idle for that) would take a Listening or Editing pill down.
+    private func showProblemOnPill(_ text: String) {
+        guard let hud, hudEnabled() else { return }
+        switch hud.phase {
+        case .processing, .result, .problem:
+            hud.show(.problem(text))
+        case .hidden:
+            guard !pipeline.isArmed, !editing else { return }
+            hudShow?.cancel()
+            hudHide?.cancel()
+            hud.show(.problem(text))
+            scheduleHudHide(hud)
+        case .listening, .editing:
+            break
         }
     }
 
@@ -496,6 +598,13 @@ final class DictationCoordinator: ObservableObject {
     /// Runs on main (CGEventTap callback). The interpreter decides whether this press starts a hold, starts a latch
     /// (a double tap), or is the tap that ends one.
     func handleKeyDown(chord: Bool = false) {
+        // One hold at a time: a repeat or a second key while an edit holds the microphone is not a new recording.
+        guard !editing else { return }
+        // A chord over a latched dictation is just the tap that ends it, so the two pipelines are never both armed.
+        if chord, editEnabled(), let edit = editPipeline, !pipeline.isArmed {
+            beginEdit(edit)
+            return
+        }
         switch taps.down(at: now()) {
         case .start: beginHold(latched: false)
         case .startLatched: beginHold(latched: true)
@@ -505,6 +614,10 @@ final class DictationCoordinator: ObservableObject {
     }
 
     func handleKeyUp() {
+        if editing {
+            endEdit()
+            return
+        }
         // No reset on the way out: a short release is the first half of a double tap and the interpreter remembers it.
         if taps.up(at: now()) == .stop { endHold() }
     }
@@ -539,6 +652,58 @@ final class DictationCoordinator: ObservableObject {
             return
         }
         showListeningAtOnce()
+    }
+
+    /// A chord's key-down: the same hook, watchdog and hint reset as a hold, on the edit pipeline. The pill says
+    /// Editing at once — the chord is deliberate, so there is no tap threshold to wait out.
+    private func beginEdit(_ edit: EditPipeline) {
+        hintClear?.cancel()
+        if hint != nil { hint = nil }
+        onKeyDown()
+        onEditKeyDown()
+
+        let notice = "Stopped after \(Int(pipelineConfig.maxHold / 60)) min — release the key"
+        let cap = pipelineConfig.maxHold
+        holdWatchdog?.cancel()
+        holdWatchdog = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(cap * 1e9))
+            guard !Task.isCancelled else { return }
+            self?.editPipeline?.forceStop(notice: notice)
+            self?.hotkeyMonitor.forgetHeldKey()
+            self?.taps.reset()
+            // The release will never arrive; leaving this set would swallow every key-down after it.
+            self?.editing = false
+        }
+        edit.keyDown()
+        guard edit.isArmed else {
+            // The recorder would not start: nothing is being edited, and the next key must not be taken for its release.
+            holdWatchdog?.cancel()
+            return
+        }
+        // The engine is bound by now, an edit's start being a recording start like a hold's.
+        capturingFrom = currentCaptureStatus()
+        editing = true
+        guard let hud, hudEnabled() else { return }
+        hudShow?.cancel()
+        hudHide?.cancel()
+        hud.show(.editing)
+    }
+
+    /// The chord's release. `taps` never saw the press, and forgets any tap before it: a chord tap followed by a plain
+    /// press within the double-tap window must not latch.
+    private func endEdit() {
+        holdWatchdog?.cancel()
+        editing = false
+        editPipeline?.keyUp()
+        taps.reset()
+    }
+
+    /// Sleep, or the hotkey swapped: the release will never arrive, and editing on wake is wrong.
+    private func cancelEdit() {
+        guard editing else { return }
+        holdWatchdog?.cancel()
+        editPipeline?.cancelHold()
+        editing = false
     }
 
     /// The double tap has already outlasted the tap filter, and a hands-free recording needs its pill up at once.
