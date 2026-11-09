@@ -504,10 +504,10 @@ final class DictationPipeline {
     }
 
     /// Latch mode makes 200-word dictations normal, and cleanup time is linear in length (about 25 ms a word on the
-    /// default model, so 200 words take 5.1 s against the 6 s base). The deadline grows 0.03 s a word past 50, capped
-    /// at 20 s, and never drops below a base the user set higher than the cap.
-    static func cleanupDeadline(words: Int, base: Double) -> Double {
-        min(base + 0.03 * Double(max(0, words - 50)), max(base, 20))
+    /// default model, so 200 words take 5.1 s against the 6 s base). The deadline grows `perWord` (0.03 s here; an edit
+    /// passes its own slope) a word past 50, capped at 20 s, and never drops below a base the user set higher than the cap.
+    static func cleanupDeadline(words: Int, base: Double, perWord: Double = 0.03) -> Double {
+        min(base + perWord * Double(max(0, words - 50)), max(base, 20))
     }
 
     /// The failure case is any gate/error that means "use raw", with the reason it was hit.

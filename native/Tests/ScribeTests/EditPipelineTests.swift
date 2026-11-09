@@ -70,7 +70,9 @@ final class EditPipelineTests: XCTestCase {
         pairs: [ReplacementPair] = [],
         modelIsGemma4: Bool = false,
         runner: ((@escaping () async -> Void) -> Void)? = nil,
-        clock: FakeClock = FakeClock()
+        clock: FakeClock = FakeClock(),
+        // nil is the pipeline's own production runner: the timeout tests must run it, not a copy kept in this harness.
+        runWithDeadline: EditPipeline.DeadlineRunner? = nil
     ) -> Harness {
         let states = Box<PipelineState>()
         let notices = Box<String>()
@@ -109,6 +111,7 @@ final class EditPipelineTests: XCTestCase {
                 },
                 onStat: { stats.append($0) },
                 runner: runner ?? { work in runBlocking(work) }),
+            runWithDeadline: runWithDeadline,
             onLog: { logs.append($0) })
         return Harness(
             pipeline: pipeline, clock: clock, states: states, notices: notices, verdicts: verdicts, problems: problems,
@@ -172,7 +175,8 @@ final class EditPipelineTests: XCTestCase {
         edit(h)
 
         XCTAssertEqual(h.backend.edits.count, 1)
-        XCTAssertEqual(h.backend.edits.first?.instruction, EditVerb.formal.instruction)
+        XCTAssertEqual(h.backend.edits.first?.instruction, EditPrompt.instruction(verb: .formal, selection: Self.selected))
+        XCTAssertTrue(h.backend.edits.first?.instruction.hasPrefix(EditVerb.formal.instruction) == true)
         XCTAssertEqual(h.backend.edits.first?.text, Self.selected)
         XCTAssertEqual(h.reader.targets.count, 1)
         XCTAssertEqual(h.reader.targets.first, 42, "the selection is read in the app that had focus at key-down")
@@ -220,7 +224,8 @@ final class EditPipelineTests: XCTestCase {
 
         edit(h)
 
-        XCTAssertEqual(h.backend.edits.first?.instruction, EditVerb.shorter.instruction)
+        XCTAssertEqual(h.backend.edits.first?.instruction, EditPrompt.instruction(verb: .shorter, selection: Self.selected))
+        XCTAssertTrue(h.backend.edits.first?.instruction.hasPrefix(EditVerb.shorter.instruction) == true)
         XCTAssertEqual(h.verdicts.value, ["Shorter"])
     }
 
@@ -230,7 +235,8 @@ final class EditPipelineTests: XCTestCase {
 
         edit(h)
 
-        XCTAssertEqual(h.backend.edits.first?.instruction, EditVerb.formal.instruction)
+        XCTAssertEqual(h.backend.edits.first?.instruction, EditPrompt.instruction(verb: .formal, selection: Self.selected))
+        XCTAssertTrue(h.backend.edits.first?.instruction.hasPrefix(EditVerb.formal.instruction) == true)
         XCTAssertTrue(h.logs.value.first?.contains("engine=whisper") == true, "\(h.logs.value)")
     }
 
@@ -364,9 +370,88 @@ final class EditPipelineTests: XCTestCase {
         assertNoTextInTheLog(h)
     }
 
-    func testTheDeadlineGrowsWithTheSelection() {
-        // 6 s base + 0.03 s a word past 50 is DictationPipeline's rule; 200 words give 10.5 s, not 6.
-        XCTAssertEqual(DictationPipeline.cleanupDeadline(words: 200, base: 6), 10.5, accuracy: 0.001)
+    /// Gemma 3 needed 10.35 s for a 200-word translation against the 10.5 s a dictation deadline gives that length, so an
+    /// edit grows 0.045 s a word past 50: 200 words get 12.75 s. The base and the 20 s cap are dictation's.
+    func testTheEditDeadlineGrowsFortyFiveMillisecondsAWordPastFifty() {
+        XCTAssertEqual(EditPipeline.secondsPerWordOverFifty, 0.045)
+        XCTAssertEqual(EditPipeline.deadline(words: 0, base: 6), 6)
+        XCTAssertEqual(EditPipeline.deadline(words: 50, base: 6), 6)
+        XCTAssertEqual(EditPipeline.deadline(words: 51, base: 6), 6.045, accuracy: 1e-9)
+        XCTAssertEqual(EditPipeline.deadline(words: 200, base: 6), 12.75, accuracy: 1e-9)
+        XCTAssertEqual(DictationPipeline.cleanupDeadline(words: 200, base: 6), 10.5, accuracy: 1e-9, "dictation keeps its own slope")
+    }
+
+    func testTheEditDeadlineIsStillCappedAtTwentySecondsAndNeverBelowALargerBase() {
+        XCTAssertEqual(EditPipeline.deadline(words: 1000, base: 6), 20)
+        XCTAssertEqual(EditPipeline.deadline(words: 1000, base: 30), 30)
+        XCTAssertEqual(EditPipeline.deadline(words: 5, base: 30), 30)
+        XCTAssertLessThan(EditPipeline.deadline(words: 100_000, base: PipelineConfig().cleanupTimeout), PipelineConfig().queueMaxAge)
+    }
+
+    /// The call site, not just the function: the deadline the pipeline hands the model call is read off the runner, so
+    /// no clock runs and nothing waits. 80 words with a 0.05 s base get 1.4 s at the edit's 0.045 s a word, where
+    /// dictation's 0.03 would give 0.95 s.
+    func testAnEditOfEightyWordsGetsTheEditSlopeAtTheCallSite() {
+        let words = Array(repeating: "we shipped the build today", count: 16).joined(separator: " ")
+        XCTAssertEqual(words.split(separator: " ").count, 80)
+        let config = PipelineConfig(cleanupTimeout: 0.05)
+        let asked = Box<Double>()
+        let h = make(
+            heard: "fix the grammar", out: words, reader: FakeSelectionReader(selection(words)), config: config,
+            runWithDeadline: { seconds, work in
+                asked.append(seconds)
+                return try await work()
+            })
+
+        edit(h)
+
+        XCTAssertEqual(asked.value.count, 2, "one deadline for the transcription, one for the model call")
+        XCTAssertEqual(try XCTUnwrap(asked.value.first), config.sttTimeout, accuracy: 1e-9)
+        XCTAssertEqual(try XCTUnwrap(asked.value.last), 1.4, accuracy: 1e-9)
+        XCTAssertEqual(DictationPipeline.cleanupDeadline(words: 80, base: 0.05), 0.95, accuracy: 1e-9, "dictation's slope would have given the model less")
+        XCTAssertEqual(h.verdicts.value, ["Fix grammar"])
+        XCTAssertEqual(h.stats.value.first?.accepted, true)
+        XCTAssertEqual(h.replacer.replaced.count, 1)
+    }
+
+    // MARK: - The language hint
+
+    func testAnEnglishSelectionReachesTheModelWithAnEnglishHint() {
+        let h = make(heard: "make it formal")
+
+        edit(h)
+
+        XCTAssertEqual(
+            h.backend.edits.first?.instruction,
+            "Rewrite it in a formal register. The text is in English; answer in English.")
+    }
+
+    func testASpanishSelectionReachesTheModelWithASpanishHint() {
+        let spanish = "El informe es para el martes y lo vamos a mandar a todo el equipo después de la reunión."
+        let h = make(heard: "hazlo informal", reader: FakeSelectionReader(selection(spanish)))
+
+        edit(h)
+
+        XCTAssertEqual(
+            h.backend.edits.first?.instruction,
+            "Rewrite it in a casual, friendly register. The text is in Spanish; answer in Spanish.")
+        XCTAssertEqual(h.backend.edits.first?.text, spanish, "the hint is in the instruction; the text goes through untouched")
+    }
+
+    func testATranslationReachesTheModelWithoutAHint() {
+        let h = make(heard: "translate to Spanish")
+
+        edit(h)
+
+        XCTAssertEqual(h.backend.edits.first?.instruction, EditVerb.toSpanish.instruction)
+    }
+
+    func testASelectionThatScoresZeroReachesTheModelWithoutAHint() {
+        let h = make(heard: "make it shorter", reader: FakeSelectionReader(selection("¡Buenos días a todos!")))
+
+        edit(h)
+
+        XCTAssertEqual(h.backend.edits.first?.instruction, EditVerb.shorter.instruction)
     }
 
     // MARK: - Failures on the way

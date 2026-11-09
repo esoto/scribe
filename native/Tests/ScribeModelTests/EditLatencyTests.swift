@@ -36,14 +36,15 @@ final class EditLatencyTests: XCTestCase {
         for words in Self.lengths {
             let text = pool.prefix(words).map(String.init).joined(separator: " ")
             let maxTokens = EditPrompt.maxTokens(verb: verb, inputTokens: text.count / 4)
-            _ = try await backend.edit(instruction: verb.instruction, text: text, maxTokens: maxTokens)
+            let instruction = EditPrompt.instruction(verb: verb, selection: text)
+            _ = try await backend.edit(instruction: instruction, text: text, maxTokens: maxTokens)
 
             var timings: [Int] = []
             var outWords = 0
             var accepted = false
             for _ in 0..<Self.runsPerLength {
                 let t0 = Date()
-                let edited = try await backend.edit(instruction: verb.instruction, text: text, maxTokens: maxTokens)
+                let edited = try await backend.edit(instruction: instruction, text: text, maxTokens: maxTokens)
                 timings.append(Int(Date().timeIntervalSince(t0) * 1000))
                 XCTAssertFalse(edited.isEmpty, "[\(verb.rawValue), \(words) words] empty output")
                 outWords = edited.split(whereSeparator: { $0.isWhitespace }).count
