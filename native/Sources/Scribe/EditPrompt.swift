@@ -19,6 +19,23 @@ enum EditPrompt {
         ),
     ]
 
+    /// Not private: `EditGates` rejects a result that opens by repeating either sentence, and must read the same strings.
+    static let englishHint = "The text is in English; answer in English."
+    static let spanishHint = "The text is in Spanish; answer in Spanish."
+
+    /// The instruction line one call sends. Every verb that keeps the language also gets a sentence naming the
+    /// selection's, because Gemma 4 and E2B answered English selections in Spanish on "formal": the only formal
+    /// few-shot is Spanish, and the system prompt's "keep the language" did not outweigh it. The hint lives in this
+    /// user-turn line alone, so the warm prefix (system prompt and few-shots) stays byte-identical. A translation
+    /// is meant to change language, and a selection that scores 0 has nothing to name.
+    static func instruction(verb: EditVerb, selection: String) -> String {
+        guard !verb.isTranslation else { return verb.instruction }
+        let score = Gates.langScore(selection)
+        if score > 0 { return "\(verb.instruction) \(englishHint)" }
+        if score < 0 { return "\(verb.instruction) \(spanishHint)" }
+        return verb.instruction
+    }
+
     static func wrap(instruction: String, text: String) -> String {
         "<instruction>\n\(instruction)\n</instruction>\n<text>\n\(text)\n</text>"
     }

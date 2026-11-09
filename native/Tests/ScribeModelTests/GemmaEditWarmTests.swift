@@ -21,7 +21,8 @@ final class GemmaEditWarmTests: XCTestCase {
 
         for verb in EditVerb.allCases {
             let maxTokens = EditPrompt.maxTokens(verb: verb, inputTokens: selection.count / 4)
-            let edited = try await backend.edit(instruction: verb.instruction, text: selection, maxTokens: maxTokens)
+            let edited = try await backend.edit(
+                instruction: EditPrompt.instruction(verb: verb, selection: selection), text: selection, maxTokens: maxTokens)
             XCTAssertFalse(edited.isEmpty, "\(verb)")
         }
 

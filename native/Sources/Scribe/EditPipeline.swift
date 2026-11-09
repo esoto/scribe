@@ -25,6 +25,17 @@ final class EditPipeline {
     static let notAnEditHint = "Not an edit — say shorter, formal, to Spanish…"
     static let noModelHint = "No cleanup model — pick one in Settings › Models"
 
+    /// Gemma 3 needs 10.35 s for a 200-word translation, which dictation's 0.03 s a word (10.5 s) all but spends.
+    static let secondsPerWordOverFifty = 0.045
+
+    static func deadline(words: Int, base: Double) -> Double {
+        DictationPipeline.cleanupDeadline(words: words, base: base, perWord: secondsPerWordOverFifty)
+    }
+
+    /// How a call is run under its deadline. A test swaps in a recorder, so the number the pipeline computed is read
+    /// off the call instead of being inferred from a model that takes real time to answer.
+    typealias DeadlineRunner = (Double, @escaping @Sendable () async throws -> String) async throws -> String
+
     private let recorder: RecorderLike
     private var stt: SttEngine
     private let backend: () -> (any CleanupModelBackend)?
@@ -39,6 +50,7 @@ final class EditPipeline {
     /// Read fresh each edit: a misheard instruction ("shorted") is fixed by the Dictionary like a dictation.
     private let replacementPairs: () -> [ReplacementPair]
     private let sinks: EditSinks
+    private let runWithDeadline: DeadlineRunner
     private let onLog: ((String) -> Void)?
 
     private(set) var engineName: String
@@ -69,6 +81,7 @@ final class EditPipeline {
         frontmost: @escaping () -> pid_t? = { nil },
         replacementPairs: @escaping () -> [ReplacementPair] = { [] },
         sinks: EditSinks,
+        runWithDeadline: DeadlineRunner? = nil,
         onLog: ((String) -> Void)? = nil
     ) {
         self.recorder = recorder
@@ -84,6 +97,9 @@ final class EditPipeline {
         self.frontmost = frontmost
         self.replacementPairs = replacementPairs
         self.sinks = sinks
+        // Resolved here, not as a default argument, so a caller that passes nothing (the app and the timeout tests)
+        // gets the one production runner and a harness never keeps a copy of it.
+        self.runWithDeadline = runWithDeadline ?? { try await withDeadline($0, $1) }
         self.onLog = onLog
     }
 
@@ -232,7 +248,7 @@ final class EditPipeline {
         let heardRaw: String
         do {
             let engine = stt
-            heardRaw = Gates.normalize(try await withDeadline(config.sttTimeout) { try await engine.transcribe(pcm) })
+            heardRaw = Gates.normalize(try await runWithDeadline(config.sttTimeout) { try await engine.transcribe(pcm) })
         } catch {
             // The type only: an engine's message is not ours to vouch for.
             onLog?("edit: transcription failed (\(engineName)): \(type(of: error))")
@@ -257,15 +273,16 @@ final class EditPipeline {
         let words = selection.text.split(whereSeparator: { $0.isWhitespace }).count
         // The first edit after launch or an idle unload builds its warm prefix inside the call; E5 measures whether
         // that needs a pre-warm.
-        let deadline = DictationPipeline.cleanupDeadline(words: words, base: config.cleanupTimeout)
+        let deadline = Self.deadline(words: words, base: config.cleanupTimeout)
         let maxTokens = EditPrompt.maxTokens(verb: verb, inputTokens: selection.text.count / 4)
+        let instruction = EditPrompt.instruction(verb: verb, selection: selection.text)
         let t1 = clock()
         let verdict: EditVerdict
         var resultChars = 0
         do {
             // withDeadline also cancels the call when the deadline fires, so Gemma's token loop frees the model.
-            let out = try await withDeadline(deadline) {
-                try await backend.edit(instruction: verb.instruction, text: selection.text, maxTokens: maxTokens)
+            let out = try await runWithDeadline(deadline) {
+                try await backend.edit(instruction: instruction, text: selection.text, maxTokens: maxTokens)
             }
             resultChars = out.count
             verdict = EditGates.accept(verb: verb, selection: selection.text, result: out)
